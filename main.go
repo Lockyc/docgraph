@@ -148,19 +148,23 @@ func parseChecks(s string) (map[string]bool, error) {
 }
 
 // printReport prints the selected sections and reports whether any selected
-// category has findings.
+// category has findings. The output is written to be self-describing: a reader
+// (often a fresh agent seeing only a failed `git push`) should learn from the
+// text alone what docaudit is, that a finding is a doc-graph — not code —
+// problem, why a non-zero exit aborts a push, and how to remediate or bypass.
+// The banner prints always; the explain-and-remediate footer only on findings,
+// so green/CI runs stay terse.
 func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
-	fmt.Fprintf(w, "roots: %v\n", r.Roots)
-	fmt.Fprintf(w, "tracked .md: %d   reachable: %d\n\n", r.TrackedMD, r.Reachable)
+	fmt.Fprintln(w, "docaudit — audits the agent-facing doc graph: every tracked .md should be reachable")
+	fmt.Fprintln(w, "by an agent following links/path-mentions from a root doc. Reads the doc graph, not code.")
+	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
-	findings := false
 	if sel["orphans"] {
 		fmt.Fprintf(w, "ORPHANS (%d) — docs unreachable by link/path-following:\n", len(r.Orphans))
 		for _, o := range r.Orphans {
 			fmt.Fprintf(w, "  %s\n", o)
 		}
 		fmt.Fprintln(w)
-		findings = findings || len(r.Orphans) > 0
 	}
 	if sel["broken"] {
 		fmt.Fprintf(w, "BROKEN LINKS (%d) — .md targets that don't exist:\n", len(r.BrokenLinks))
@@ -168,7 +172,6 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
 		}
 		fmt.Fprintln(w)
-		findings = findings || len(r.BrokenLinks) > 0
 	}
 	if sel["untracked"] {
 		fmt.Fprintf(w, "UNTRACKED (%d) — .md on disk but not in git:\n", len(r.Untracked))
@@ -176,10 +179,54 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 			fmt.Fprintf(w, "  %s\n", u)
 		}
 		fmt.Fprintln(w)
-		findings = findings || len(r.Untracked) > 0
 	}
-	if !findings {
+
+	orphans := sel["orphans"] && len(r.Orphans) > 0
+	broken := sel["broken"] && len(r.BrokenLinks) > 0
+	untracked := sel["untracked"] && len(r.Untracked) > 0
+	if !orphans && !broken && !untracked {
 		fmt.Fprintln(w, "clean ✓")
+		return false
 	}
-	return findings
+
+	n := 0
+	if sel["orphans"] {
+		n += len(r.Orphans)
+	}
+	if sel["broken"] {
+		n += len(r.BrokenLinks)
+	}
+	if sel["untracked"] {
+		n += len(r.Untracked)
+	}
+	printFailureFooter(w, n, orphans, broken, untracked)
+	return true
+}
+
+// printFailureFooter explains, in plain text, why docaudit is exiting non-zero
+// and how to act on it — so nobody has to reverse-engineer the gate from a bare
+// "failed to push some refs". Only the fix lines for checks that actually have
+// findings are shown.
+func printFailureFooter(w io.Writer, n int, orphans, broken, untracked bool) {
+	bar := strings.Repeat("─", 82)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
+	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
+	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a doc-graph problem (a doc an agent")
+	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md) — not a code problem.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Fix the findings listed above:")
+	if orphans {
+		fmt.Fprintln(w, "  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a")
+		fmt.Fprintln(w, "              .docauditignore entry) if it is intentionally standalone; or delete it.")
+	}
+	if broken {
+		fmt.Fprintln(w, "  BROKEN    → repair or remove the dead .md link at the shown file:line.")
+	}
+	if untracked {
+		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Bypass just this push (the gate still fails next time): git push --no-verify")
+	fmt.Fprintln(w, bar)
 }
