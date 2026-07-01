@@ -47,15 +47,14 @@ Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a g
 ```bash
 docaudit install-hook [path]                    # gate all three checks
 docaudit install-hook --checks broken,untracked # nav-driven repos (no orphan gate)
-docaudit install-hook --soft                    # fail open if docaudit is absent
 ```
 
 Writes a tracked `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for
 this clone (other clones activate it with `git config core.hooksPath .githooks`).
 Refuses to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate
-into it — e.g. homelab runs docaudit from `make lint`). Default fails **closed**
-(a missing `docaudit` blocks the push); `--soft` fails open, which suits repos
-cloned where the tool may be absent (CI, public contributors).
+into it — e.g. homelab runs docaudit from `make lint`). Fails **closed**: a
+missing `docaudit` blocks the push, because a gate that skips when its tool is
+absent is a false green, not a gate.
 
 ### Doc models and when to drop `--checks orphans`
 

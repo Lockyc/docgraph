@@ -27,15 +27,13 @@ func main() {
 
 // runInstallHook writes a tracked .githooks/pre-push that runs docaudit, and
 // points core.hooksPath at .githooks (activated for this clone). The hook fails
-// closed by default (a missing docaudit blocks the push); --soft warns and
-// allows, which suits repos cloned where docaudit may be absent (CI, public
-// contributors).
+// closed: if docaudit isn't installed the push is blocked, because a gate that
+// silently skips when its tool is missing is a false green, not a gate.
 func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docaudit install-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	checks := fs.String("checks", "orphans,broken,untracked", "checks to gate (comma-separated)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
-	soft := fs.Bool("soft", false, "fail open (warn + allow) if docaudit isn't installed")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -61,7 +59,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*checks, *soft)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*checks)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -69,24 +67,19 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: git config core.hooksPath failed: %v\n", err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "installed .githooks/pre-push (checks: %s%s); core.hooksPath -> .githooks\n",
-		*checks, map[bool]string{true: ", soft", false: ""}[*soft])
+	fmt.Fprintf(stdout, "installed .githooks/pre-push (checks: %s); core.hooksPath -> .githooks\n", *checks)
 	return 0
 }
 
-func hookScript(checks string, soft bool) string {
-	missing := `  echo "docaudit not installed (go install git.lsjc.au/lachlan/docaudit@latest)" >&2
-  exit 1`
-	if soft {
-		missing = `  echo "docaudit not installed — skipping docs gate (go install git.lsjc.au/lachlan/docaudit@latest)" >&2
-  exit 0`
-	}
+func hookScript(checks string) string {
 	return `#!/usr/bin/env bash
 # docaudit pre-push gate — installed by ` + "`docaudit install-hook`" + `.
-# Activated per clone via core.hooksPath -> .githooks.
+# Activated per clone via core.hooksPath -> .githooks. Fails closed: a missing
+# docaudit blocks the push (install it: go install git.lsjc.au/lachlan/docaudit@latest).
 set -euo pipefail
 command -v docaudit >/dev/null || {
-` + missing + `
+  echo "docaudit not installed (go install git.lsjc.au/lachlan/docaudit@latest)" >&2
+  exit 1
 }
 exec docaudit --checks ` + checks + ` .
 `
