@@ -7,7 +7,12 @@ import (
 	"strings"
 )
 
-const defaultIgnore = "**/superpowers/**"
+// defaultIgnores excludes non-documentation .md that would otherwise show up as
+// false orphans: intentionally-untracked scratch, and Claude Code skill/config
+// files under .claude/ (loaded by the runtime, never part of the doc graph).
+// Real docs outside docs/ (e.g. a config-dir README) are NOT excluded — they are
+// documents and get audited.
+var defaultIgnores = []string{"**/superpowers/**", ".claude/**"}
 
 func matchGlob(pattern, path string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
@@ -40,7 +45,7 @@ func matchSegments(pat, name []string) bool {
 // loadIgnores returns the default ignore, patterns from .docauditignore (if
 // present), then extra patterns — order preserved.
 func loadIgnores(root string, extra []string) ([]string, error) {
-	globs := []string{defaultIgnore}
+	globs := append([]string{}, defaultIgnores...)
 	f, err := os.Open(filepath.Join(root, ".docauditignore"))
 	if err == nil {
 		defer f.Close()

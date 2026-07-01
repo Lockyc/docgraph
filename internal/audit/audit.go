@@ -33,13 +33,6 @@ type Options struct {
 
 var rootCandidates = []string{"CLAUDE.md", "README.md", "AGENTS.md", "docs/index.md"}
 
-// isDocCandidate reports whether a tracked .md belongs to the doc graph that
-// orphan-checking governs: the docs/ tree. Tracked .md elsewhere (skill files
-// under .claude/, config-dir READMEs) are not part of the navigable doc graph.
-func isDocCandidate(f string) bool {
-	return strings.HasPrefix(f, "docs/")
-}
-
 // isPathWordByte reports whether b can be part of a path segment — used to
 // require a segment boundary before a path mention (so "mydocs/x.md" does not
 // count as a mention of "docs/x.md").
@@ -163,7 +156,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 
 	var orphans []string
 	for _, f := range tracked {
-		if !reachable[f] && isDocCandidate(f) && !matchesIgnore(f, globs) {
+		if !reachable[f] && !matchesIgnore(f, globs) {
 			orphans = append(orphans, f)
 		}
 	}

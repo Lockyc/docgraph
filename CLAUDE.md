@@ -46,10 +46,14 @@ repo (`lachlan/homelab`, `docs/runbooks/script-linting.md`) for the wiring.
   a flood of false orphans under link-only reachability. Validated: reductable
   32→0, distilus 29→4 (its real unreferenced docs). Removing `mentionsPath`
   reintroduces the flood.
-- **Orphans are scoped to `docs/` on purpose.** `isDocCandidate` limits orphan
-  candidates to the `docs/` tree. Tracked `.md` elsewhere — `.claude/skills/**`
-  (skill files, not docs), config-dir READMEs — are not the navigable doc graph
-  and must not count as orphans. Broken-link and untracked checks stay repo-wide.
+- **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
+  candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
+  Claude Code skill/config files, which aren't documentation, and untracked
+  scratch). A real doc outside `docs/` (a config-dir README like homelab's
+  `monitoring/README.md`) **is** a document and must be audited — an earlier
+  `docs/`-only scope wrongly made such docs invisible (neither flagged nor
+  checked). `.claude/**` files are runtime tooling; a config-dir README is not.
+  Keep that distinction.
 
 ## Doc models (why `--checks` exists)
 

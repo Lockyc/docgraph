@@ -35,7 +35,7 @@ func TestLoadIgnores(t *testing.T) {
 	for _, g := range globs {
 		joined += g + "|"
 	}
-	want := "**/superpowers/**|vendor/**|extra/*.md|"
+	want := "**/superpowers/**|.claude/**|vendor/**|extra/*.md|"
 	if joined != want {
 		t.Errorf("globs = %q want %q", joined, want)
 	}

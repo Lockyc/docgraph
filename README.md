@@ -7,11 +7,12 @@ a pre-push hook or CI without a wrapper.
 
 ## Checks
 
-1. **Orphans** — a tracked doc under `docs/` not reachable from the entry
-   points. Reachability follows both markdown links *and* bare/inline-code path
-   mentions (`` `docs/x.md` ``), because an agent follows either. Only `docs/`
-   is checked — skill files (`.claude/`) and config-dir READMEs aren't part of
-   the doc graph.
+1. **Orphans** — a tracked doc not reachable from the entry points.
+   Reachability follows both markdown links *and* bare/inline-code path mentions
+   (`` `docs/x.md` ``), because an agent follows either. Every real `.md` is
+   audited — including docs outside `docs/` (e.g. a config-dir README); only
+   Claude Code tooling under `.claude/` and untracked scratch are excluded, as
+   those aren't documentation.
 2. **Broken links** — a `[x](y.md)` whose target doesn't exist (renamed/moved/
    deleted, link not updated). Checked across all tracked `.md`.
 3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`) —
@@ -67,7 +68,7 @@ blocks, per-section `index.md` implicit-nav, and repo-specific conventions are
 out of scope. Markdown-link extraction (used for broken-link detection and link
 edges) skips fenced/inline code so example paths aren't treated as real links;
 the orphan *reachability* pass, by contrast, does read inline-code path mentions
-(that's how it follows `` `docs/x.md` ``). The doc tree is assumed to be `docs/`.
+(that's how it follows `` `docs/x.md` ``).
 
 ## Development
 

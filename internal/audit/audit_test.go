@@ -46,22 +46,24 @@ func TestAuditPathMentionReachability(t *testing.T) {
 	}
 }
 
-func TestAuditDocsScope(t *testing.T) {
-	// Only tracked .md under docs/ are orphan candidates; skill files and
-	// config-dir READMEs elsewhere are not part of the doc graph.
+func TestAuditExcludesToolingNotRealDocs(t *testing.T) {
+	// Skill files under .claude/ are runtime tooling, not docs — excluded.
+	// A real doc outside docs/ (a config-dir README) IS a document and must be
+	// audited, so if unreachable it's a genuine orphan.
 	dir := setupRepo(t, map[string]string{
 		"CLAUDE.md":                     "hub with no links\n",
 		"docs/lonely.md":                "unreferenced doc\n",
-		".claude/skills/foo/rules/x.md": "skill rule, not a doc\n",
-		"monitoring/README.md":          "config readme\n",
-	}, []string{"CLAUDE.md", "docs/lonely.md", ".claude/skills/foo/rules/x.md", "monitoring/README.md"})
+		"monitoring/README.md":          "a real doc outside docs/\n",
+		".claude/skills/foo/rules/x.md": "skill file, not a doc\n",
+	}, []string{"CLAUDE.md", "docs/lonely.md", "monitoring/README.md", ".claude/skills/foo/rules/x.md"})
 
 	rep, err := Audit(dir, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Orphans) != 1 || rep.Orphans[0] != "docs/lonely.md" {
-		t.Errorf("orphans = %v, want only [docs/lonely.md]", rep.Orphans)
+	got := rep.Orphans
+	if len(got) != 2 || got[0] != "docs/lonely.md" || got[1] != "monitoring/README.md" {
+		t.Errorf("orphans = %v, want [docs/lonely.md monitoring/README.md] (skill file excluded, real docs kept)", got)
 	}
 }
 
