@@ -16,6 +16,14 @@ func TestExtractLinks(t *testing.T) {
 	}
 }
 
+func TestExtractLinksSkipsCode(t *testing.T) {
+	content := "real [a](x.md)\n```\ntemplate [b](fake.md)\n```\nand `inline [c](nope.md)` end\n"
+	got := extractLinks(content)
+	if len(got) != 1 || got[0].Target != "x.md" {
+		t.Fatalf("got %v, want only {1 x.md}", got)
+	}
+}
+
 func TestIsLocalMd(t *testing.T) {
 	cases := map[string]bool{
 		"x.md": true, "../a/b.md": true, "y.md#frag": true, "y.md \"T\"": true,

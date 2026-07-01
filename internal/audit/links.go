@@ -13,12 +13,29 @@ type Link struct {
 
 var inlineLinkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
 var refLinkRe = regexp.MustCompile(`^\s*\[[^\]]+\]:\s+(\S+)`)
+var fenceRe = regexp.MustCompile("^([`~]{3,})")
 
 // extractLinks returns every markdown link target with its 1-based line number,
-// covering inline [x](target) and reference-style [label]: target.
+// covering inline [x](target) and reference-style [label]: target. Links inside
+// fenced code blocks (``` / ~~~) and inline code spans (`...`) are skipped, so
+// illustrative/template paths in examples don't count as real links.
 func extractLinks(content string) []Link {
 	var links []Link
-	for i, line := range strings.Split(content, "\n") {
+	inFence := false
+	var fenceChar byte
+	for i, raw := range strings.Split(content, "\n") {
+		if m := fenceRe.FindString(strings.TrimSpace(raw)); m != "" {
+			if !inFence {
+				inFence, fenceChar = true, m[0]
+			} else if m[0] == fenceChar {
+				inFence = false
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		line := stripInlineCode(raw)
 		for _, m := range inlineLinkRe.FindAllStringSubmatch(line, -1) {
 			links = append(links, Link{Line: i + 1, Target: m[1]})
 		}
@@ -27,6 +44,25 @@ func extractLinks(content string) []Link {
 		}
 	}
 	return links
+}
+
+// stripInlineCode blanks out `...` spans so example links inside them are not
+// matched, while preserving column-independent link syntax outside the spans.
+func stripInlineCode(s string) string {
+	var b strings.Builder
+	inCode := false
+	for _, r := range s {
+		switch {
+		case r == '`':
+			inCode = !inCode
+			b.WriteByte(' ')
+		case inCode:
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // cleanTarget strips any #anchor, ?query, or " title" suffix.
