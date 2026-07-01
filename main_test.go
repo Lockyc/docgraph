@@ -40,6 +40,54 @@ func TestRunFindingsExit1(t *testing.T) {
 	}
 }
 
+func mkOrphanRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	write("CLAUDE.md", "hub with no links\n")
+	write("docs/orphan.md", "unreferenced\n")
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("init")
+	git("add", "CLAUDE.md", "docs/orphan.md")
+	return dir
+}
+
+func TestRunChecksExcludesOrphans(t *testing.T) {
+	dir := mkOrphanRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{"--checks", "broken,untracked", dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (orphans not selected)\n%s", code, out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("ORPHANS")) {
+		t.Errorf("ORPHANS section shown despite not being selected:\n%s", out.String())
+	}
+}
+
+func TestRunChecksDefaultGatesOrphans(t *testing.T) {
+	dir := mkOrphanRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (orphan gated by default)", code)
+	}
+}
+
+func TestRunChecksInvalidExit2(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"--checks", "bogus", t.TempDir()}, &out, &errb); code != 2 {
+		t.Fatalf("exit = %d, want 2 for invalid check name", code)
+	}
+}
+
 func TestRunNotAGitRepoExit2(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := run([]string{t.TempDir()}, &out, &errb)
