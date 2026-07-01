@@ -226,7 +226,5 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked bool) {
 	if untracked {
 		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Bypass just this push (the gate still fails next time): git push --no-verify")
 	fmt.Fprintln(w, bar)
 }

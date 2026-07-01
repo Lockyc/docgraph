@@ -44,9 +44,9 @@ Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a g
 
 On a finding, the output is self-describing: below the findings it prints what
 docaudit is, that its non-zero exit is what aborts a pre-push, that a finding is a
-doc-graph (not code) problem, and how to remediate each category or bypass the
-push once (`git push --no-verify`). A reader who sees only a failed push — human or
-agent — should not have to reverse-engineer the gate. Clean/CI runs stay terse.
+doc-graph (not code) problem, and how to remediate each category. A reader who sees
+only a failed push — human or agent — should not have to reverse-engineer the gate.
+Clean/CI runs stay terse.
 
 ### Install as a pre-push gate
 
