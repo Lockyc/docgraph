@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,48 @@ func TestRunChecksInvalidExit2(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"--checks", "bogus", t.TempDir()}, &out, &errb); code != 2 {
 		t.Fatalf("exit = %d, want 2 for invalid check name", code)
+	}
+}
+
+func gitInit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
+}
+
+func TestInstallHook(t *testing.T) {
+	dir := gitInit(t)
+	var out, errb bytes.Buffer
+	if code := runInstallHook([]string{"--checks", "broken,untracked", dir}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d\n%s", code, errb.String())
+	}
+	hook := filepath.Join(dir, ".githooks", "pre-push")
+	b, err := os.ReadFile(hook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "--checks broken,untracked") {
+		t.Errorf("hook missing checks:\n%s", b)
+	}
+	if fi, _ := os.Stat(hook); fi.Mode()&0o100 == 0 {
+		t.Error("hook not executable")
+	}
+	hp, _ := exec.Command("git", "-C", dir, "config", "core.hooksPath").Output()
+	if strings.TrimSpace(string(hp)) != ".githooks" {
+		t.Errorf("core.hooksPath = %q, want .githooks", strings.TrimSpace(string(hp)))
+	}
+}
+
+func TestInstallHookRefusesExisting(t *testing.T) {
+	dir := gitInit(t)
+	os.MkdirAll(filepath.Join(dir, ".githooks"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".githooks", "pre-push"), []byte("#existing\n"), 0o755)
+	var out, errb bytes.Buffer
+	if code := runInstallHook([]string{dir}, &out, &errb); code != 2 {
+		t.Fatalf("exit=%d, want 2 (refuse existing without --force)", code)
 	}
 }
 

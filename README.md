@@ -5,6 +5,11 @@ navigates by grep + following `[x](y.md)` links, not the rendered site a human
 browses. Flags three things and exits non-zero on any finding, so it drops into
 a pre-push hook or CI without a wrapper.
 
+**Scope: project *documents*, not project *content*.** It audits the docs that
+explain the project (`docs/`, `CLAUDE.md`, config-dir READMEs). It is *not* for
+content a site framework routes and renders (an Astro/MkDocs content collection,
+a seed-data corpus) — exclude those per-repo via `.docauditignore`.
+
 ## Checks
 
 1. **Orphans** — a tracked doc not reachable from the entry points.
@@ -36,6 +41,21 @@ docaudit --checks broken,untracked  # run/gate a subset (default: all three)
 ```
 
 Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a git repo.
+
+### Install as a pre-push gate
+
+```bash
+docaudit install-hook [path]                    # gate all three checks
+docaudit install-hook --checks broken,untracked # nav-driven repos (no orphan gate)
+docaudit install-hook --soft                    # fail open if docaudit is absent
+```
+
+Writes a tracked `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for
+this clone (other clones activate it with `git config core.hooksPath .githooks`).
+Refuses to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate
+into it — e.g. homelab runs docaudit from `make lint`). Default fails **closed**
+(a missing `docaudit` blocks the push); `--soft` fails open, which suits repos
+cloned where the tool may be absent (CI, public contributors).
 
 ### Doc models and when to drop `--checks orphans`
 
