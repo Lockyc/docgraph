@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 type BrokenLink struct {
@@ -31,6 +32,42 @@ type Options struct {
 }
 
 var rootCandidates = []string{"CLAUDE.md", "README.md", "AGENTS.md", "docs/index.md"}
+
+// isDocCandidate reports whether a tracked .md belongs to the doc graph that
+// orphan-checking governs: the docs/ tree. Tracked .md elsewhere (skill files
+// under .claude/, config-dir READMEs) are not part of the navigable doc graph.
+func isDocCandidate(f string) bool {
+	return strings.HasPrefix(f, "docs/")
+}
+
+// isPathWordByte reports whether b can be part of a path segment — used to
+// require a segment boundary before a path mention (so "mydocs/x.md" does not
+// count as a mention of "docs/x.md").
+func isPathWordByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case b == '.' || b == '/' || b == '-' || b == '_':
+		return true
+	}
+	return false
+}
+
+// mentionsPath reports whether content references the repo-relative path at a
+// segment boundary (bare or inside inline code), not just as a markdown link.
+func mentionsPath(content, path string) bool {
+	for from := 0; ; {
+		i := strings.Index(content[from:], path)
+		if i < 0 {
+			return false
+		}
+		i += from
+		if i == 0 || !isPathWordByte(content[i-1]) {
+			return true
+		}
+		from = i + 1
+	}
+}
 
 func Audit(repoRoot string, opts Options) (Report, error) {
 	tracked, err := trackedMD(repoRoot)
@@ -94,6 +131,13 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 				enqueue(resolved)
 			}
 		}
+		// Path-mention edges: an agent follows a bare/inline-code path reference
+		// (`docs/x.md`) just like a markdown link, so a mention makes it reachable.
+		for f := range trackedSet {
+			if !reachable[f] && mentionsPath(content, f) {
+				enqueue(f)
+			}
+		}
 	}
 
 	// Broken links: every tracked (non-ignored) md, any .md target missing on disk.
@@ -119,7 +163,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 
 	var orphans []string
 	for _, f := range tracked {
-		if !reachable[f] && !matchesIgnore(f, globs) {
+		if !reachable[f] && isDocCandidate(f) && !matchesIgnore(f, globs) {
 			orphans = append(orphans, f)
 		}
 	}
