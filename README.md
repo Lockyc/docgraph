@@ -7,10 +7,13 @@ a pre-push hook or CI without a wrapper.
 
 ## Checks
 
-1. **Orphans** — tracked `.md` not reachable by following links from the entry
-   points. The agent can't discover it by pointer-following.
+1. **Orphans** — a tracked doc under `docs/` not reachable from the entry
+   points. Reachability follows both markdown links *and* bare/inline-code path
+   mentions (`` `docs/x.md` ``), because an agent follows either. Only `docs/`
+   is checked — skill files (`.claude/`) and config-dir READMEs aren't part of
+   the doc graph.
 2. **Broken links** — a `[x](y.md)` whose target doesn't exist (renamed/moved/
-   deleted, link not updated).
+   deleted, link not updated). Checked across all tracked `.md`.
 3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`) —
    absent from clones, the built site, and any mirror.
 
@@ -25,12 +28,25 @@ Stdlib only — no dependencies. Requires `git` on PATH.
 ## Usage
 
 ```bash
-docaudit [path]              # path defaults to the current directory
-docaudit --root wiki/Home.md # add an extra entry point (repeatable)
-docaudit --ignore 'vendor/**' # exclude a glob from checks (repeatable)
+docaudit [path]                     # path defaults to the current directory
+docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
+docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
+docaudit --checks broken,untracked  # run/gate a subset (default: all three)
 ```
 
-Exit codes: `0` clean · `1` findings · `2` usage / not a git repo.
+Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a git repo.
+
+### Doc models and when to drop `--checks orphans`
+
+The orphan check assumes a **prose-linked** doc graph (entry docs link/mention
+their way through `docs/`). That fits most repos. Two exceptions:
+
+- **Nav-driven MkDocs sites** (a `docs/` with no `nav:` block — MkDocs
+  auto-builds the sidebar from the file tree, pages never cross-link). Every
+  page is a prose-orphan by design. Gate these with
+  `--checks broken,untracked`.
+- Repos with genuinely unreferenced design docs will report real orphans — link
+  them from `CLAUDE.md`/`README`, or accept and narrow with `--checks`.
 
 ### Entry points (roots)
 
@@ -48,7 +64,10 @@ more via a `.docauditignore` file (gitignore syntax, `#` comments) or repeatable
 
 Anchor validity (`y.md#missing`), external-URL liveness, raw `<a href>` in HTML
 blocks, per-section `index.md` implicit-nav, and repo-specific conventions are
-out of scope. Links inside fenced/inline code are skipped.
+out of scope. Markdown-link extraction (used for broken-link detection and link
+edges) skips fenced/inline code so example paths aren't treated as real links;
+the orphan *reachability* pass, by contrast, does read inline-code path mentions
+(that's how it follows `` `docs/x.md` ``). The doc tree is assumed to be `docs/`.
 
 ## Development
 
