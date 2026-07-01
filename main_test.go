@@ -112,6 +112,12 @@ func TestInstallHook(t *testing.T) {
 	if !strings.Contains(string(b), "--checks broken,untracked") {
 		t.Errorf("hook missing checks:\n%s", b)
 	}
+	// The hook must resolve docaudit even under a minimal PATH (git runs hooks
+	// with the caller's PATH; GUI clients / agent harnesses often lack ~/go/bin).
+	// Guard the Go-bin fallback so it can't regress to `command -v` only.
+	if !strings.Contains(string(b), "$HOME/go/bin") || !strings.Contains(string(b), "docaudit_bin") {
+		t.Errorf("hook lost its minimal-PATH fallback (would fail-closed when docaudit isn't on PATH):\n%s", b)
+	}
 	if fi, _ := os.Stat(hook); fi.Mode()&0o100 == 0 {
 		t.Error("hook not executable")
 	}

@@ -80,6 +80,22 @@ docs/" with zero config.
   `git.go` (`ls-files` wrappers), `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
+- **Deploy is automatic on the host machine** via tracked `.githooks/post-commit`
+  + `post-merge` (both run `go install .`; activate with
+  `git config core.hooksPath .githooks`). This machine is docaudit's only host,
+  so a stale `~/go/bin/docaudit` = the gate runs old logic everywhere. Don't rely
+  on remembering `just install`.
+
+## Footgun — the gate must find its own binary under a minimal PATH
+
+The pre-push hook `hookScript` generates must resolve docaudit via PATH **and**
+the Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone. Git
+runs hooks with the caller's PATH; GUI clients and sandboxed agent harnesses push
+with a bare PATH that omits `~/go/bin`. With a `command -v`-only lookup the
+fail-closed gate then *blocks the push because it can't see an installed binary*
+— tool present, but invisible — which reads as "docaudit is broken" and trains
+agents to reach for `--no-verify`. The Go-bin fallback (guarded by a test in
+`main_test.go`) is load-bearing; do not narrow it back to `command -v`.
 
 ## v1 gaps (documented, not silent)
 

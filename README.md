@@ -100,8 +100,21 @@ the orphan *reachability* pass, by contrast, does read inline-code path mentions
 ```bash
 just test    # go test ./...
 just build   # go build -o docaudit .
-just install # go install .
+just install # go install . -> ~/go/bin/docaudit
 ```
+
+**Deploy is automatic on this repo's host.** A tracked `.githooks/post-commit`
+(and `post-merge`) runs `go install .`, so `~/go/bin/docaudit` always matches the
+latest commit — no manual `just install` step to forget, and no stale binary
+gating pushes with old logic. Activate in a fresh clone with
+`git config core.hooksPath .githooks`.
+
+The installed binary must be reachable when a hook fires: the pre-push hook
+`install-hook` generates resolves docaudit via PATH **and** the Go bin dir
+(`$GOBIN` / `$GOPATH/bin` / `~/go/bin`), because git runs hooks with the caller's
+PATH — GUI clients and sandboxed agents often push with a bare PATH that omits
+`~/go/bin`, and a `command -v`-only hook would then fail-closed for the wrong
+reason (tool present but unseen).
 
 Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
 `internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers, the
