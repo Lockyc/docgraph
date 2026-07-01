@@ -8,11 +8,11 @@ import (
 )
 
 // defaultIgnores excludes non-documentation .md that would otherwise show up as
-// false orphans: intentionally-untracked scratch, and Claude Code skill/config
-// files under .claude/ (loaded by the runtime, never part of the doc graph).
+// false orphans: intentionally-untracked scratch, and agent skill/config files
+// under .claude/ and .agents/ (loaded by the runtime, never part of the doc graph).
 // Real docs outside docs/ (e.g. a config-dir README) are NOT excluded — they are
 // documents and get audited.
-var defaultIgnores = []string{"**/superpowers/**", ".claude/**"}
+var defaultIgnores = []string{"**/superpowers/**", ".claude/**", ".agents/**"}
 
 func matchGlob(pattern, path string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(path, "/"))
