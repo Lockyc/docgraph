@@ -1,0 +1,49 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func mkRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	write("CLAUDE.md", "[i](docs/index.md)\n")
+	write("docs/index.md", "[gone](missing.md)\n")
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("init")
+	git("add", "CLAUDE.md", "docs/index.md")
+	return dir
+}
+
+func TestRunFindingsExit1(t *testing.T) {
+	dir := mkRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("BROKEN LINKS (1)")) {
+		t.Errorf("missing broken-links section:\n%s", out.String())
+	}
+}
+
+func TestRunNotAGitRepoExit2(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{t.TempDir()}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+}
