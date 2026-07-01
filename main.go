@@ -89,7 +89,7 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 
 	findings := false
 	if sel["orphans"] {
-		fmt.Fprintf(w, "ORPHANS (%d) — tracked docs/ unreachable by link/path-following:\n", len(r.Orphans))
+		fmt.Fprintf(w, "ORPHANS (%d) — docs unreachable by link/path-following:\n", len(r.Orphans))
 		for _, o := range r.Orphans {
 			fmt.Fprintf(w, "  %s\n", o)
 		}
