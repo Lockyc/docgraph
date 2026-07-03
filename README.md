@@ -58,7 +58,7 @@ docaudit install-hook --checks broken,untracked # nav-driven repos (no orphan ga
 Writes a tracked `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for
 this clone (other clones activate it with `git config core.hooksPath .githooks`).
 Refuses to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate
-into it — e.g. homelab runs docaudit from `make lint`). Fails **closed**: a
+into it — e.g. call docaudit from an existing `make lint`). Fails **closed**: a
 missing `docaudit` blocks the push, because a gate that skips when its tool is
 absent is a false green, not a gate.
 

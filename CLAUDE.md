@@ -7,11 +7,11 @@ inline-code path mentions. Exits non-zero on a finding in a selected check
 (`--checks`, default all three). Stdlib only; shells out to `git`. Usage and
 checks are in `README.md` — this file carries the invariants and footguns.
 
-## Homelab back-link
+## Intended use
 
-This tool guards documentation for the LSJC homelab and other repos. Its
-intended production use is homelab's **pre-push** hook — see the homelab docs
-repo (`lachlan/homelab`, `docs/runbooks/script-linting.md`) for the wiring.
+docaudit is built to run as a **pre-push documentation gate** (and in CI): it
+exits non-zero on a finding so a broken doc-graph blocks the push without a
+wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 
 ## What it is (and is not)
 
@@ -36,20 +36,21 @@ repo (`lachlan/homelab`, `docs/runbooks/script-linting.md`) for the wiring.
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
   broken links (e.g. a `[docs](services/name.md)` template row). This was a real
-  false positive caught on the first homelab run — the skip is load-bearing.
+  false positive caught on an early real-world run — the skip is load-bearing.
   (Note the asymmetry: the orphan **reachability** pass, `mentionsPath`, *does*
   read inline-code path mentions on purpose — that's how an agent follows a
   bare `` `docs/x.md` `` reference. Link-extraction and reachability answer
   different questions; don't unify them.)
 - **Reachability = markdown links OR path mentions — don't narrow to links.**
   Model-C repos (design docs referenced by path, not clickable link) would show
-  a flood of false orphans under link-only reachability. Validated: reductable
-  32→0, distilus 29→4 (its real unreferenced docs). Removing `mentionsPath`
+  a flood of false orphans under link-only reachability. Validated on real
+  flat-reference repos: link-only reachability reported dozens of false orphans
+  that `mentionsPath` collapsed to the genuine few. Removing `mentionsPath`
   reintroduces the flood.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
   Claude Code skill/config files, which aren't documentation, and untracked
-  scratch). A real doc outside `docs/` (a config-dir README like homelab's
+  scratch). A real doc outside `docs/` (a config-dir README, e.g. a
   `monitoring/README.md`) **is** a document and must be audited — an earlier
   `docs/`-only scope wrongly made such docs invisible (neither flagged nor
   checked). `.claude/**` files are runtime tooling; a config-dir README is not.
@@ -58,14 +59,13 @@ repo (`lachlan/homelab`, `docs/runbooks/script-linting.md`) for the wiring.
 ## Doc models (why `--checks` exists)
 
 Repos fall into models the orphan check treats differently:
-- **A — prose-linked** (homelab): entry docs link/mention through `docs/`.
-  Orphans are real. Gate all three checks.
-- **B — nav-driven MkDocs** (e.g. cheatsheet): `docs/` with no `nav:` block;
-  MkDocs auto-builds the sidebar, pages never cross-link → every page is a
-  prose-orphan *by design*. Gate `--checks broken,untracked` only.
-- **C — flat reference `docs/`** (reductable, distilus, warden): design notes
-  referenced by path. `mentionsPath` makes these reachable; genuine orphans that
-  remain are real gaps worth linking.
+- **A — prose-linked**: entry docs link/mention through `docs/`. Orphans are
+  real. Gate all three checks.
+- **B — nav-driven MkDocs**: `docs/` with no `nav:` block; MkDocs auto-builds
+  the sidebar, pages never cross-link → every page is a prose-orphan *by design*.
+  Gate `--checks broken,untracked` only.
+- **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
+  makes these reachable; genuine orphans that remain are real gaps worth linking.
 
 ## Roots
 
@@ -80,11 +80,11 @@ docs/" with zero config.
   `git.go` (`ls-files` wrappers), `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
-- **Deploy is automatic on the host machine** via tracked `.githooks/post-commit`
-  + `post-merge` (both run `go install .`; activate with
-  `git config core.hooksPath .githooks`). This machine is docaudit's only host,
-  so a stale `~/go/bin/docaudit` = the gate runs old logic everywhere. Don't rely
-  on remembering `just install`.
+- **Self-deploy hooks**: tracked `.githooks/post-commit` + `post-merge` both run
+  `go install .` (activate with `git config core.hooksPath .githooks`), so a
+  local checkout keeps `~/go/bin/docaudit` current without remembering
+  `just install`. A stale binary means the gate runs old logic, so the auto-install
+  matters when docaudit gates its own pushes.
 
 ## Footgun — the gate must find its own binary under a minimal PATH
 
