@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"git.lsjc.au/lachlan/docaudit/internal/audit"
+	"github.com/lockyc/docaudit/internal/audit"
 )
 
 type multiFlag []string
@@ -75,7 +75,7 @@ func hookScript(checks string) string {
 	return `#!/usr/bin/env bash
 # docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
 # clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
-# the push is blocked (install: go install git.lsjc.au/lachlan/docaudit@latest).
+# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
 set -euo pipefail
 
 # Resolve docaudit even under a minimal hook PATH. Git runs hooks with whatever
@@ -98,7 +98,7 @@ docaudit_bin() {
 
 if ! bin="$(docaudit_bin)"; then
   echo "docaudit: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
-  echo "  install it: go install git.lsjc.au/lachlan/docaudit@latest" >&2
+  echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
   exit 1
 fi
 exec "$bin" --checks ` + checks + ` .

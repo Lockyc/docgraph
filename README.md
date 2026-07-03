@@ -26,7 +26,7 @@ a seed-data corpus) — exclude those per-repo via `.docauditignore`.
 ## Install
 
 ```bash
-go install git.lsjc.au/lachlan/docaudit@latest   # or: just install
+go install github.com/lockyc/docaudit@latest   # or: just install
 ```
 
 Stdlib only — no dependencies. Requires `git` on PATH.

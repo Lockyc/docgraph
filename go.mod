@@ -1,3 +1,3 @@
-module git.lsjc.au/lachlan/docaudit
+module github.com/lockyc/docaudit
 
 go 1.26.4
