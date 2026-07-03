@@ -1,5 +1,9 @@
 # docaudit
 
+[![Release](https://img.shields.io/github/v/release/Lockyc/docaudit?sort=semver&label=release)](https://github.com/Lockyc/docaudit/releases/latest)
+![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
+[![License](https://img.shields.io/github/license/Lockyc/docaudit)](LICENSE)
+
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep + following `[x](y.md)` links, not the rendered site a human
 browses. Flags three things and exits non-zero on any finding, so it drops into
