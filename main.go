@@ -19,8 +19,14 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func main() {
 	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "install-hook" {
-		os.Exit(runInstallHook(args[1:], os.Stdout, os.Stderr))
+	if len(args) > 0 {
+		switch args[0] {
+		case "install-hook":
+			os.Exit(runInstallHook(args[1:], os.Stdout, os.Stderr))
+		case "version", "--version", "-v":
+			fmt.Println("docaudit " + version)
+			os.Exit(0)
+		}
 	}
 	os.Exit(run(args, os.Stdout, os.Stderr))
 }

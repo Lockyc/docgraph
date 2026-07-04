@@ -42,6 +42,7 @@ docaudit [path]                     # path defaults to the current directory
 docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
 docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
 docaudit --checks broken,untracked  # run/gate a subset (default: all three)
+docaudit version                    # print version (also --version, -v)
 ```
 
 Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a git repo.
@@ -105,7 +106,16 @@ the orphan *reachability* pass, by contrast, does read inline-code path mentions
 just test    # go test ./...
 just build   # go build -o docaudit .
 just install # go install . -> ~/go/bin/docaudit
+just gate    # gofmt check + vet + tests (pre-release gate)
 ```
+
+Work lands on the `dev` integration branch; `main` is the release branch and only
+fast-forwards to a tagged release. Branch feature/fix work off `dev`, run `just gate`
+before merging. Releases follow [semantic versioning](https://semver.org): the root
+`VERSION` file is the single source of truth (embedded into the binary via `go:embed`),
+and `just release` tags `v<VERSION>` and publishes the matching GitHub release. Because
+consumers `go install …@latest`, a release moves everyone's pinned tool — keep `main`
+releasable.
 
 **Deploy is automatic on this repo's host.** A tracked `.githooks/post-commit`
 (and `post-merge`) runs `go install .`, so `~/go/bin/docaudit` always matches the

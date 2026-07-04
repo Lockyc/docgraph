@@ -86,6 +86,20 @@ docs/" with zero config.
   `just install`. A stale binary means the gate runs old logic, so the auto-install
   matters when docaudit gates its own pushes.
 
+## Branching & releases
+
+- **`main` + `dev`.** `dev` is the integration trunk; `main` is the release branch —
+  it only fast-forwards to a tagged release commit and stays a clean ancestor of `dev`.
+  Never commit directly to `main` (drift breaks the fast-forward; fix by back-merging
+  `main` into `dev`, never force-push). Feature/fix branches off `dev`.
+- **Semver, `v`-prefixed tags.** The tracked root **`VERSION`** file is the single source
+  of truth, `go:embed`-ed via `version.go` so `docaudit version` (also `--version`, `-v`)
+  self-reports — never restate the version elsewhere. Consumers `go install …@latest`, so
+  a release moves everyone's pinned tool: keep `main` releasable and bump minor for a new
+  feature, patch for a fix.
+- **Cut a release** from `dev` with `VERSION` bumped + committed: `just release` runs
+  `gate`, fast-forwards `main`, tags `v<VERSION>`, and publishes the GitHub release.
+
 ## Footgun — the gate must find its own binary under a minimal PATH
 
 The pre-push hook `hookScript` generates must resolve docaudit via PATH **and**
