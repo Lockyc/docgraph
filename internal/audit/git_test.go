@@ -57,3 +57,46 @@ func TestTrackedUntracked(t *testing.T) {
 		t.Errorf("untracked = %v", untracked)
 	}
 }
+
+func TestClosestBaseFindsIntegrationBranch(t *testing.T) {
+	dir := setupRepo(t, map[string]string{"CLAUDE.md": "a\n"}, []string{"CLAUDE.md"})
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	git("branch", "-M", "main") // make the base branch a known integration candidate
+	base := trim(git("rev-parse", "HEAD"))
+	git("checkout", "-b", "feature")
+	writeFile(t, dir, "CLAUDE.md", "a\nb\n")
+	git("add", "CLAUDE.md")
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "feature work")
+
+	got, ok := ClosestBase(dir, "feature")
+	if !ok || got != base {
+		t.Fatalf("want base=%s ok=true, got %q ok=%v", base, got, ok)
+	}
+}
+
+func TestClosestBaseFailsOpenWithNoIntegrationBranch(t *testing.T) {
+	// No main/master/dev/develop/trunk branch exists → ClosestBase can resolve no
+	// range and fails OPEN (the caller then runs no footgun-drift check).
+	dir := setupRepo(t, map[string]string{"CLAUDE.md": "a\n"}, []string{"CLAUDE.md"})
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	git("branch", "-M", "wip") // none of the integration-branch candidates exist
+
+	got, ok := ClosestBase(dir, "wip")
+	if ok || got != "" {
+		t.Fatalf(`no integration branch → want ("", false), got %q %v`, got, ok)
+	}
+}

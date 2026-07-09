@@ -26,8 +26,8 @@ type declFinding struct {
 // bolded `**Footgun:`/`—` anywhere. Cross-references ("see the X footgun") and
 // bare container headings ("## Footguns", no delimiter) deliberately do NOT match.
 var (
-	footgunDeclLead = regexp.MustCompile(`(?i)^\s*(?:>[ \t]*)*(?:#{1,6}\s*|[-*+]\s+)?\*{0,2}footguns?\s*[:—-]`)
-	footgunDeclBold = regexp.MustCompile(`(?i)\*\*\s*footguns?\s*[:—-]`)
+	footgunDeclLead = regexp.MustCompile(`(?i)^\s*(?:>[ \t]*)*(?:#{1,6}\s*|[-*+]\s+)?\*{0,2}footguns?\s*(?::|—|-(?:\s|$))`)
+	footgunDeclBold = regexp.MustCompile(`(?i)\*\*\s*footguns?\s*(?::|—|-(?:\s|$))`)
 	footgunHeading  = regexp.MustCompile(`^\s*#`)
 	// Conservative built-in rationale vocabulary — single source of truth; do not
 	// restate in docs. Narrow on purpose: loose connectives fire everywhere.
@@ -84,7 +84,7 @@ func scanDeclarations(content string) []declFinding {
 		}
 		text := strings.Join(lines[ln:boundEnd], "\n")
 		if boundEnd == p.end {
-			single := boundEnd-ln == 1
+			single := p.end-p.start == 1
 			heading := footgunHeading.MatchString(line)
 			if (single || heading) && pi+1 < len(paras) {
 				np := paras[pi+1]
