@@ -1,8 +1,11 @@
 package audit
 
 import (
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -104,4 +107,105 @@ func changedConstants(diff string) []constChange {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// DocHit is one doc location referencing a stale symbol or value.
+type DocHit struct {
+	File string
+	Line int
+	Text string
+}
+
+// gitDiff returns the unified diff of `git diff <spec>`. spec may be a base SHA
+// (diffs base vs the WORKING TREE — committed and uncommitted), "HEAD"
+// (uncommitted only), or "base..head" (committed only).
+func gitDiff(root, spec string) (string, error) {
+	out, err := exec.Command("git", "-C", root, "diff", spec).Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// stillDefinedInCode reports whether sym appears (whole-word) anywhere in tracked
+// NON-doc files. A fixed-string word match; a regex alternation backtracks
+// catastrophically on a large tree.
+func stillDefinedInCode(root, sym string) bool {
+	return exec.Command("git", "-C", root, "grep", "-qwF", "--", sym,
+		"--", ".", ":!*.md", ":!*.mdx").Run() == nil
+}
+
+// gitGrepHits runs `git grep -n -F -w` with the given pathspec args and parses
+// file:line:text, capping at max. git grep exit 1 (no match) yields (nil, nil).
+func gitGrepHits(root string, pathspec []string, needle string, max int) ([]DocHit, error) {
+	args := append([]string{"-C", root, "grep", "-n", "-F", "-w", "--", needle, "--"}, pathspec...)
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var hits []DocHit
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		i := strings.IndexByte(line, ':')
+		if i < 0 {
+			continue
+		}
+		j := strings.IndexByte(line[i+1:], ':')
+		if j < 0 {
+			continue
+		}
+		j += i + 1
+		ln, e := strconv.Atoi(line[i+1 : j])
+		if e != nil {
+			continue
+		}
+		hits = append(hits, DocHit{
+			File: filepath.ToSlash(line[:i]),
+			Line: ln,
+			Text: strings.TrimSpace(line[j+1:]),
+		})
+		if len(hits) >= max {
+			break
+		}
+	}
+	return hits, nil
+}
+
+// docGrepSymbol returns up to 5 doc locations naming sym.
+func docGrepSymbol(root, sym string) ([]DocHit, error) {
+	return gitGrepHits(root, []string{"*.md", "*.mdx"}, sym, 5)
+}
+
+// docGrepValue returns up to 5 doc locations that carry old, but only within docs
+// that also NAME the symbol (word match) — the anchored-drift signature.
+func docGrepValue(root, name, old string) ([]DocHit, error) {
+	named, err := exec.Command("git", "-C", root, "grep", "-l", "-F", "-w", "--", name,
+		"--", "*.md", "*.mdx").Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var hits []DocHit
+	for _, d := range strings.Split(strings.TrimSpace(string(named)), "\n") {
+		if d == "" {
+			continue
+		}
+		h, err := gitGrepHits(root, []string{filepath.ToSlash(d)}, old, 5)
+		if err != nil {
+			return nil, err
+		}
+		hits = append(hits, h...)
+		if len(hits) >= 5 {
+			hits = hits[:5]
+			break
+		}
+	}
+	return hits, nil
 }

@@ -44,3 +44,44 @@ func TestChangedConstants(t *testing.T) {
 		t.Fatalf("changedConstants = %v, want %v", got, want)
 	}
 }
+
+func TestStillDefinedInCode(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"a.go":      "type KeepWidget struct{}\n",
+		"CLAUDE.md": "KeepWidget and GhostWidget are mentioned.\n",
+	}, []string{"a.go", "CLAUDE.md"})
+	if !stillDefinedInCode(dir, "KeepWidget") {
+		t.Error("KeepWidget is in code, want stillDefined=true")
+	}
+	if stillDefinedInCode(dir, "GhostWidget") {
+		t.Error("GhostWidget is only in a doc, want stillDefined=false")
+	}
+}
+
+func TestDocGrepSymbol(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "line one\nwe use OldWidget here\n",
+		"a.go":      "OldWidget\n", // code hit must be ignored (docs only)
+	}, []string{"CLAUDE.md", "a.go"})
+	hits, err := docGrepSymbol(dir, "OldWidget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].File != "CLAUDE.md" || hits[0].Line != 2 {
+		t.Fatalf("want one CLAUDE.md:2 hit, got %+v", hits)
+	}
+}
+
+func TestDocGrepValue(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "MAX_ROOTS is 1000 by default\n",
+		"other.md":  "1000 appears but MAX_ROOTS does not\n", // NOT named here? it is -> still counts
+	}, []string{"CLAUDE.md"})
+	hits, err := docGrepValue(dir, "MAX_ROOTS", "1000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].File != "CLAUDE.md" {
+		t.Fatalf("want one CLAUDE.md hit (other.md untracked), got %+v", hits)
+	}
+}
