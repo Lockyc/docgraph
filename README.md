@@ -51,22 +51,33 @@ checks do **not** narrow the leak pass — only an explicit `--ignore` glob does
 A tracked `.claude/` config still ships in a public clone, so it stays in
 scope even though it's excluded from the doc-graph checks.
 
-Patterns come from a **global** rules file — never committed to a repo, because a
-per-repo deny list would itself enumerate your sensitive terms. Resolution order:
-`--leaks-config <path>` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`
-(e.g. `~/.config/docaudit/leaks`).
+Patterns come from a **global TOML file** — never committed to a repo, because a
+per-repo deny (or allow) list would itself enumerate your sensitive terms.
+Resolution order: `--leaks-config <path>` → `$DOCAUDIT_LEAKS` →
+`os.UserConfigDir()/docaudit/leaks.toml`.
 
-Format — one Go regexp per line; `!` prefixes an allow-exception that suppresses a
-deny match it covers; `#` and blank lines are ignored; a ` #` trailing comment is
-stripped:
+Top-level `terms` match literally and case-insensitively; `regex` are Go regexps
+(opt into `(?i)` yourself). `allow`/`allow_regex` suppress a deny match they cover.
+`[[dir]]` sections scope exceptions to files under an absolute `path` (a whole repo
+or a subdir): `ignore` globs (relative to `path`) drop files from the scan, and
+`allow`/`allow_regex` suppress terms within that subtree.
 
-    lsjc\.au
-    /Users/[a-z]+
-    !au\.lsjc\.curator      # bundle id — meant to ship
+    terms       = ["nucleus", "lachlan@lsjc.com.au", "/Users/lockyc"]
+    regex       = ['192\.168\.1\.\d+']
+    allow       = ["github.com/lockyc"]
+    allow_regex = ['au\.lsjc\.[a-z]+']
 
-A small built-in set of unambiguous secret shapes (PEM private-key headers, AWS
-`AKIA…`, GitHub `ghp_…`, Slack `xox…` tokens) always runs and is suppressible with
-`!` allow lines.
+    [[dir]]
+    path   = "/abs/path/to/repo"
+    ignore = ["vendor/*.json"]        # skip vendored specs
+    [[dir]]
+    path  = "/abs/path/to/repo/sub"
+    allow = ["mycelium"]              # legit in this subtree
+
+The footprint list and its exclusions are global (machine-local), so in CI / a
+fresh clone (no file) the scan degrades to the built-in patterns only. A small
+built-in set of unambiguous secret shapes (PEM headers, AWS `AKIA…`, GitHub
+`ghp_…`, Slack `xox…`) always runs and is suppressible with `allow`/`ignore`.
 
 **Config handling** (leaks runs by default, incl. in CI, which has no global file):
 - **No config file** → scans with the built-in patterns only and prints a
@@ -86,7 +97,7 @@ manual leak-audit skill), no per-rule messages.
 go install github.com/lockyc/docaudit@latest   # or: just install
 ```
 
-Stdlib only — no dependencies. Requires `git` on PATH.
+Depends only on `github.com/BurntSushi/toml` (config decode) plus the Go stdlib. Requires `git` on PATH.
 
 ## Usage
 
@@ -118,6 +129,7 @@ terse.
 ```bash
 docaudit install-hook [path]                # gate: enforce ALL checks (default)
 docaudit install-hook --skip orphans        # nav-driven repos (no orphan gate)
+docaudit install-hook --ignore '**/*_test.go'  # bake an --ignore glob into the gated hook
 docaudit install-hook --force               # regenerate an existing hook (e.g. after upgrading)
 ```
 
