@@ -41,7 +41,9 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates every sensitive term the owner has). The footprint vocabulary is
   also identical across repos. So `leaks` reads a **TOML** file at
-  `--leaks-config` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks.toml`,
+  `--leaks-config` → `$DOCAUDIT_LEAKS` → `$XDG_CONFIG_HOME/docaudit/leaks.toml`
+  (default `~/.config/docaudit/leaks.toml` — XDG, not `os.UserConfigDir()`, which
+  on macOS is the wrong `~/Library/Application Support` GUI-app home for a CLI tool),
   with top-level `terms` (literal, case-insensitive) / `regex` (also
   case-insensitive by default — opt out per-pattern with `(?-i)`; a leak must be
   caught in any casing) / `allow` / `allow_regex` deny-and-exception arrays, plus

@@ -161,7 +161,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
 	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
-	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or os.UserConfigDir()/docaudit/leaks.toml)")
+	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -257,9 +257,16 @@ func resolveLeaksConfig(flagVal string) (string, error) {
 	if env := os.Getenv("DOCAUDIT_LEAKS"); env != "" {
 		return env, nil
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
+	// XDG, not os.UserConfigDir(): docaudit is a CLI tool, and os.UserConfigDir()
+	// returns ~/Library/Application Support on macOS (Apple's GUI-app convention),
+	// which is the wrong home for a dev tool. Honor $XDG_CONFIG_HOME, else ~/.config.
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".config")
 	}
 	return filepath.Join(dir, "docaudit", "leaks.toml"), nil
 }

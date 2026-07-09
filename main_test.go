@@ -14,6 +14,40 @@ import (
 // up the dev machine's real ~/.config/docaudit/leaks.
 func noCfg(dir string) string { return filepath.Join(dir, "no-leaks-cfg") }
 
+// The default config home is XDG (~/.config), not os.UserConfigDir() — which on
+// macOS is ~/Library/Application Support, the wrong GUI-app home for a CLI tool.
+func TestResolveLeaksConfigXDG(t *testing.T) {
+	if got, _ := resolveLeaksConfig("/explicit/x.toml"); got != "/explicit/x.toml" {
+		t.Errorf("--leaks-config should win, got %q", got)
+	}
+	t.Setenv("DOCAUDIT_LEAKS", "/env/y.toml")
+	if got, _ := resolveLeaksConfig(""); got != "/env/y.toml" {
+		t.Errorf("$DOCAUDIT_LEAKS should win over XDG, got %q", got)
+	}
+	t.Setenv("DOCAUDIT_LEAKS", "")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := mustResolve(t), filepath.Join("/xdg", "docaudit", "leaks.toml"); got != want {
+		t.Errorf("XDG default = %q, want %q", got, want)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	if got, want := mustResolve(t), filepath.Join(home, ".config", "docaudit", "leaks.toml"); got != want {
+		t.Errorf("fallback = %q, want %q (~/.config, not ~/Library/Application Support)", got, want)
+	}
+}
+
+func mustResolve(t *testing.T) string {
+	t.Helper()
+	got, err := resolveLeaksConfig("")
+	if err != nil {
+		t.Fatalf("resolveLeaksConfig: %v", err)
+	}
+	return got
+}
+
 func mkRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

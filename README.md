@@ -54,7 +54,7 @@ scope even though it's excluded from the doc-graph checks.
 Patterns come from a **global TOML file** — never committed to a repo, because a
 per-repo deny (or allow) list would itself enumerate your sensitive terms.
 Resolution order: `--leaks-config <path>` → `$DOCAUDIT_LEAKS` →
-`os.UserConfigDir()/docaudit/leaks.toml`.
+`$XDG_CONFIG_HOME/docaudit/leaks.toml` (default `~/.config/docaudit/leaks.toml`).
 
 Top-level `terms` match literally and case-insensitively; `regex`/`allow_regex`
 are Go regexps, **also case-insensitive by default** (a leak must be caught in any
