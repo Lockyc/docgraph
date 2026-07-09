@@ -144,3 +144,43 @@ func TestRunNotAGitRepoExit2(t *testing.T) {
 		t.Fatalf("exit = %d, want 2", code)
 	}
 }
+
+func TestRunLeaksNoConfigExit2(t *testing.T) {
+	dir := gitInit(t)
+	var out, errb bytes.Buffer
+	// Force a nonexistent config path so this never depends on the dev machine's
+	// real ~/.config/docaudit/leaks.
+	code := run([]string{"--checks", "leaks", "--leaks-config", filepath.Join(dir, "nope"), dir}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (leaks selected, no rules file)\n%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "no rules file") {
+		t.Errorf("want a 'no rules file' message, got: %s", errb.String())
+	}
+}
+
+func TestRunLeaksFindingExit1(t *testing.T) {
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	write("README.md", "reach us at admin@lsjc.au today\n")
+	cfg := filepath.Join(dir, "leaks.rules")
+	os.WriteFile(cfg, []byte("lsjc\\.au\n"), 0o644)
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "README.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	var out, errb bytes.Buffer
+	code := run([]string{"--checks", "leaks", "--leaks-config", cfg, dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (leak present)\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("LEAKS (1)")) {
+		t.Errorf("missing LEAKS section:\n%s", out.String())
+	}
+}

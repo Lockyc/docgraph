@@ -111,7 +111,7 @@ exec "$bin" --checks ` + checks + ` .
 `
 }
 
-var checkNames = []string{"orphans", "broken", "untracked"}
+var checkNames = []string{"orphans", "broken", "untracked", "leaks"}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docaudit", flag.ContinueOnError)
@@ -120,6 +120,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
 	checks := fs.String("checks", "orphans,broken,untracked", "comma-separated checks to run/gate: orphans,broken,untracked")
+	leaksConfig := fs.String("leaks-config", "", "path to the global leak rules file (default: $DOCAUDIT_LEAKS or os.UserConfigDir()/docaudit/leaks)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -142,7 +143,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	findings := printReport(stdout, rep, selected)
+	var leaks []audit.LeakFinding
+	if selected["leaks"] {
+		cfgPath, err := resolveLeaksConfig(*leaksConfig)
+		if err != nil {
+			fmt.Fprintf(stderr, "docaudit: %v\n", err)
+			return 2
+		}
+		rules, err := loadLeakRules(cfgPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "docaudit: leaks selected but no rules file at %s — create it or pass --leaks-config\n", cfgPath)
+			return 2
+		}
+		leaks, err = audit.LeakScan(root, rules, ignores)
+		if err != nil {
+			fmt.Fprintf(stderr, "docaudit: %v\n", err)
+			return 2
+		}
+	}
+	findings := printReport(stdout, rep, leaks, selected)
 	if findings {
 		return 1
 	}
@@ -173,6 +192,29 @@ func parseChecks(s string) (map[string]bool, error) {
 	return sel, nil
 }
 
+func resolveLeaksConfig(flagVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	if env := os.Getenv("DOCAUDIT_LEAKS"); env != "" {
+		return env, nil
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "docaudit", "leaks"), nil
+}
+
+func loadLeakRules(path string) (audit.LeakRules, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return audit.LeakRules{}, err
+	}
+	defer f.Close()
+	return audit.ParseLeakRules(f)
+}
+
 // printReport prints the selected sections and reports whether any selected
 // category has findings. The output is written to be self-describing: a reader
 // (often a fresh agent seeing only a failed `git push`) should learn from the
@@ -180,9 +222,10 @@ func parseChecks(s string) (map[string]bool, error) {
 // problem, why a non-zero exit aborts a push, and how to remediate or bypass.
 // The banner prints always; the explain-and-remediate footer only on findings,
 // so green/CI runs stay terse.
-func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
+func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
 	fmt.Fprintln(w, "docaudit — audits the agent-facing doc graph: every tracked .md should be reachable")
-	fmt.Fprintln(w, "by an agent following links/path-mentions from a root doc. Reads the doc graph, not code.")
+	fmt.Fprintln(w, "by an agent following links/path-mentions from a root doc. With --checks leaks it also")
+	fmt.Fprintln(w, "scans tracked file content for configured leak patterns.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
 	if sel["orphans"] {
@@ -206,11 +249,19 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 		}
 		fmt.Fprintln(w)
 	}
+	if sel["leaks"] {
+		fmt.Fprintf(w, "LEAKS (%d) — tree content matching a leak pattern:\n", len(leaks))
+		for _, l := range leaks {
+			fmt.Fprintf(w, "  %s:%d → %s  (%s)\n", l.File, l.Line, l.Match, l.Pattern)
+		}
+		fmt.Fprintln(w)
+	}
 
 	orphans := sel["orphans"] && len(r.Orphans) > 0
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
-	if !orphans && !broken && !untracked {
+	leaksFound := sel["leaks"] && len(leaks) > 0
+	if !orphans && !broken && !untracked && !leaksFound {
 		fmt.Fprintln(w, "clean ✓")
 		return false
 	}
@@ -225,7 +276,10 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 	if sel["untracked"] {
 		n += len(r.Untracked)
 	}
-	printFailureFooter(w, n, orphans, broken, untracked)
+	if sel["leaks"] {
+		n += len(leaks)
+	}
+	printFailureFooter(w, n, orphans, broken, untracked, leaksFound)
 	return true
 }
 
@@ -233,7 +287,7 @@ func printReport(w io.Writer, r audit.Report, sel map[string]bool) bool {
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, untracked bool) {
+func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bool) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
@@ -251,6 +305,10 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked bool) {
 	}
 	if untracked {
 		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
+	}
+	if leaks {
+		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add a `!` allow-exception to your")
+		fmt.Fprintln(w, "              leak rules file if the match is legitimate.")
 	}
 	fmt.Fprintln(w, bar)
 }
