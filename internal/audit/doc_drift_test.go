@@ -85,3 +85,35 @@ func TestDocGrepValue(t *testing.T) {
 		t.Fatalf("want one CLAUDE.md hit (other.md untracked), got %+v", hits)
 	}
 }
+
+// TestDocGrepSymbolNoMatch drives gitGrepHits' git-grep-exit-1 branch: no
+// tracked doc names the symbol, so `git grep -n -F -w` exits 1 and must
+// yield (nil, nil), not an error.
+func TestDocGrepSymbolNoMatch(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "this doc mentions nothing special\n",
+	}, []string{"CLAUDE.md"})
+	hits, err := docGrepSymbol(dir, "GhostSymbol")
+	if err != nil {
+		t.Fatalf("docGrepSymbol err = %v, want nil", err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("docGrepSymbol hits = %+v, want none", hits)
+	}
+}
+
+// TestDocGrepValueNoMatch drives docGrepValue's own `git grep -l` listing
+// exit-1 branch: no tracked doc names the symbol at all, so the listing grep
+// exits 1 before ever searching for the value, and must yield (nil, nil).
+func TestDocGrepValueNoMatch(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "this doc names no relevant symbol\n",
+	}, []string{"CLAUDE.md"})
+	hits, err := docGrepValue(dir, "GhostSymbol", "1000")
+	if err != nil {
+		t.Fatalf("docGrepValue err = %v, want nil", err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("docGrepValue hits = %+v, want none", hits)
+	}
+}
