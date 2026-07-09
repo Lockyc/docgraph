@@ -36,11 +36,11 @@ func TestParseLeakRulesBadRegex(t *testing.T) {
 
 func TestLeakScan(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
-		"README.md":   "clean line\ncontact lachlan@lsjc.au here\n",   // deny hit on line 2
-		"src/app.rs":  "// bundle id au.lsjc.curator is fine\n",       // deny 'lsjc' covered by allow
-		"secrets.env": "AWS=AKIAIOSFODNN7EXAMPLE\n",                   // built-in hit
-		"logo.bin":    "\x00\x01binary lsjc.au\x00",                   // binary, skipped
-		"vendor.md":   "lsjc.au appears here\n",                       // ignored via --ignore
+		"README.md":   "clean line\ncontact lachlan@lsjc.au here\n", // deny hit on line 2
+		"src/app.rs":  "// bundle id au.lsjc.curator is fine\n",     // deny 'lsjc' covered by allow
+		"secrets.env": "AWS=AKIAIOSFODNN7EXAMPLE\n",                 // built-in hit
+		"logo.bin":    "\x00\x01binary lsjc.au\x00",                 // binary, skipped
+		"vendor.md":   "lsjc.au appears here\n",                     // ignored via --ignore
 	}, []string{"README.md", "src/app.rs", "secrets.env", "logo.bin", "vendor.md"})
 
 	rules, err := ParseLeakRules(strings.NewReader("lsjc\\.au\n!au\\.lsjc\\.curator\n"))

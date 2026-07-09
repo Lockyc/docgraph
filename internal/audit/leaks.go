@@ -78,9 +78,9 @@ func ParseLeakRules(r io.Reader) (LeakRules, error) {
 func builtinLeakRules() []LeakRule {
 	pats := []string{
 		`-----BEGIN [A-Z ]*PRIVATE KEY-----`, // PEM private key header
-		`AKIA[0-9A-Z]{16}`,                    // AWS access key id
-		`ghp_[A-Za-z0-9]{36}`,                 // GitHub personal access token
-		`xox[baprs]-[A-Za-z0-9-]{10,}`,        // Slack token
+		`AKIA[0-9A-Z]{16}`,                   // AWS access key id
+		`ghp_[A-Za-z0-9]{36}`,                // GitHub personal access token
+		`xox[baprs]-[A-Za-z0-9-]{10,}`,       // Slack token
 	}
 	rs := make([]LeakRule, 0, len(pats))
 	for _, p := range pats {
