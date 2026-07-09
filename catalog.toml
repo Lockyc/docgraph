@@ -1,5 +1,5 @@
 name    = "docaudit"
-summary = "Audits a repo's agent-facing documentation graph — orphans, broken links, untracked markdown — and fails a push when it breaks"
+summary = "Audits a repo's agent-facing documentation graph — orphans, broken links, untracked markdown — plus a content leak scan and a diff-scoped footgun-drift pre-push check; fails a push when any breaks"
 kind    = "tool"
 status  = "active"
 tags    = ["docs", "linting", "ci", "git-hooks", "agents"]
@@ -7,5 +7,5 @@ stack   = ["go"]
 
 [[provides]]
 name    = "docaudit"
-summary = "go-installable doc-graph audit binary; wired into .githooks/pre-push and CI"
+summary = "go-installable doc-graph + leak audit binary; wired into .githooks/pre-push and CI"
 url     = "https://github.com/Lockyc/docaudit"

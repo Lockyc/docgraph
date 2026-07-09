@@ -37,7 +37,7 @@ run-list to update.
    Reachability follows both markdown links *and* bare/inline-code path mentions
    (`` `docs/x.md` ``), because an agent follows either. Every real `.md` is
    audited — including docs outside `docs/` (e.g. a config-dir README); only
-   Claude Code tooling under `.claude/` and untracked scratch are excluded, as
+   agent tooling under `.claude/` and `.agents/` plus untracked scratch are excluded, as
    those aren't documentation.
 2. **Broken links** — a `[x](y.md)` whose target doesn't exist (renamed/moved/
    deleted, link not updated). Checked across all tracked `.md`.
@@ -269,8 +269,9 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 ### Ignoring paths
 
-`**/superpowers/**` is ignored by default for the doc-graph checks
-(intentionally-untracked scratch). Add more via a `.docauditignore` file
+`**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for
+the doc-graph checks (intentionally-untracked scratch, and agent skill/config
+tooling that is never part of the doc graph). Add more via a `.docauditignore` file
 (gitignore syntax, `#` comments) or repeatable `--ignore` globs. Globs support
 `**` (any number of path segments), `*`, `?`. Note the leak scan honors only
 `--ignore` (not the default/`.docauditignore` layers) — see the leaks section.

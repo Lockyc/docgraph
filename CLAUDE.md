@@ -164,12 +164,12 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   reintroduces the flood.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
-  Claude Code skill/config files, which aren't documentation, and untracked
-  scratch). A real doc outside `docs/` (a config-dir README, e.g. a
+  and `.agents/**` agent skill/config files, which aren't documentation, and
+  untracked scratch). A real doc outside `docs/` (a config-dir README, e.g. a
   `monitoring/README.md`) **is** a document and must be audited — an earlier
   `docs/`-only scope wrongly made such docs invisible (neither flagged nor
-  checked). `.claude/**` files are runtime tooling; a config-dir README is not.
-  Keep that distinction.
+  checked). `.claude/**` and `.agents/**` files are runtime tooling; a config-dir
+  README is not. Keep that distinction.
 - **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** One JSONL
   record per run appends to `$XDG_STATE_HOME/docaudit/usage.jsonl` (XDG *state*, not
   config) **only** when a global `config.toml` `[log]` table opts in — resolved
