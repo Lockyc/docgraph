@@ -2,10 +2,12 @@
 
 A Go CLI that audits a repo's **agent-facing documentation graph** — orphans
 (tracked `docs/` files unreachable from the roots), broken internal `.md` links,
-untracked `.md` files — **and** scans tracked file content for configured `leaks`
-patterns. Reachability follows markdown links **and** bare/inline-code path
-mentions. All four checks are **enforced by default**; you exclude one explicitly
-with `--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
+untracked `.md` files — scans tracked file content for configured `leaks`
+patterns, **and** flags unjustified `footguns` labels in tracked markdown,
+because a footgun recorded with no stated reason is functionally undocumented.
+Reachability follows markdown links **and** bare/inline-code path mentions. All
+five checks are **enforced by default**; you exclude one explicitly with
+`--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
 non-zero on any finding in an enforced check. Stdlib + `github.com/BurntSushi/toml`
 (config decode); shells out to `git`. Usage and checks are in `README.md` — this
 file carries the invariants and footguns.
@@ -20,12 +22,15 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 
 - **Agent-facing, not human-facing.** It measures the graph an agent traverses
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
-- **Reads doc-graph structure and, for the `leaks` check, file content.** The
+- **Reads doc-graph structure and, for `leaks`/`footguns`, file content.** The
   three doc-graph checks (orphans/broken/untracked) traverse only the link graph.
-  The `leaks` check additionally scans tracked file *content* (code included) for
-  configured leak patterns. It never reads git history.
+  `leaks` additionally scans tracked file *content* (code included) for
+  configured leak patterns; `footguns` scans tracked markdown content for
+  unjustified "footgun" mentions, because judging whether a label is justified
+  requires reading the surrounding prose, not just the link graph. Neither
+  reads git history.
 
-## Footguns
+## Footguns <!-- footgun-ok: section title, not a claim -->
 
 - **Measures prose-link reachability on purpose — NOT MkDocs nav.** A MkDocs
   site with no `nav:` block auto-builds its sidebar from the file tree, so every
@@ -111,6 +116,34 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   `docs/`-only scope wrongly made such docs invisible (neither flagged nor
   checked). `.claude/**` files are runtime tooling; a config-dir README is not.
   Keep that distinction.
+- **`footguns` is a heuristic, not a judge.** It catches the bare-assertion
+  case — a "footgun" named with no rationale anywhere nearby — but it cannot
+  rank whether a stated rationale is actually *good*, because judging rationale
+  quality is a judgment task and docaudit is a deterministic pattern scanner.
+  The real footgun test (is this genuinely a trap, recorded at the right doc
+  level) stays in the `doc-and-audit-rigor` skill, not in this tool.
+- **`footguns`' window is the enclosing paragraph, not the whole document.** A
+  footgun written as a lone heading with its rationale in a *separate*
+  paragraph won't be seen and needs an explicit `<!-- footgun-ok -->` marker
+  instead — accepted because the marker is cheap and most real footgun notes
+  are already inline-rationale bullets, so the narrow window only costs the
+  odd heading-plus-separate-paragraph shape.
+- **`footguns` scope is the doc-graph ignore layers, NOT the leaks
+  git-tracking scope — do not copy the leaks scope model here.** It reuses the
+  same tracked-`.md` set `orphans`/`broken`/`untracked` use (`defaultIgnores` +
+  `.docauditignore` + `--ignore`) because `footguns` is a doc-quality check on
+  house documentation: an agent skill file under `.claude/` is runtime
+  tooling, not documentation, so its "footgun" usage is correctly out of
+  scope. Widening it to the leaks git-tracking scope would flag mentions
+  inside files that were never meant to be read as project documentation.
+- **The rationale vocabulary is a built-in Go constant
+  (`footgunRationaleSignals` in `internal/audit/footguns.go`), not a config
+  file.** Unlike `leaks`, these words aren't secret and don't vary per repo,
+  because they're a fixed set of English connectives ("because", "otherwise",
+  …) rather than an owner's private footprint, so a global TOML file would add
+  indirection with no privacy payoff. Anchor to the symbol — don't restate the
+  phrase list here, since a restated copy would drift out of sync the next
+  time the constant changes.
 
 ## Doc models (why `--skip` exists)
 
@@ -123,6 +156,10 @@ Repos fall into models the orphan check treats differently:
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
 
+A repo that doesn't use the footgun-with-rationale convention at all runs with
+`--skip footguns`, because enforcing a convention the repo never adopted would
+just be noise — parallel to `--skip orphans` for model B.
+
 ## Roots
 
 Auto = tracked ones of `{CLAUDE.md, README.md, AGENTS.md, docs/index.md}` +
@@ -134,12 +171,13 @@ docs/" with zero config.
 - `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers), `leaks.go` (TOML config decode + dir-scoped
-  content scan), `audit.go` (`Audit` → `Report`).
+  content scan), `footguns.go` (paragraph-scoped footgun-label scan),
+  `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
-  reinstalled automatically, so reinstall after changing the CLI or the local binary
-  runs stale logic.
+  reinstalled automatically, because `go install` only runs when invoked — so
+  reinstall after changing the CLI or the local binary runs stale logic.
 
 ## Branching & releases
 
@@ -155,7 +193,7 @@ docs/" with zero config.
 - **Cut a release** from `dev` with `VERSION` bumped + committed: `just release` runs
   `gate`, fast-forwards `main`, tags `v<VERSION>`, and publishes the GitHub release.
 
-## Footgun — the gate must find its own binary under a minimal PATH
+## Footgun — the gate must find its own binary under a minimal PATH <!-- footgun-ok: section title, not a claim -->
 
 The pre-push hook `hookScript` generates must resolve docaudit via PATH **and**
 the Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone. Git

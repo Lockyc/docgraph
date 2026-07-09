@@ -374,8 +374,8 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks, f
 	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
 	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
 	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
-	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, or a configured leak pattern matched")
-	fmt.Fprintln(w, "in tracked content.")
+	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, a configured leak pattern matched in")
+	fmt.Fprintln(w, "tracked content, or a \"footgun\" documented without a nearby rationale.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Fix the findings listed above:")
 	if orphans {

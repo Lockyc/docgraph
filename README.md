@@ -21,7 +21,7 @@ via `.docauditignore`. The `leaks` check is broader: it scans *all* tracked file
 
 ## Checks
 
-All four run by default. Exclude one with `--skip <check[,check]>` (e.g. a
+All five run by default. Exclude one with `--skip <check[,check]>` (e.g. a
 nav-driven MkDocs repo runs `--skip orphans`). A newly-added check is enforced
 everywhere automatically — there is no run-list to update.
 
@@ -37,6 +37,9 @@ everywhere automatically — there is no run-list to update.
    absent from clones, the built site, and any mirror.
 4. **Leaks** — tracked file *content* matching a configured leak pattern (see
    below). Scans file content rather than the doc graph.
+5. **Footguns** — a "footgun" mention in tracked markdown whose enclosing
+   paragraph carries no rationale (see below). A label without its reason is
+   worse than no label.
 
 ### `leaks` — the content scan
 
@@ -103,6 +106,26 @@ no rules and the scan is a no-op there (it stays a local pre-push gate).
 **Known gaps:** no git-history scan (rewriting history is the owner's call — use the
 manual leak-audit skill), no per-rule messages.
 
+### `footguns` — the label check <!-- footgun-ok: section title, not a claim -->
+
+Flags every `footgun`/`footguns` mention in tracked markdown whose *enclosing
+paragraph* carries neither a rationale signal (`because`, `otherwise`, `so that`,
+`the reason`, `would break`, `re-litigat...`, `the trap`) nor an explicit
+`<!-- footgun-ok -->` acknowledgment comment. Runs by default; `--skip footguns`
+turns it off. Scope is the same tracked-`.md`-under-the-doc-graph-ignore-layers
+set as the orphan check (`defaultIgnores` + `.docauditignore` + `--ignore`), not
+the leaks git-tracking scope — a `.claude/` skill file isn't house documentation.
+
+It is a **heuristic, not a judge**: it catches the bare-assertion case (a
+footgun named with no "why" anywhere nearby) but cannot rank whether a given
+rationale is actually *good* — that's a judgment call docaudit, being
+deterministic, doesn't make. On a finding, ask two questions: (1) is this a
+real footgun — a trap you hit, a tempting-but-wrong approach, a re-litigated
+decision? (2) is it at the right doc level — an invariant belongs in
+`CLAUDE.md`, in-depth rationale in `docs/`, human-facing prose in `README`? If
+yes to both, state the "why" inline or add the ack marker; if not, reword it as
+a plain note or move it.
+
 ## Install
 
 ```bash
@@ -165,6 +188,10 @@ their way through `docs/`). That fits most repos. Two exceptions:
 - Repos with genuinely unreferenced design docs will report real orphans — link
   them from `CLAUDE.md`/`README`, or accept and exclude with `--skip orphans`.
 
+Repos that don't use the footgun-with-rationale convention at all can likewise
+run with `--skip footguns`, because there's no rationale-labeling scheme to
+check against.
+
 ### Entry points (roots)
 
 Reachability starts from whichever of `CLAUDE.md`, `README.md`, `AGENTS.md`
@@ -216,6 +243,8 @@ PATH — GUI clients and sandboxed agents often push with a bare PATH that omits
 `~/go/bin`, and a `command -v`-only hook would then fail-closed for the wrong
 reason (tool present but unseen).
 
-Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
-`internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers, the
-`Audit` orchestrator, and the leak scanner). See `CLAUDE.md` for design invariants.
+Layout: `main.go` is a thin CLI (flags → audit → report → exit code), because
+keeping flag-parsing and reporting separate from the audit logic lets the
+checks be tested without a CLI in the loop; `internal/audit/` holds that logic
+(link parsing, glob-ignore, git wrappers, the `Audit` orchestrator, the leak
+scanner, and the footgun scanner). See `CLAUDE.md` for design invariants.
