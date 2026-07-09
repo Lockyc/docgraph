@@ -77,16 +77,25 @@ terms within that subtree.
     path  = "/abs/path/to/repo/sub"
     allow = ["some-project"]          # legit in this subtree
 
-The footprint list and its exclusions are global (machine-local), so in CI / a
-fresh clone (no file) the scan degrades to the built-in patterns only. A small
-built-in set of unambiguous secret shapes (PEM headers, AWS `AKIA…`, GitHub
-`ghp_…`, Slack `xox…`) always runs and is suppressible with `allow`/`ignore`.
+**The config is the sole source of rules** — there are no hidden built-in patterns.
+Generic secret shapes (PEM headers, AWS `AKIA…`, GitHub `ghp_…`, Slack `xox…`) are
+just `regex` entries you add; use a leading `(?-i)` to keep them case-sensitive:
+
+    regex = [
+      '(?-i)-----BEGIN [A-Z ]*PRIVATE KEY-----',
+      '(?-i)AKIA[0-9A-Z]{16}',
+      '(?-i)ghp_[A-Za-z0-9]{36}',
+      '(?-i)xox[baprs]-[A-Za-z0-9-]{10,}',
+    ]
+
+The config is global (machine-local), so in CI / a fresh clone (no file) there are
+no rules and the scan is a no-op there (it stays a local pre-push gate).
 
 **Config handling** (leaks runs by default, incl. in CI, which has no global file):
-- **No config file** → scans with the built-in patterns only and prints a
-  warning; **not** fatal. Baseline secret detection is always on; define your
-  global file (or pass `--leaks-config`) to enforce your own footprint patterns —
-  they take effect wherever that file exists (your local pre-push).
+- **No config file** → the leaks check has no rules, so it scans nothing and
+  prints a warning; **not** fatal (a hard-fail would brick every CI push). Define
+  your global file (or pass `--leaks-config`) to give the check its rules — they
+  take effect wherever that file exists (your local pre-push).
 - **Malformed config** (bad TOML, or a bad regex in `regex`/`allow_regex`) → exit 2 (fail-closed). A broken config is a
   real bug, not the common "not set up yet" case, so it fails loudly rather than
   silently degrading.

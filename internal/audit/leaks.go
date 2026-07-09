@@ -68,24 +68,6 @@ func regexMatcher(s string) (matcher, bool, error) {
 	return matcher{re: re, raw: s}, true, nil
 }
 
-// builtinLeakMatchers are the always-on generic secret shapes — a small baseline
-// net, not the primary feature. Suppressible by any allow/ignore. They stay
-// case-sensitive: these are fixed-case token shapes (an AWS key id is uppercase,
-// a `ghp_` prefix lowercase), so folding case would only add false positives.
-func builtinLeakMatchers() []matcher {
-	pats := []string{
-		`-----BEGIN [A-Z ]*PRIVATE KEY-----`,
-		`AKIA[0-9A-Z]{16}`,
-		`ghp_[A-Za-z0-9]{36}`,
-		`xox[baprs]-[A-Za-z0-9-]{10,}`,
-	}
-	ms := make([]matcher, 0, len(pats))
-	for _, p := range pats {
-		ms = append(ms, matcher{re: regexp.MustCompile(p), raw: p})
-	}
-	return ms
-}
-
 type compiledDir struct {
 	path   string // cleaned absolute
 	ignore []string
@@ -93,7 +75,7 @@ type compiledDir struct {
 }
 
 type compiledLeaks struct {
-	deny  []matcher // global terms + regex + built-ins
+	deny  []matcher // global terms + regex — the config is the sole source of rules
 	allow []matcher // global allow + allow_regex
 	dirs  []compiledDir
 }
@@ -145,7 +127,6 @@ func (c LeakConfig) compile() (compiledLeaks, error) {
 	if err := addRe(&cl.deny, c.Regex, "leaks regex"); err != nil {
 		return compiledLeaks{}, err
 	}
-	cl.deny = append(cl.deny, builtinLeakMatchers()...)
 	addLit(&cl.allow, c.Allow)
 	if err := addRe(&cl.allow, c.AllowRegex, "leaks allow_regex"); err != nil {
 		return compiledLeaks{}, err

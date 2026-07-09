@@ -10,8 +10,8 @@ import (
 )
 
 // noCfg returns a leaks-config path guaranteed not to exist, so a test that isn't
-// about leak rules stays deterministic (built-in patterns only) instead of picking
-// up the dev machine's real ~/.config/docaudit/leaks.
+// about leak rules stays deterministic (no rules → nothing scanned) instead of
+// picking up the dev machine's real ~/.config/docaudit/leaks.toml.
 func noCfg(dir string) string { return filepath.Join(dir, "no-leaks-cfg") }
 
 // The default config home is XDG (~/.config), not os.UserConfigDir() — which on
@@ -218,7 +218,7 @@ func TestRunNotAGitRepoExit2(t *testing.T) {
 }
 
 // Absent leak config is NON-fatal: leaks runs by default (incl. CI, which has no
-// global file), so it degrades to built-in patterns + a warning, not exit 2.
+// machine-local file), so it warns and scans nothing rather than exit 2.
 func TestRunLeaksAbsentConfigNonFatal(t *testing.T) {
 	dir := t.TempDir()
 	write := func(p, c string) {
@@ -238,13 +238,14 @@ func TestRunLeaksAbsentConfigNonFatal(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (absent config is non-fatal, no findings)\n%s", code, out.String())
 	}
-	if !strings.Contains(errb.String(), "no leak rules file") || !strings.Contains(errb.String(), "built-in") {
-		t.Errorf("want a warning about the absent config + built-in fallback, got: %s", errb.String())
+	if !strings.Contains(errb.String(), "no leak rules file") || !strings.Contains(errb.String(), "nothing is scanned") {
+		t.Errorf("want a warning that the absent config means nothing is scanned, got: %s", errb.String())
 	}
 }
 
-// Built-in secret patterns enforce even with no config file at all.
-func TestRunLeaksBuiltinsWithoutConfig(t *testing.T) {
+// The config is the sole source of rules: with no config, a secret-shaped string
+// is NOT flagged — there are no hidden built-in patterns to fall back on.
+func TestRunLeaksNoRulesWithoutConfig(t *testing.T) {
 	dir := t.TempDir()
 	write := func(p, c string) {
 		full := filepath.Join(dir, filepath.FromSlash(p))
@@ -261,11 +262,11 @@ func TestRunLeaksBuiltinsWithoutConfig(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (built-in AWS pattern fires without a config)\n%s", code, out.String())
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (no config → no rules → nothing flagged)\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("LEAKS (1)")) {
-		t.Errorf("missing LEAKS section from a built-in match:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("LEAKS (0)")) {
+		t.Errorf("a secret-shaped string must NOT be flagged without a configured rule:\n%s", out.String())
 	}
 }
 
@@ -294,8 +295,8 @@ func TestRunLeaksBadRegexExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (bad regex in config)\n%s", code, errb.String())
 	}
-	if strings.Contains(errb.String(), "built-in secret patterns only") {
-		t.Errorf("a bad-regex config must not degrade to built-ins: %s", errb.String())
+	if strings.Contains(errb.String(), "nothing is scanned") {
+		t.Errorf("a bad-regex config must fail, not degrade to the absent-config path: %s", errb.String())
 	}
 	if !strings.Contains(errb.String(), "leaks regex") {
 		t.Errorf("want the regex error surfaced, got: %s", errb.String())
@@ -311,8 +312,8 @@ func TestRunLeaksMalformedTomlExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (malformed TOML)\n%s", code, errb.String())
 	}
-	if strings.Contains(errb.String(), "built-in secret patterns only") {
-		t.Errorf("a malformed config must not degrade to built-ins: %s", errb.String())
+	if strings.Contains(errb.String(), "nothing is scanned") {
+		t.Errorf("a malformed config must fail, not degrade to the absent-config path: %s", errb.String())
 	}
 }
 

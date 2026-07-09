@@ -19,8 +19,8 @@ func TestCompileLeaksLiteralAndRegex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cl.deny) != 6 {
-		t.Errorf("deny = %d, want 6 (1 term + 1 regex + 4 built-in)", len(cl.deny))
+	if len(cl.deny) != 2 {
+		t.Errorf("deny = %d, want 2 (1 term + 1 regex; no hidden built-ins — config is the sole source)", len(cl.deny))
 	}
 	if len(cl.allow) != 2 {
 		t.Errorf("allow = %d, want 2", len(cl.allow))
@@ -119,25 +119,18 @@ func TestLeakScanGlobalAllowSuppresses(t *testing.T) {
 	}
 }
 
-func TestLeakScanBuiltinSuppressedByAllowRegex(t *testing.T) {
-	const token = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
-	dir := setupRepo(t, map[string]string{"README.md": "key " + token + "\n"}, []string{"README.md"})
-
-	// Bare: the built-in ghp_ pattern must fire (proves the fixture is a real match).
-	bare, err := LeakScan(dir, LeakConfig{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bare) != 1 || bare[0].Match != token {
-		t.Fatalf("built-in ghp_ should match, got %+v", bare)
-	}
-	// With an allow_regex covering it, the built-in match is suppressed.
-	found, err := LeakScan(dir, LeakConfig{AllowRegex: []string{`ghp_[A-Za-z0-9]{36}`}}, nil)
+// The config is the sole source of rules: an empty config scans nothing, even a
+// secret-shaped string — there are no hidden built-in patterns.
+func TestLeakScanEmptyConfigScansNothing(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"secrets.env": "AWS=AKIAIOSFODNN7EXAMPLE\nGH=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\n",
+	}, []string{"secrets.env"})
+	found, err := LeakScan(dir, LeakConfig{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(found) != 0 {
-		t.Errorf("allow_regex should suppress the built-in, got %+v", found)
+		t.Errorf("an empty config must scan nothing (no hidden built-ins), got %+v", found)
 	}
 }
 
@@ -147,7 +140,11 @@ func TestLeakScanDirIgnoreDropsFile(t *testing.T) {
 		"src.go":           "key AKIAIOSFODNN7EXAMPLE inside\n", // flagged
 	}, []string{"vendor/spec.json", "src.go"})
 
-	cfg := LeakConfig{Dir: []DirRule{{Path: dir, Ignore: []string{"vendor/*.json"}}}}
+	// The rule comes from the config, not a built-in.
+	cfg := LeakConfig{
+		Regex: []string{`(?-i)AKIA[0-9A-Z]{16}`},
+		Dir:   []DirRule{{Path: dir, Ignore: []string{"vendor/*.json"}}},
+	}
 	found, err := LeakScan(dir, cfg, nil)
 	if err != nil {
 		t.Fatal(err)

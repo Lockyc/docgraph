@@ -48,16 +48,20 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   case-insensitive by default — opt out per-pattern with `(?-i)`; a leak must be
   caught in any casing) / `allow` / `allow_regex` deny-and-exception arrays, plus
   `[[dir]]` sections that scope an `ignore`/`allow`/`allow_regex` set to files
-  under an absolute `path` (a leading `~/` expands). Because leaks runs by default
-  (incl. in CI, which has no global file), an **absent** config is NOT fatal — it
-  degrades to the built-in patterns plus a warning; a **malformed** config (bad
-  TOML, a bad regexp in any `regex`/`allow_regex` field, or a non-absolute
-  `[[dir]]` `path`) IS fatal (exit 2), since that's a real bug, not the common
-  "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks
-  being default-on means a missing global file is the normal CI/fresh-clone
-  state, and failing there would brick every push. Built-in secret patterns
-  (PEM/AWS/GitHub/Slack shapes) always run and are suppressible by `allow`/
-  `allow_regex`. History is out of scope (owner's call); that stays with the
+  under an absolute `path` (a leading `~/` expands). **The config is the SOLE
+  source of rules — there are NO hardcoded built-in patterns.** Generic secret
+  shapes (PEM/AWS/GitHub/Slack) are just `regex` entries the owner adds (with a
+  leading `(?-i)` to keep them case-sensitive); the binary ships none. Because
+  leaks runs by default (incl. in CI, which has no machine-local file), an
+  **absent** config is NOT fatal — with no rules the scan is a no-op plus a
+  warning; a **malformed** config (bad TOML, a bad regexp in any
+  `regex`/`allow_regex` field, or a non-absolute `[[dir]]` `path`) IS fatal
+  (exit 2), since that's a real bug, not the common "not set up yet" case. Do NOT
+  restore hard-fail-on-absent: leaks being default-on means a missing global file
+  is the normal CI/fresh-clone state, and failing there would brick every push.
+  Do NOT reintroduce hardcoded built-in patterns either — the config being the
+  single visible source of truth is the point (rules hidden in the binary can't be
+  seen or tuned). History is out of scope (owner's call); that stays with the
   manual `pre-public-leak-audit` skill.
 - **Enforce-by-default, exclude explicitly — never an opt-in/include model.**
   Every check runs by default; `--skip <check[,check]>` is the only way to not run

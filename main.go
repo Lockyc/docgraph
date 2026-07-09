@@ -197,10 +197,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		cfg, err := loadLeakConfig(cfgPath)
 		if errors.Is(err, os.ErrNotExist) {
 			// Absent config is NOT fatal: leaks runs by default (incl. CI, which has
-			// no global file). Built-in secret patterns still run — baseline
-			// enforcement — and the warning nudges the owner to define their footprint.
-			fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — scanning with built-in secret patterns only;\n", cfgPath)
-			fmt.Fprintln(stderr, "  add one (or pass --leaks-config) to enforce your own footprint patterns.")
+			// no machine-local config), so a hard-fail would brick every push there.
+			// The config is the sole source of rules — with none, the scan is a no-op,
+			// and the warning nudges the owner to define their footprint file.
+			fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — the leaks check has no rules, so nothing is scanned;\n", cfgPath)
+			fmt.Fprintln(stderr, "  add one (or pass --leaks-config) to define your leak patterns.")
 			cfg = audit.LeakConfig{}
 		} else if err != nil {
 			// Present-but-malformed TOML IS fatal: a real config bug, not "not set up yet".
