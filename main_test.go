@@ -344,3 +344,47 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 		t.Errorf("missing LEAKS section:\n%s", out.String())
 	}
 }
+
+func mkFootgunRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	full := filepath.Join(dir, "CLAUDE.md")
+	if err := os.WriteFile(full, []byte("- Footgun: no rationale here at all.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("init")
+	git("add", "CLAUDE.md")
+	return dir
+}
+
+func TestRunFootgunFindingFailsNonZero(t *testing.T) {
+	dir := mkFootgunRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("want exit 1 on footgun finding, got %d\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("FOOTGUNS (1)")) {
+		t.Fatalf("want a FOOTGUNS section, got:\n%s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("no rationale here at all")) {
+		t.Fatalf("want the offending line text in the report, got:\n%s", out.String())
+	}
+}
+
+func TestRunSkipFootguns(t *testing.T) {
+	dir := mkFootgunRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{"--skip", "footguns", "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("--skip footguns should pass, got %d\n%s", code, out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("FOOTGUNS")) {
+		t.Fatalf("skipped check must not print its section:\n%s", out.String())
+	}
+}

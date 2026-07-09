@@ -149,7 +149,7 @@ fi
 `
 }
 
-var checkNames = []string{"orphans", "broken", "untracked", "leaks"}
+var checkNames = []string{"orphans", "broken", "untracked", "leaks", "footguns"}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
@@ -160,7 +160,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
-	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
+	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,footguns)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -215,7 +215,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
-	findings := printReport(stdout, rep, leaks, selected)
+	var footguns []audit.FootgunFinding
+	if selected["footguns"] {
+		footguns, err = audit.FootgunScan(root, ignores)
+		if err != nil {
+			fmt.Fprintf(stderr, "docaudit: %v\n", err)
+			return 2
+		}
+	}
+	findings := printReport(stdout, rep, leaks, footguns, selected)
 	if findings {
 		return 1
 	}
@@ -284,10 +292,10 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // what docaudit is, what a finding means, why a non-zero exit aborts a push, and
 // how to remediate. The banner prints always; the explain-and-remediate footer
 // only on findings, so green/CI runs stay terse.
-func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
+func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, footguns []audit.FootgunFinding, sel map[string]bool) bool {
 	fmt.Fprintln(w, "docaudit — enforces agent-facing repo hygiene: doc-graph reachability")
-	fmt.Fprintln(w, "(orphans/broken/untracked .md) plus a content scan for configured leak patterns.")
-	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
+	fmt.Fprintln(w, "(orphans/broken/untracked .md), a content scan for configured leak patterns,")
+	fmt.Fprintln(w, "and a footgun-label check. All checks run by default; exclude one with --skip.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
 	if sel["orphans"] {
@@ -318,12 +326,20 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		}
 		fmt.Fprintln(w)
 	}
+	if sel["footguns"] {
+		fmt.Fprintf(w, "FOOTGUNS (%d) — \"footgun\" documented without a nearby rationale:\n", len(footguns))
+		for _, fg := range footguns {
+			fmt.Fprintf(w, "  %s:%d → %s\n", fg.File, fg.Line, fg.Text)
+		}
+		fmt.Fprintln(w)
+	}
 
 	orphans := sel["orphans"] && len(r.Orphans) > 0
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
 	leaksFound := sel["leaks"] && len(leaks) > 0
-	if !orphans && !broken && !untracked && !leaksFound {
+	footgunsFound := sel["footguns"] && len(footguns) > 0
+	if !orphans && !broken && !untracked && !leaksFound && !footgunsFound {
 		fmt.Fprintln(w, "clean ✓")
 		return false
 	}
@@ -341,7 +357,10 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	if sel["leaks"] {
 		n += len(leaks)
 	}
-	printFailureFooter(w, n, orphans, broken, untracked, leaksFound)
+	if sel["footguns"] {
+		n += len(footguns)
+	}
+	printFailureFooter(w, n, orphans, broken, untracked, leaksFound, footgunsFound)
 	return true
 }
 
@@ -349,7 +368,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bool) {
+func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks, footguns bool) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
@@ -372,6 +391,15 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bo
 	if leaks {
 		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
 		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
+	}
+	if footguns {
+		fmt.Fprintln(w, "  FOOTGUN   → \"footgun\" documented without a nearby rationale. Confirm two things:")
+		fmt.Fprintln(w, "              (1) Is it a real footgun? — a trap you hit, a tempting-but-wrong")
+		fmt.Fprintln(w, "                  approach, or a re-litigated decision, recorded WITH its rationale.")
+		fmt.Fprintln(w, "              (2) Is it at the right level? — an invariant/footgun belongs in")
+		fmt.Fprintln(w, "                  CLAUDE.md; in-depth rationale in docs/; human-facing prose in README.")
+		fmt.Fprintln(w, "              If yes to both: state the \"why\" inline, or mark <!-- footgun-ok -->.")
+		fmt.Fprintln(w, "              If not: reword as a plain note, or move it to the right doc.")
 	}
 	fmt.Fprintln(w, bar)
 }
