@@ -84,7 +84,7 @@ built-in set of unambiguous secret shapes (PEM headers, AWS `AKIA…`, GitHub
   warning; **not** fatal. Baseline secret detection is always on; define your
   global file (or pass `--leaks-config`) to enforce your own footprint patterns —
   they take effect wherever that file exists (your local pre-push).
-- **Malformed config** (a bad regex) → exit 2 (fail-closed). A broken config is a
+- **Malformed config** (bad TOML, or a bad regex in `regex`/`allow_regex`) → exit 2 (fail-closed). A broken config is a
   real bug, not the common "not set up yet" case, so it fails loudly rather than
   silently degrading.
 
