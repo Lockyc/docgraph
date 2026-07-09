@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -70,4 +73,104 @@ func ParseLeakRules(r io.Reader) (LeakRules, error) {
 		return LeakRules{}, err
 	}
 	return rules, nil
+}
+
+func builtinLeakRules() []LeakRule {
+	pats := []string{
+		`-----BEGIN [A-Z ]*PRIVATE KEY-----`, // PEM private key header
+		`AKIA[0-9A-Z]{16}`,                    // AWS access key id
+		`ghp_[A-Za-z0-9]{36}`,                 // GitHub personal access token
+		`xox[baprs]-[A-Za-z0-9-]{10,}`,        // Slack token
+	}
+	rs := make([]LeakRule, 0, len(pats))
+	for _, p := range pats {
+		rs = append(rs, LeakRule{re: regexp.MustCompile(p), raw: p})
+	}
+	return rs
+}
+
+// looksBinary reports whether a head chunk contains a NUL byte.
+func looksBinary(b []byte) bool {
+	if len(b) > 8000 {
+		b = b[:8000]
+	}
+	for _, c := range b {
+		if c == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// LeakScan walks tracked files and reports every line span matching a deny rule
+// (user rules + built-ins) that no allow rule covers. Binary and ignored files
+// (defaults + .docauditignore + extraIgnores) are skipped. History is never read.
+func LeakScan(repoRoot string, rules LeakRules, extraIgnores []string) ([]LeakFinding, error) {
+	rules.deny = append(rules.deny, builtinLeakRules()...)
+	globs, err := loadIgnores(repoRoot, extraIgnores)
+	if err != nil {
+		return nil, err
+	}
+	files, err := gitLines(repoRoot, "ls-files")
+	if err != nil {
+		return nil, err
+	}
+	var findings []LeakFinding
+	for _, f := range files {
+		if matchesIgnore(f, globs) {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(f)))
+		if err != nil || looksBinary(b) {
+			continue
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			findings = append(findings, scanLine(f, i+1, line, rules)...)
+		}
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].File != findings[j].File {
+			return findings[i].File < findings[j].File
+		}
+		if findings[i].Line != findings[j].Line {
+			return findings[i].Line < findings[j].Line
+		}
+		return findings[i].Match < findings[j].Match
+	})
+	return findings, nil
+}
+
+// scanLine returns findings for one line: deny matches not covered by an allow
+// span. A deny span [s,e) is covered iff some allow rule matches a span [as,ae)
+// with as<=s && ae>=e (e.g. `lsjc` inside an allowed `au.lsjc.curator`).
+func scanLine(file string, lineNo int, line string, rules LeakRules) []LeakFinding {
+	var allowSpans [][]int
+	for _, a := range rules.allow {
+		allowSpans = append(allowSpans, a.re.FindAllStringIndex(line, -1)...)
+	}
+	covered := func(s, e int) bool {
+		for _, sp := range allowSpans {
+			if sp[0] <= s && sp[1] >= e {
+				return true
+			}
+		}
+		return false
+	}
+	var out []LeakFinding
+	seen := map[string]bool{}
+	for _, d := range rules.deny {
+		for _, loc := range d.re.FindAllStringIndex(line, -1) {
+			if covered(loc[0], loc[1]) {
+				continue
+			}
+			m := line[loc[0]:loc[1]]
+			key := fmt.Sprintf("%d:%s:%s", loc[0], m, d.raw)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, LeakFinding{File: file, Line: lineNo, Match: m, Pattern: d.raw})
+		}
+	}
+	return out
 }
