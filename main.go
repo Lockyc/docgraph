@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/lockyc/docaudit/internal/audit"
@@ -162,6 +163,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
 	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
+	config := fs.String("config", "", "path to the global config.toml, holding [log] (default: $DOCAUDIT_CONFIG or $XDG_CONFIG_HOME/docaudit/config.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -216,10 +218,78 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	findings := printReport(stdout, rep, leaks, selected)
+	exit := 0
 	if findings {
-		return 1
+		exit = 1
 	}
-	return 0
+	maybeLog(*config, "run", root, exit, rep, leaks, selected, stderr)
+	return exit
+}
+
+// maybeLog appends one usage record for this run when logging is opted in. It is
+// best-effort and side-channel: it never changes the exit code and never returns an
+// error. DOCAUDIT_NO_LOG short-circuits it. A malformed config.toml is warned about
+// and disables logging — NOT fatal, unlike a malformed leaks.toml: logging is
+// auxiliary, so a log-config typo must not block a push.
+func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []audit.LeakFinding, sel map[string]bool, stderr io.Writer) {
+	if os.Getenv("DOCAUDIT_NO_LOG") != "" {
+		return
+	}
+	cfgPath, err := resolveConfig(configFlag)
+	if err != nil {
+		return
+	}
+	logCfg, err := loadLogConfig(cfgPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return // absent config → logging silently off (the normal CI/clone state).
+	} else if err != nil {
+		fmt.Fprintf(stderr, "docaudit: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
+		return
+	}
+	if !logCfg.Active() {
+		return
+	}
+	logPath, err := audit.LogPath(logCfg.Path)
+	if err != nil {
+		return
+	}
+	rec := audit.BuildRecord(cmd, root, version, exit, rep, leaks, sel, logCfg.Level, time.Now())
+	_ = audit.LogRun(logPath, rec) // best-effort: a gate never fails because the log is unwritable.
+}
+
+// resolveConfig resolves the global config.toml: --config > $DOCAUDIT_CONFIG >
+// $XDG_CONFIG_HOME/docaudit/config.toml (else ~/.config/...). Same XDG discipline
+// as resolveLeaksConfig — never os.UserConfigDir() (wrong on macOS for a CLI tool).
+func resolveConfig(flagVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	if env := os.Getenv("DOCAUDIT_CONFIG"); env != "" {
+		return env, nil
+	}
+	dir := os.Getenv("XDG_CONFIG_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "docaudit", "config.toml"), nil
+}
+
+// loadLogConfig decodes the [log] table of config.toml. An absent file returns
+// os.ErrNotExist (the caller treats it as silently-off); a malformed file returns a
+// decode error the caller warns on without failing the run.
+func loadLogConfig(path string) (audit.LogConfig, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return audit.LogConfig{}, err
+	}
+	var fc struct {
+		Log audit.LogConfig `toml:"log"`
+	}
+	_, err := toml.DecodeFile(path, &fc)
+	return fc.Log, err
 }
 
 // parseSkip returns the set of checks to RUN: every check by default, minus the

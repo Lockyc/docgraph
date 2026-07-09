@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -342,5 +343,115 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("LEAKS (1)")) {
 		t.Errorf("missing LEAKS section:\n%s", out.String())
+	}
+}
+
+// TestMain isolates every test in this package from the dev machine's real
+// ~/.config and ~/.local/state, so a test can never read the owner's config.toml
+// or append junk to the real usage.jsonl if logging is enabled on this machine.
+func TestMain(m *testing.M) {
+	cfg, _ := os.MkdirTemp("", "docaudit-cfg")
+	state, _ := os.MkdirTemp("", "docaudit-state")
+	os.Setenv("XDG_CONFIG_HOME", cfg)
+	os.Setenv("XDG_STATE_HOME", state)
+	os.Unsetenv("DOCAUDIT_CONFIG")
+	os.Unsetenv("DOCAUDIT_LOG")
+	os.Unsetenv("DOCAUDIT_NO_LOG")
+	os.Unsetenv("DOCAUDIT_LEAKS")
+	code := m.Run()
+	os.RemoveAll(cfg)
+	os.RemoveAll(state)
+	os.Exit(code)
+}
+
+func TestResolveConfigXDG(t *testing.T) {
+	if got, _ := resolveConfig("/explicit/c.toml"); got != "/explicit/c.toml" {
+		t.Errorf("--config should win, got %q", got)
+	}
+	t.Setenv("DOCAUDIT_CONFIG", "/env/c.toml")
+	if got, _ := resolveConfig(""); got != "/env/c.toml" {
+		t.Errorf("$DOCAUDIT_CONFIG should win over XDG, got %q", got)
+	}
+	t.Setenv("DOCAUDIT_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	got, err := resolveConfig("")
+	if err != nil || got != filepath.Join("/xdg", "docaudit", "config.toml") {
+		t.Errorf("XDG default = %q (%v), want /xdg/docaudit/config.toml", got, err)
+	}
+}
+
+// A repo with a finding + logging enabled writes exactly one JSONL record.
+func TestRunLogsWhenEnabled(t *testing.T) {
+	dir := mkRepo(t) // broken link → exit 1
+	logf := filepath.Join(t.TempDir(), "usage.jsonl")
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(cfg, []byte("[log]\nenabled = true\nlevel = 1\npath = "+strconv.Quote(logf)+"\n"), 0o644)
+
+	var out, errb bytes.Buffer
+	code := run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
+	}
+	b, err := os.ReadFile(logf)
+	if err != nil {
+		t.Fatalf("log not written: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want 1 log line, got %d: %q", len(lines), b)
+	}
+	if !strings.Contains(lines[0], `"cmd":"run"`) || !strings.Contains(lines[0], `"exit":1`) ||
+		!strings.Contains(lines[0], `"broken":1`) {
+		t.Errorf("record missing expected fields: %s", lines[0])
+	}
+}
+
+// No config → logging silently off, nothing written (default state on CI/clones).
+func TestRunNoLogWhenConfigAbsent(t *testing.T) {
+	dir := mkRepo(t)
+	logf := filepath.Join(t.TempDir(), "usage.jsonl")
+	t.Setenv("DOCAUDIT_LOG", logf)
+	var out, errb bytes.Buffer
+	run([]string{"--config", noCfg(dir), "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if _, err := os.Stat(logf); !os.IsNotExist(err) {
+		t.Errorf("no config should mean no log file, but it exists (err=%v)", err)
+	}
+}
+
+// A malformed config.toml is NON-fatal for logging: it warns, disables logging, and
+// the run still returns its normal exit code — a log-config typo must not block a
+// push. (This is the deliberate divergence from leaks, where malformed is fatal.)
+func TestRunMalformedConfigNonFatal(t *testing.T) {
+	dir := mkRepo(t) // exit 1 on its own
+	logf := filepath.Join(t.TempDir(), "usage.jsonl")
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(cfg, []byte("[log]\nenabled = this is not valid toml\n"), 0o644)
+	t.Setenv("DOCAUDIT_LOG", logf)
+
+	var out, errb bytes.Buffer
+	code := run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (malformed log config must NOT change the exit code)\n%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "config") {
+		t.Errorf("want a warning mentioning the config problem, got: %s", errb.String())
+	}
+	if _, err := os.Stat(logf); !os.IsNotExist(err) {
+		t.Errorf("malformed config should disable logging (no file), but it exists")
+	}
+}
+
+// DOCAUDIT_NO_LOG=1 disables logging even when the config enables it.
+func TestRunNoLogEnvDisables(t *testing.T) {
+	dir := mkRepo(t)
+	logf := filepath.Join(t.TempDir(), "usage.jsonl")
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(cfg, []byte("[log]\nenabled = true\nlevel = 1\npath = "+strconv.Quote(logf)+"\n"), 0o644)
+	t.Setenv("DOCAUDIT_NO_LOG", "1")
+
+	var out, errb bytes.Buffer
+	run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if _, err := os.Stat(logf); !os.IsNotExist(err) {
+		t.Errorf("DOCAUDIT_NO_LOG=1 should suppress logging, but the file exists")
 	}
 }
