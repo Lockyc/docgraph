@@ -3,9 +3,11 @@
 A Go CLI that audits a repo's **agent-facing documentation graph**: orphans
 (tracked `docs/` files unreachable from the roots), broken internal `.md` links,
 and untracked `.md` files. Reachability follows markdown links **and** bare/
-inline-code path mentions. Exits non-zero on a finding in a selected check
-(`--checks`, default all three). Stdlib only; shells out to `git`. Usage and
-checks are in `README.md` — this file carries the invariants and footguns.
+inline-code path mentions. A fourth, opt-in `leaks` check scans tracked file
+content for configured leak patterns (see the footgun below). Exits non-zero on
+a finding in a selected check (`--checks`, default the three doc-graph checks;
+`leaks` is opt-in). Stdlib only; shells out to `git`. Usage and checks are in
+`README.md` — this file carries the invariants and footguns.
 
 ## Intended use
 
