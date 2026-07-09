@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/lockyc/docaudit/internal/audit"
 )
 
@@ -154,7 +155,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
 	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
-	leaksConfig := fs.String("leaks-config", "", "path to the global leak rules file (default: $DOCAUDIT_LEAKS or os.UserConfigDir()/docaudit/leaks)")
+	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or os.UserConfigDir()/docaudit/leaks.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -187,24 +188,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "docaudit: %v\n", err)
 			return 2
 		}
-		rules, err := loadLeakRules(cfgPath)
+		cfg, err := loadLeakConfig(cfgPath)
 		if errors.Is(err, os.ErrNotExist) {
 			// Absent config is NOT fatal: leaks runs by default (incl. CI, which has
-			// no global file), so a hard-fail would block every push. Built-in secret
-			// patterns still run — baseline enforcement — and the warning nudges the
-			// owner to define their footprint file for full coverage.
+			// no global file). Built-in secret patterns still run — baseline
+			// enforcement — and the warning nudges the owner to define their footprint.
 			fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — scanning with built-in secret patterns only;\n", cfgPath)
 			fmt.Fprintln(stderr, "  add one (or pass --leaks-config) to enforce your own footprint patterns.")
-			rules = audit.LeakRules{}
+			cfg = audit.LeakConfig{}
 		} else if err != nil {
-			// A present-but-malformed config IS fatal: it's a real config bug, not the
-			// common "not set up yet" case, so fail closed rather than silently degrade.
-			fmt.Fprintf(stderr, "docaudit: leaks rules file %s: %v\n", cfgPath, err)
+			// Present-but-malformed TOML IS fatal: a real config bug, not "not set up yet".
+			fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
 			return 2
 		}
-		leaks, err = audit.LeakScan(root, rules, ignores)
+		leaks, err = audit.LeakScan(root, cfg, ignores)
 		if err != nil {
-			fmt.Fprintf(stderr, "docaudit: %v\n", err)
+			// A bad regexp in an otherwise-valid config surfaces here — also fatal.
+			fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
 			return 2
 		}
 	}
@@ -255,16 +255,13 @@ func resolveLeaksConfig(flagVal string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "docaudit", "leaks"), nil
+	return filepath.Join(dir, "docaudit", "leaks.toml"), nil
 }
 
-func loadLeakRules(path string) (audit.LeakRules, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return audit.LeakRules{}, err
-	}
-	defer f.Close()
-	return audit.ParseLeakRules(f)
+func loadLeakConfig(path string) (audit.LeakConfig, error) {
+	var cfg audit.LeakConfig
+	_, err := toml.DecodeFile(path, &cfg)
+	return cfg, err
 }
 
 // printReport prints the sections for the checks being run and reports whether any
@@ -359,8 +356,8 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bo
 		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
 	}
 	if leaks {
-		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add a `!` allow-exception to your")
-		fmt.Fprintln(w, "              leak rules file if the match is legitimate.")
+		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
+		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
 	}
 	fmt.Fprintln(w, bar)
 }

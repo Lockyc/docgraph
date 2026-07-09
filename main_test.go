@@ -237,18 +237,32 @@ func TestRunLeaksBuiltinsWithoutConfig(t *testing.T) {
 
 func TestRunLeaksBadRegexExit2(t *testing.T) {
 	dir := gitInit(t)
-	cfg := filepath.Join(dir, "leaks.rules")
-	os.WriteFile(cfg, []byte("(unclosed\n"), 0o644)
+	cfg := filepath.Join(dir, "leaks.toml")
+	os.WriteFile(cfg, []byte("regex = ['(unclosed']\n"), 0o644)
 	var out, errb bytes.Buffer
 	code := run([]string{"--leaks-config", cfg, dir}, &out, &errb)
 	if code != 2 {
-		t.Fatalf("exit = %d, want 2 (malformed rules file)\n%s", code, errb.String())
+		t.Fatalf("exit = %d, want 2 (bad regex in config)\n%s", code, errb.String())
 	}
 	if strings.Contains(errb.String(), "built-in secret patterns only") {
-		t.Errorf("an existing-but-malformed rules file must not degrade to built-ins: %s", errb.String())
+		t.Errorf("a bad-regex config must not degrade to built-ins: %s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "bad regex") {
-		t.Errorf("want the parse error surfaced, got: %s", errb.String())
+	if !strings.Contains(errb.String(), "leaks regex") {
+		t.Errorf("want the regex error surfaced, got: %s", errb.String())
+	}
+}
+
+func TestRunLeaksMalformedTomlExit2(t *testing.T) {
+	dir := gitInit(t)
+	cfg := filepath.Join(dir, "leaks.toml")
+	os.WriteFile(cfg, []byte("this is not = valid = toml\n"), 0o644)
+	var out, errb bytes.Buffer
+	code := run([]string{"--leaks-config", cfg, dir}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (malformed TOML)\n%s", code, errb.String())
+	}
+	if strings.Contains(errb.String(), "built-in secret patterns only") {
+		t.Errorf("a malformed config must not degrade to built-ins: %s", errb.String())
 	}
 }
 
@@ -262,8 +276,8 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 		os.WriteFile(full, []byte(c), 0o644)
 	}
 	write("README.md", "reach us at admin@lsjc.au today\n")
-	cfg := filepath.Join(dir, "leaks.rules")
-	os.WriteFile(cfg, []byte("lsjc\\.au\n"), 0o644)
+	cfg := filepath.Join(dir, "leaks.toml")
+	os.WriteFile(cfg, []byte("terms = [\"lsjc.au\"]\n"), 0o644)
 	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
