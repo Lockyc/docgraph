@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -152,7 +153,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		rules, err := loadLeakRules(cfgPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "docaudit: leaks selected but no rules file at %s — create it or pass --leaks-config\n", cfgPath)
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintf(stderr, "docaudit: leaks selected but no rules file at %s — create it or pass --leaks-config\n", cfgPath)
+			} else {
+				fmt.Fprintf(stderr, "docaudit: leaks rules file %s: %v\n", cfgPath, err)
+			}
 			return 2
 		}
 		leaks, err = audit.LeakScan(root, rules, ignores)
@@ -292,8 +297,9 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bo
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
 	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
-	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a doc-graph problem (a doc an agent")
-	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md) — not a code problem.")
+	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
+	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, or a configured leak pattern matched")
+	fmt.Fprintln(w, "in tracked content.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Fix the findings listed above:")
 	if orphans {

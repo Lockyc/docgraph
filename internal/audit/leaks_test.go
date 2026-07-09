@@ -27,6 +27,16 @@ lsjc\.au
 	}
 }
 
+func TestParseLeakRulesPureCommentAllowSkipped(t *testing.T) {
+	rules, err := ParseLeakRules(strings.NewReader("!  # note\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules.allow) != 0 {
+		t.Errorf("allow = %d, want 0 (pure-comment allow line must not compile a rule)", len(rules.allow))
+	}
+}
+
 func TestParseLeakRulesBadRegex(t *testing.T) {
 	_, err := ParseLeakRules(strings.NewReader("valid\n(unclosed\n"))
 	if err == nil || !strings.Contains(err.Error(), "line 2") {

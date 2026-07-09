@@ -55,7 +55,7 @@ func ParseLeakRules(r io.Reader) (LeakRules, error) {
 			line = strings.TrimSpace(line[1:])
 		}
 		pat := strings.TrimSpace(stripInlineComment(line))
-		if pat == "" {
+		if pat == "" || strings.HasPrefix(pat, "#") {
 			continue
 		}
 		re, err := regexp.Compile(pat)
@@ -106,7 +106,8 @@ func looksBinary(b []byte) bool {
 // (user rules + built-ins) that no allow rule covers. Binary and ignored files
 // (defaults + .docauditignore + extraIgnores) are skipped. History is never read.
 func LeakScan(repoRoot string, rules LeakRules, extraIgnores []string) ([]LeakFinding, error) {
-	rules.deny = append(rules.deny, builtinLeakRules()...)
+	deny := append(append([]LeakRule{}, rules.deny...), builtinLeakRules()...)
+	scanRules := LeakRules{deny: deny, allow: rules.allow}
 	globs, err := loadIgnores(repoRoot, extraIgnores)
 	if err != nil {
 		return nil, err
@@ -125,7 +126,7 @@ func LeakScan(repoRoot string, rules LeakRules, extraIgnores []string) ([]LeakFi
 			continue
 		}
 		for i, line := range strings.Split(string(b), "\n") {
-			findings = append(findings, scanLine(f, i+1, line, rules)...)
+			findings = append(findings, scanLine(f, i+1, line, scanRules)...)
 		}
 	}
 	sort.Slice(findings, func(i, j int) bool {

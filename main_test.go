@@ -159,6 +159,23 @@ func TestRunLeaksNoConfigExit2(t *testing.T) {
 	}
 }
 
+func TestRunLeaksBadRegexExit2(t *testing.T) {
+	dir := gitInit(t)
+	cfg := filepath.Join(dir, "leaks.rules")
+	os.WriteFile(cfg, []byte("(unclosed\n"), 0o644)
+	var out, errb bytes.Buffer
+	code := run([]string{"--checks", "leaks", "--leaks-config", cfg, dir}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (malformed rules file)\n%s", code, errb.String())
+	}
+	if strings.Contains(errb.String(), "no rules file") {
+		t.Errorf("an existing-but-malformed rules file must not be reported as missing: %s", errb.String())
+	}
+	if !strings.Contains(errb.String(), "bad regex") {
+		t.Errorf("want the parse error surfaced, got: %s", errb.String())
+	}
+}
+
 func TestRunLeaksFindingExit1(t *testing.T) {
 	dir := t.TempDir()
 	write := func(p, c string) {
