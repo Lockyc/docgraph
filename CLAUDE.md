@@ -64,12 +64,18 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   seen or tuned). History scrubbing is now supported by **exporting** rules for an
   external rewriter — `docaudit leaks-rules` emits a `git-filter-repo --replace-text`
   file from the config (terms → `regex:(?i)…` escaped; `regex` kept case-insensitive
-  unless it has `(?-i)`; `allow`/`allow_regex`/`[[dir]]` **dropped with a stderr
-  warning**, since filter-repo rewrites by content across all paths/history and
-  can't honor a span or path exception). docaudit itself still **never reads or
-  rewrites history** — `leaks-rules` reads only the TOML; the destructive rewrite is
-  a separate external step. History *detection* remains out of scope (owner's call);
-  that stays with the manual `pre-public-leak-audit` skill.
+  unless it has a leading `(?-i)`; `allow`/`allow_regex`/`[[dir]]` **dropped with a
+  stderr warning**, since filter-repo rewrites by content across all paths/history and
+  can't honor a span or path exception). Emitted rules target filter-repo's **Python
+  `re` engine**, not Go/RE2: a leading `(?-i)` is normalized to a plain
+  case-sensitive rule rather than emitted verbatim, because Python `re` rejects a
+  bare `(?-i)` flag-clear that Go/RE2 accepts and would otherwise abort the whole
+  rewrite — a `(?-i)` anywhere else in a pattern, or other RE2-only syntax, has no
+  such normalization and needs manual review before running the rewrite. docaudit
+  itself still **never reads or rewrites history** — `leaks-rules` reads only the
+  TOML; the destructive rewrite is a separate external step. History *detection*
+  remains out of scope (owner's call); that stays with the manual
+  `pre-public-leak-audit` skill.
 - **Enforce-by-default, exclude explicitly — never an opt-in/include model.**
   Every check runs by default; `--skip <check[,check]>` is the only way to not run
   one. The removed `--checks` (include-list) flag could not enforce: a check added

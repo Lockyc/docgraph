@@ -22,8 +22,12 @@ func TestReplaceTextRulesRegexDefaultGetsCaseInsensitivePrefix(t *testing.T) {
 }
 
 func TestReplaceTextRulesRegexOptOutKeepsCaseSensitive(t *testing.T) {
+	// A leading (?-i) is docaudit's documented case-sensitive opt-out, but
+	// git-filter-repo compiles regex: lines with Python re, which rejects a bare
+	// (?-i) flag-clear. The flag must be stripped rather than emitted verbatim,
+	// leaving a plain case-sensitive pattern.
 	lines, _ := ReplaceTextRules(LeakConfig{Regex: []string{`(?-i)AKIA[0-9A-Z]{16}`}})
-	want := []string{`regex:(?-i)AKIA[0-9A-Z]{16}`}
+	want := []string{`regex:AKIA[0-9A-Z]{16}`}
 	if !reflect.DeepEqual(lines, want) {
 		t.Errorf("got %q, want %q", lines, want)
 	}

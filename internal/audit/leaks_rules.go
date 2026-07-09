@@ -16,8 +16,11 @@ type Dropped struct {
 // ReplaceTextRules translates a LeakConfig's DENY vocabulary into git-filter-repo
 // --replace-text lines. Each line is `regex:<pat>`, using filter-repo's default
 // ***REMOVED*** replacement. terms are regexp-escaped and made case-insensitive
-// ((?i)); regex entries also get a (?i) prefix unless they already opt out with an
-// explicit (?-i) — mirroring regexMatcher's case-folding (leaks.go:60). Output is
+// ((?i)); regex entries also get a (?i) prefix unless they already opt out with a
+// leading (?-i) — mirroring regexMatcher's case-folding (leaks.go:60). A leading
+// (?-i) is stripped rather than emitted verbatim: filter-repo compiles regex: lines
+// with Python re, which rejects the bare (?-i) flag-clear that Go/RE2 accepts, so
+// the opt-out is normalized to a plain case-sensitive pattern instead. Output is
 // deterministic (terms then regex, in config order) and de-duped; whitespace-only
 // entries are skipped, matching the scan.
 //
@@ -42,8 +45,13 @@ func ReplaceTextRules(cfg LeakConfig) (lines []string, dropped Dropped) {
 		if strings.TrimSpace(r) == "" {
 			continue
 		}
-		if strings.Contains(r, "(?-i)") {
-			add("regex:" + r)
+		if strings.HasPrefix(r, "(?-i)") {
+			// A leading (?-i) is docaudit's documented case-sensitive opt-out. But
+			// git-filter-repo compiles with Python re, which REJECTS a bare (?-i)
+			// flag-clear that Go/RE2 accepts — emitting the pattern verbatim aborts the
+			// whole rewrite. Strip the flag and emit a plain case-sensitive rule, which
+			// is Python-valid and matches the scan's semantics for a leading opt-out.
+			add("regex:" + strings.TrimPrefix(r, "(?-i)"))
 		} else {
 			add("regex:(?i)" + r)
 		}
