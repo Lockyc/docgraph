@@ -632,3 +632,39 @@ func TestFootgunsNotInStateChecks(t *testing.T) {
 		t.Fatal("footguns must NOT be a whole-state check")
 	}
 }
+
+func TestDocDriftSubcommandBlocksOnDrift(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n"},
+		map[string]string{"x.go": "package x\n"},
+	)
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	if code != 2 {
+		t.Fatalf("doc-drift blocks -> want exit 2, got %d\nstderr:\n%s", code, errb.String())
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("doc-drift")) || !bytes.Contains(errb.Bytes(), []byte("OldWidget")) {
+		t.Fatalf("want a doc-drift finding on stderr naming OldWidget, got:\n%s", errb.String())
+	}
+}
+
+func TestDocDriftSubcommandSilentWhenClean(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\nmore prose\n"},
+	)
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 || errb.Len() != 0 {
+		t.Fatalf("no drift -> want exit 0 and no stderr, got %d\n%s", code, errb.String())
+	}
+}
+
+func TestDocDriftOffKillSwitch(t *testing.T) {
+	t.Setenv("DOC_DRIFT_OFF", "1")
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{"--range", "a..b", "/nonexistent"}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("DOC_DRIFT_OFF=1 -> want exit 0 before any work, got %d", code)
+	}
+}

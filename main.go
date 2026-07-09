@@ -31,6 +31,8 @@ func main() {
 			os.Exit(runLeaksRules(args[1:], os.Stdout, os.Stderr))
 		case "footgun-drift":
 			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
+		case "doc-drift":
+			os.Exit(runDocDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -638,4 +640,107 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	fmt.Fprintln(w, "If any is just a note-just-in-case, reword it as a plain note or remove it (a")
 	fmt.Fprintln(w, "follow-up commit is fine — docaudit did not hold the push).")
 	fmt.Fprintln(w, bar)
+}
+
+// runDocDrift is the Stop-hook subcommand: it flags dangling doc references and
+// anchored value drift over the branch's working-tree-inclusive diff, and BLOCKS
+// the Stop (exit 2, message on stderr) on any finding. Contrast footgun-drift,
+// which is advisory. Bare invocation resolves the diff base and applies the
+// once-per-HEAD loop-guard (Task 5); --range runs a deterministic, guard-free
+// check for manual use.
+func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if os.Getenv("DOC_DRIFT_OFF") != "" {
+		return 0
+	}
+	fs := flag.NewFlagSet("docaudit doc-drift", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rangeFlag := fs.String("range", "", "explicit git-diff spec (base, base..head) — bypasses the loop-guard")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
+	}
+	// Drain the Stop payload (bare mode sends JSON on stdin); unused.
+	_, _ = io.Copy(io.Discard, stdin)
+
+	root, err := audit.GitRoot(path)
+	if err != nil {
+		return 0 // not a work-tree (e.g. bare dotfiles repo) -> no-op
+	}
+
+	guard := *rangeFlag == ""
+	spec := *rangeFlag
+	if spec == "" {
+		spec = docDriftDiffBase(root)
+	}
+
+	findings, err := audit.DocDrift(root, spec)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	if len(findings) == 0 {
+		return 0
+	}
+	if guard && !docDriftGuardOK(root) {
+		return 0 // already nagged for this HEAD
+	}
+	printDocDrift(stderr, findings)
+	return 2
+}
+
+// docDriftDiffBase resolves what to `git diff` against: the closest integration
+// branch's merge-base if this work sits ahead of it, else "HEAD" (on a trunk
+// branch the change set IS the working tree — uncommitted only).
+func docDriftDiffBase(root string) string {
+	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "HEAD"
+	}
+	h := strings.TrimSpace(string(head))
+	if base, ok := audit.ClosestBase(root, "HEAD"); ok && base != "" && base != h {
+		return base
+	}
+	return "HEAD"
+}
+
+// TEMP stub — replaced in Task 5. Always nags.
+func docDriftGuardOK(root string) bool { return true }
+
+// printDocDrift renders findings grouped by kind, with the reconcile guidance.
+// Self-contained prose — no machine-local path references.
+func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
+	var dangling, value []audit.DocDriftFinding
+	for _, f := range fs {
+		if f.Kind == audit.Dangling {
+			dangling = append(dangling, f)
+		} else {
+			value = append(value, f)
+		}
+	}
+	fmt.Fprintln(w, "doc-drift: this branch changed code that tracked docs still describe the old way.")
+	fmt.Fprintln(w, "Reconcile in THIS change set, or confirm each is intentional history:")
+	if len(dangling) > 0 {
+		fmt.Fprintln(w, "  Dangling references (symbol deleted, doc still names it):")
+		for _, f := range dangling {
+			fmt.Fprintf(w, "    • '%s' (definition removed on this branch) still referenced in:\n", f.Symbol)
+			for _, h := range f.Hits {
+				fmt.Fprintf(w, "        %s:%d: %s\n", h.File, h.Line, h.Text)
+			}
+		}
+	}
+	if len(value) > 0 {
+		fmt.Fprintln(w, "  Anchored value drift (doc names the constant but shows its old value):")
+		for _, f := range value {
+			fmt.Fprintf(w, "    • '%s' changed value (old literal %s); doc names the symbol but still shows %s:\n", f.Symbol, f.Old, f.Old)
+			for _, h := range f.Hits {
+				fmt.Fprintf(w, "        %s:%d: %s\n", h.File, h.Line, h.Text)
+			}
+		}
+	}
+	fmt.Fprintln(w, "This catches only anchored/symbol cases — for paraphrased values or reversed")
+	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing. Already reconciled, or is it")
+	fmt.Fprintln(w, "framed history? Stop again — you won't be re-prompted for this HEAD.")
 }
