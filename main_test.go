@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -666,5 +667,51 @@ func TestDocDriftOffKillSwitch(t *testing.T) {
 	code := runDocDrift([]string{"--range", "a..b", "/nonexistent"}, strings.NewReader(""), &out, &errb)
 	if code != 0 {
 		t.Fatalf("DOC_DRIFT_OFF=1 -> want exit 0 before any work, got %d", code)
+	}
+}
+
+func setupRepoMain(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for p, c := range files {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("init")
+	git("branch", "-M", "wip") // not an integration-branch candidate -> base resolves to HEAD
+	for p := range files {
+		git("add", p)
+	}
+	return dir
+}
+
+func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // isolate the marker store
+	dir := setupRepoMain(t, map[string]string{
+		"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n",
+	})
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	full := filepath.Join(dir, "x.go")
+	os.WriteFile(full, []byte("package x\n"), 0o644) // uncommitted removal -> drift vs HEAD
+
+	// Bare invocation (no --range) uses the guard; on a trunk repo the base is HEAD.
+	first := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard)
+	if first != 2 {
+		t.Fatalf("first bare run must block -> want exit 2, got %d", first)
+	}
+	second := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard)
+	if second != 0 {
+		t.Fatalf("same HEAD already nagged -> want exit 0, got %d", second)
 	}
 }

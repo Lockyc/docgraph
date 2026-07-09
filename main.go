@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -706,8 +708,43 @@ func docDriftDiffBase(root string) string {
 	return "HEAD"
 }
 
-// TEMP stub — replaced in Task 5. Always nags.
-func docDriftGuardOK(root string) bool { return true }
+// docDriftGuardOK reports whether to nag for this repo at its current HEAD.
+// Returns true at most once per (repo, HEAD): the first true records HEAD so a
+// repeat call for the same HEAD returns false. Each commit moves HEAD, re-arming.
+// This de-dupes the nag within one HEAD; it never suppresses a finding across HEADs.
+func docDriftGuardOK(root string) bool {
+	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return true // unborn HEAD -> don't suppress
+	}
+	h := strings.TrimSpace(string(head))
+	dir := docDriftStateDir()
+	if dir == "" {
+		return true // can't resolve state dir -> never suppress
+	}
+	sum := sha256.Sum256([]byte(root))
+	marker := filepath.Join(dir, hex.EncodeToString(sum[:])[:16])
+	if b, err := os.ReadFile(marker); err == nil && strings.TrimSpace(string(b)) == h {
+		return false
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(marker, []byte(h), 0o644)
+	return true
+}
+
+// docDriftStateDir resolves $XDG_STATE_HOME/docaudit/doc-drift (default
+// ~/.local/state/...), matching the usage-log XDG-state convention.
+func docDriftStateDir() string {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(dir, "docaudit", "doc-drift")
+}
 
 // printDocDrift renders findings grouped by kind, with the reconcile guidance.
 // Self-contained prose — no machine-local path references.
