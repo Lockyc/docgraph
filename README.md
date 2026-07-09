@@ -181,11 +181,9 @@ and `just release` tags `v<VERSION>` and publishes the matching GitHub release. 
 consumers `go install …@latest`, a release moves everyone's pinned tool — keep `main`
 releasable.
 
-**Deploy is automatic on this repo's host.** A tracked `.githooks/post-commit`
-(and `post-merge`) runs `go install .`, so `~/go/bin/docaudit` always matches the
-latest commit — no manual `just install` step to forget, and no stale binary
-gating pushes with old logic. Activate in a fresh clone with
-`git config core.hooksPath .githooks`.
+**Install with `just install`** (or `go install .`) → `~/go/bin/docaudit`. The binary
+is not rebuilt automatically, so reinstall after changing the CLI. Consumers track
+releases via `go install …@latest`.
 
 The installed binary must be reachable when a hook fires: the pre-push hook
 `install-hook` generates resolves docaudit via PATH **and** the Go bin dir

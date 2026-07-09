@@ -115,11 +115,9 @@ docs/" with zero config.
   `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
-- **Self-deploy hooks**: tracked `.githooks/post-commit` + `post-merge` both run
-  `go install .` (activate with `git config core.hooksPath .githooks`), so a
-  local checkout keeps `~/go/bin/docaudit` current without remembering
-  `just install`. A stale binary means the gate runs old logic, so the auto-install
-  matters when docaudit gates its own pushes.
+- **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
+  reinstalled automatically, so reinstall after changing the CLI or the local binary
+  runs stale logic.
 
 ## Branching & releases
 

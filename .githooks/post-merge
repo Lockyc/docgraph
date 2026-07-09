@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# After a merge/pull, redeploy the same way a commit does.
-exec "$(dirname "$0")/post-commit"
