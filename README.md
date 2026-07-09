@@ -100,8 +100,37 @@ no rules and the scan is a no-op there (it stays a local pre-push gate).
   real bug, not the common "not set up yet" case, so it fails loudly rather than
   silently degrading.
 
-**Known gaps:** no git-history scan (rewriting history is the owner's call — use the
-manual leak-audit skill), no per-rule messages.
+**Known gaps:** no git-history *detection* (finding leaks already committed to
+history is the owner's call — use the manual leak-audit skill); *scrubbing* a known
+leak from history is supported via `docaudit leaks-rules` below. No per-rule
+messages.
+
+### `docaudit leaks-rules` — export rules for history scrubbing
+
+The `leaks` check scans the current tracked tree. To scrub a leak that already
+landed in **git history**, export the leak vocabulary as a
+[`git-filter-repo`](https://github.com/newren/git-filter-repo) rules file and run the
+rewrite separately:
+
+```sh
+docaudit leaks-rules > rules.txt          # non-destructive: reads only the config
+git filter-repo --replace-text rules.txt  # destructive: rewrites history
+```
+
+`leaks-rules` reads the same global config as the `leaks` check and emits one
+`regex:` line per deny rule (terms are escaped and case-insensitive; `regex`
+entries stay case-insensitive unless they carry a leading `(?-i)`, which is
+normalized to a plain case-sensitive pattern — see the caveat below), using
+filter-repo's default `***REMOVED***` replacement. Emitted patterns target
+git-filter-repo's Python regex engine: a leading `(?-i)` opt-out is normalized to a
+case-sensitive rule, but other Go/RE2-only regex syntax may need manual review
+before you run the rewrite. stdout is rules only; a stderr summary reports
+any `allow` / `allow_regex` / `[[dir]]` rules it **dropped** — filter-repo rewrites
+by content across all paths and history, so those exceptions cannot apply and the
+rewrite is broader than the audit's scope. Review the result.
+
+> The rewrite changes commit SHAs: force-push and have every collaborator re-clone.
+> docaudit itself never reads or rewrites history — it only exports the rules.
 
 ## Install
 

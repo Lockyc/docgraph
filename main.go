@@ -26,6 +26,8 @@ func main() {
 		switch args[0] {
 		case "install-hook":
 			os.Exit(runInstallHook(args[1:], os.Stdout, os.Stderr))
+		case "leaks-rules":
+			os.Exit(runLeaksRules(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -104,6 +106,55 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "installed .githooks/pre-push (enforcing all checks); core.hooksPath -> .githooks")
 	} else {
 		fmt.Fprintf(stdout, "installed .githooks/pre-push (enforcing all checks except %s); core.hooksPath -> .githooks\n", *skip)
+	}
+	return 0
+}
+
+// runLeaksRules exports the global leak config as a git-filter-repo --replace-text
+// rules file on stdout (rules only — filter-repo has no comment syntax), with
+// warnings + a drop summary on stderr. It is NON-destructive: it reads only the
+// TOML, never git history; the actual history rewrite is a separate, external
+// `git filter-repo --replace-text` step. Config resolution and the absent/malformed
+// exit contract mirror the leaks scan.
+func runLeaksRules(args []string, stdout, stderr io.Writer) int {
+	if checksFlagRemoved(args, stderr) {
+		return 2
+	}
+	fs := flag.NewFlagSet("docaudit leaks-rules", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfgPath, err := resolveLeaksConfig(*leaksConfig)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	cfg, err := loadLeakConfig(cfgPath)
+	if errors.Is(err, os.ErrNotExist) {
+		// Absent config is NOT fatal (same stance as the scan): the global rules file
+		// is the normal machine-local-only artifact, absent in CI / fresh clones.
+		fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — nothing to export.\n", cfgPath)
+		return 0
+	} else if err != nil {
+		fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+		return 2
+	}
+	// Malformed regex / non-absolute [[dir]] path aren't caught by TOML decode —
+	// validate via the same compile the scan runs. Fatal, like the scan.
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+		return 2
+	}
+	lines, dropped := audit.ReplaceTextRules(cfg)
+	for _, l := range lines {
+		fmt.Fprintln(stdout, l)
+	}
+	if dropped.Allows > 0 || dropped.Dirs > 0 {
+		fmt.Fprintf(stderr, "docaudit: leaks-rules ignores %d allow/allow_regex and %d [[dir]] rule(s) — filter-repo\n", dropped.Allows, dropped.Dirs)
+		fmt.Fprintln(stderr, "  rewrites by content across all paths/history, so exceptions and dir-scoping do not")
+		fmt.Fprintln(stderr, "  apply. Review the rewrite result.")
 	}
 	return 0
 }
