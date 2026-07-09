@@ -319,6 +319,64 @@ func TestRunLeaksMalformedTomlExit2(t *testing.T) {
 
 // leaks is enforced by DEFAULT — no opt-in flag needed for a user-configured
 // pattern to gate.
+func TestLeaksRulesAbsentConfigIsNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	var out, errb bytes.Buffer
+	code := runLeaksRules([]string{"--leaks-config", noCfg(dir)}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("absent config should exit 0, got %d (stderr: %s)", code, errb.String())
+	}
+	if out.String() != "" {
+		t.Errorf("absent config should emit no rules, got %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "nothing to export") {
+		t.Errorf("expected absent-config warning, got %q", errb.String())
+	}
+}
+
+func TestLeaksRulesEmitsRulesAndDropWarning(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "leaks.toml")
+	if err := os.WriteFile(cfg, []byte(`terms = ["secret.host"]`+"\n"+`allow = ["secret.hostname"]`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runLeaksRules([]string{"--leaks-config", cfg}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("valid config should exit 0, got %d (stderr: %s)", code, errb.String())
+	}
+	if got := strings.TrimSpace(out.String()); got != `regex:(?i)secret\.host` {
+		t.Errorf("stdout = %q, want the escaped term rule", got)
+	}
+	if !strings.Contains(errb.String(), "ignores 1 allow/allow_regex") {
+		t.Errorf("expected drop warning naming the allow count, got %q", errb.String())
+	}
+}
+
+func TestLeaksRulesMalformedConfigIsFatal(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "leaks.toml")
+	if err := os.WriteFile(cfg, []byte(`regex = ["(["]`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runLeaksRules([]string{"--leaks-config", cfg}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("bad regex should exit 2, got %d", code)
+	}
+}
+
+func TestLeaksRulesRejectsChecksFlag(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := runLeaksRules([]string{"--checks", "leaks"}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("--checks should be rejected with exit 2, got %d", code)
+	}
+	if !strings.Contains(errb.String(), "--checks was removed") {
+		t.Errorf("expected migration message, got %q", errb.String())
+	}
+}
+
 func TestRunEnforcesLeaksByDefault(t *testing.T) {
 	dir := t.TempDir()
 	write := func(p, c string) {
