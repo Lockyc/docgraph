@@ -100,10 +100,25 @@ func TestLeakScanScansTrackedToolingDespiteDefaultIgnores(t *testing.T) {
 }
 
 func TestLeakScanAllowSuppressesBuiltin(t *testing.T) {
+	// A valid 36-char GitHub token so the built-in `ghp_[A-Za-z0-9]{36}` actually
+	// matches — otherwise the suppression assertion below would pass vacuously.
+	const token = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 	dir := setupRepo(t, map[string]string{
-		"README.md": "example key ghp_0123456789abcdefghijklmnopqrstuvwx\n",
+		"README.md": "example key " + token + "\n",
 	}, []string{"README.md"})
-	rules, err := ParseLeakRules(strings.NewReader("!ghp_0123456789abcdefghijklmnopqrstuvwx\n"))
+
+	// Without any allow rule, the built-in must fire — proving the fixture is a
+	// real built-in match, so the suppression below is meaningful.
+	bare, err := LeakScan(dir, LeakRules{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bare) != 1 || bare[0].Match != token {
+		t.Fatalf("built-in ghp_ pattern should match the token, got %+v", bare)
+	}
+
+	// With a `!` allow covering it, the same built-in match is suppressed.
+	rules, err := ParseLeakRules(strings.NewReader("!ghp_[A-Za-z0-9]{36}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
