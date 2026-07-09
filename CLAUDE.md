@@ -83,10 +83,11 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 - **Dir-scoped exclusions are keyed by ABSOLUTE path and are local-only.**
   `[[dir]]` sections match a scanned file by absolute-path containment, so they
   only take effect where the global config lives (your machine). CI / fresh
-  clones have no config → the scan is built-ins-only there. A repo whose own
-  tracked fixtures trip the built-ins keeps its gate green with a committed
-  `--ignore` glob in its hook/CI (e.g. `--ignore '**/*_test.go'`), never inline
-  comments.
+  clones have no config → no rules → the scan is a no-op there. So a repo whose
+  own tracked fixtures would trip its owner's rules is silenced *in the config*
+  with a `[[dir]] ignore` for that repo (e.g. docaudit's own config entry ignores
+  `**/*_test.go`) — the config is the single control surface, not a per-repo
+  `--skip`/`--ignore` or an inline comment.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
