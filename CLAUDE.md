@@ -101,7 +101,19 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   own tracked fixtures would trip its owner's rules is silenced *in the config*
   with a `[[dir]] ignore` for that repo (e.g. docaudit's own config entry ignores
   `**/*_test.go`) — the config is the single control surface, not a per-repo
-  `--skip`/`--ignore` or an inline comment.
+  `--skip`/`--ignore` or an inline marker (see next).
+- **No inline suppression markers — every control is config or CLI.** docaudit
+  never parses a suppression comment/pragma out of the files it audits: there is
+  no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`-style
+  per-line escape. Suppression is *only* `.docauditignore`/`--ignore`/`--skip`
+  (doc-graph scope) and the leaks config's `allow`/`allow_regex`/`[[dir]]` (leak
+  scope). This is deliberate: an inline marker committed to a public repo would be
+  a visible "here be a secret" annotation (same reason the leaks deny-list stays
+  out of the repo), and a marker in a scanned file is exactly the kind of local
+  override the config-as-single-source-of-truth model exists to avoid. Do NOT add
+  one — a line-level comment scanner would have to read file content just to honor
+  self-referential annotations, and would silently un-gate whatever it's placed
+  on.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive

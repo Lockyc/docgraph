@@ -209,6 +209,13 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 `**` (any number of path segments), `*`, `?`. Note the leak scan honors only
 `--ignore` (not the default/`.docauditignore` layers) — see the leaks section.
 
+**No inline markers.** Every suppression lives in config or on the command line —
+`.docauditignore`, `--ignore`, `--skip`, and the leaks config's `allow`/`allow_regex`
+and `[[dir]]` sections. docaudit **never** reads a suppression comment or pragma inside
+the audited files (no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`
+equivalent). Such a marker would be silently ignored, not honored — so an unwanted
+finding is silenced by tuning the config/flags, never by annotating the file.
+
 ## Usage logging
 
 docaudit can append one JSON line per run to a local log, so you can see usage and
