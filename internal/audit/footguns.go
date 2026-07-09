@@ -1,76 +1,55 @@
 package audit
 
 import (
-	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 )
 
-// FootgunFinding is one "footgun" mention whose enclosing paragraph carries
-// neither a rationale signal nor an <!-- footgun-ok --> acknowledgment marker.
+// FootgunFinding is one newly-added footgun declaration whose window lacks a
+// rationale signal or an <!-- footgun-ok --> marker. File/Line locate it; Text is
+// the trimmed declaration line.
 type FootgunFinding struct {
 	File string
-	Line int    // 1-based line of the first footgun token in the paragraph
-	Text string // that line, trimmed, for context in the report
+	Line int
+	Text string
 }
 
-// footgunToken matches the word "footgun"/"footguns", case-insensitive.
-var footgunToken = regexp.MustCompile(`(?i)\bfootguns?\b`)
-
-// footgunAckMarker matches the explicit acknowledgment comment (optional reason
-// after the name): <!-- footgun-ok --> or <!-- footgun-ok: hit in prod -->.
-var footgunAckMarker = regexp.MustCompile(`(?i)<!--\s*footgun-ok\b`)
-
-// footgunRationaleSignals are the conservative built-in phrases that count as a
-// documented rationale in a footgun's paragraph. Deliberately narrow: loose
-// connectives (so/since/thus) fire everywhere and would neuter the check. This
-// is the single source of truth for the rationale vocabulary — do not restate it.
-var footgunRationaleSignals = regexp.MustCompile(
-	`(?i)(because|otherwise|so that|the reason|would break|re-?litigat|the trap)`)
-
-// FootgunScan reports every "footgun" mention whose enclosing paragraph lacks a
-// rationale signal or an ack marker. Scope is tracked .md under the doc-graph
-// ignore layers (defaultIgnores + .docauditignore + --ignore) — the same set as
-// the orphan check, NOT the leaks git-tracking scope: an agent skill file under
-// .claude/ isn't house documentation, so its "footgun" usage is out of scope.
-func FootgunScan(repoRoot string, extraIgnores []string) ([]FootgunFinding, error) {
-	tracked, err := trackedMD(repoRoot)
-	if err != nil {
-		return nil, err
-	}
-	globs, err := loadIgnores(repoRoot, extraIgnores)
-	if err != nil {
-		return nil, err
-	}
-	var findings []FootgunFinding
-	for _, f := range tracked {
-		if matchesIgnore(f, globs) {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(f)))
-		if err != nil {
-			continue
-		}
-		findings = append(findings, scanFootguns(f, string(b))...)
-	}
-	sort.Slice(findings, func(i, j int) bool {
-		if findings[i].File != findings[j].File {
-			return findings[i].File < findings[j].File
-		}
-		return findings[i].Line < findings[j].Line
-	})
-	return findings, nil
+// declFinding is scanDeclarations' per-content result (no file — the diff layer
+// adds it). Line is 1-based.
+type declFinding struct {
+	Line int
+	Text string
 }
 
-// scanFootguns groups content into paragraphs (maximal runs of contiguous
-// non-blank lines) and emits one finding per paragraph that mentions "footgun"
-// without a rationale signal or ack marker, anchored to the paragraph's first
-// footgun line.
-func scanFootguns(file, content string) []FootgunFinding {
+// A footgun DECLARATION (footgun as the subject being introduced), not a passing
+// mention: line-leading `Footgun:`/`—` after optional markdown markers, OR a
+// bolded `**Footgun:`/`—` anywhere. Cross-references ("see the X footgun") and
+// bare container headings ("## Footguns", no delimiter) deliberately do NOT match.
+var (
+	footgunDeclLead  = regexp.MustCompile(`(?i)^\s*(?:>[ \t]*)*(?:#{1,6}\s*|[-*+]\s+)?\*{0,2}footguns?\s*[:—-]`)
+	footgunDeclBold  = regexp.MustCompile(`(?i)\*\*\s*footguns?\s*[:—-]`)
+	footgunHeading   = regexp.MustCompile(`^\s*#`)
+	footgunAckMarker = regexp.MustCompile(`(?i)<!--\s*footgun-ok\b`)
+	// Conservative built-in rationale vocabulary — single source of truth; do not
+	// restate in docs. Narrow on purpose: loose connectives fire everywhere.
+	footgunRationaleSignals = regexp.MustCompile(
+		`(?i)(because|otherwise|so that|the reason|would break|re-?litigat|the trap)`)
+)
+
+func isFootgunDeclaration(line string) bool {
+	return footgunDeclLead.MatchString(line) || footgunDeclBold.MatchString(line)
+}
+
+// scanDeclarations reports every footgun declaration whose window lacks a
+// rationale signal or ack marker. Window = the declaration's paragraph (a
+// maximal run of contiguous non-blank lines); if that paragraph is a single line
+// or a heading, it extends to include the next paragraph, so a heading
+// declaration sees the explanation that follows it.
+func scanDeclarations(content string) []declFinding {
 	lines := strings.Split(content, "\n")
-	var out []FootgunFinding
+	// paragraph index per line: for each line, the [start,end) of its paragraph.
+	type para struct{ start, end int } // end exclusive
+	var paras []para
 	i := 0
 	for i < len(lines) {
 		if strings.TrimSpace(lines[i]) == "" {
@@ -81,20 +60,36 @@ func scanFootguns(file, content string) []FootgunFinding {
 		for i < len(lines) && strings.TrimSpace(lines[i]) != "" {
 			i++
 		}
-		para := lines[start:i]
-		joined := strings.Join(para, "\n")
-		if !footgunToken.MatchString(joined) {
+		paras = append(paras, para{start, i})
+	}
+	// map a line -> its paragraph index
+	paraOf := make(map[int]int)
+	for pi, p := range paras {
+		for l := p.start; l < p.end; l++ {
+			paraOf[l] = pi
+		}
+	}
+	windowText := func(pi int) string {
+		p := paras[pi]
+		text := strings.Join(lines[p.start:p.end], "\n")
+		single := p.end-p.start == 1
+		heading := footgunHeading.MatchString(lines[p.start])
+		if (single || heading) && pi+1 < len(paras) {
+			np := paras[pi+1]
+			text += "\n" + strings.Join(lines[np.start:np.end], "\n")
+		}
+		return text
+	}
+	var out []declFinding
+	for ln, line := range lines {
+		if !isFootgunDeclaration(line) {
 			continue
 		}
-		if footgunRationaleSignals.MatchString(joined) || footgunAckMarker.MatchString(joined) {
+		w := windowText(paraOf[ln])
+		if footgunRationaleSignals.MatchString(w) || footgunAckMarker.MatchString(w) {
 			continue
 		}
-		for j, ln := range para {
-			if footgunToken.MatchString(ln) {
-				out = append(out, FootgunFinding{File: file, Line: start + j + 1, Text: strings.TrimSpace(ln)})
-				break
-			}
-		}
+		out = append(out, declFinding{Line: ln + 1, Text: strings.TrimSpace(line)})
 	}
 	return out
 }
