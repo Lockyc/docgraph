@@ -103,6 +103,29 @@ no rules and the scan is a no-op there (it stays a local pre-push gate).
 **Known gaps:** no git-history scan (rewriting history is the owner's call — use the
 manual leak-audit skill), no per-rule messages.
 
+### `docaudit leaks-rules` — export rules for history scrubbing
+
+The `leaks` check scans the current tracked tree. To scrub a leak that already
+landed in **git history**, export the leak vocabulary as a
+[`git-filter-repo`](https://github.com/newren/git-filter-repo) rules file and run the
+rewrite separately:
+
+```sh
+docaudit leaks-rules > rules.txt          # non-destructive: reads only the config
+git filter-repo --replace-text rules.txt  # destructive: rewrites history
+```
+
+`leaks-rules` reads the same global config as the `leaks` check and emits one
+`regex:` line per deny rule (terms are escaped and case-insensitive; `regex`
+entries stay case-insensitive unless they carry `(?-i)`), using filter-repo's
+default `***REMOVED***` replacement. stdout is rules only; a stderr summary reports
+any `allow` / `allow_regex` / `[[dir]]` rules it **dropped** — filter-repo rewrites
+by content across all paths and history, so those exceptions cannot apply and the
+rewrite is broader than the audit's scope. Review the result.
+
+> The rewrite changes commit SHAs: force-push and have every collaborator re-clone.
+> docaudit itself never reads or rewrites history — it only exports the rules.
+
 ## Install
 
 ```bash
