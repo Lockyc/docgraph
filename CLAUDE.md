@@ -6,8 +6,9 @@ untracked `.md` files — **and** scans tracked file content for configured `lea
 patterns. Reachability follows markdown links **and** bare/inline-code path
 mentions. All four checks are **enforced by default**; you exclude one explicitly
 with `--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
-non-zero on any finding in an enforced check. Stdlib only; shells out to `git`.
-Usage and checks are in `README.md` — this file carries the invariants and footguns.
+non-zero on any finding in an enforced check. Stdlib + `github.com/BurntSushi/toml`
+(config decode); shells out to `git`. Usage and checks are in `README.md` — this
+file carries the invariants and footguns.
 
 ## Intended use
 
@@ -39,16 +40,23 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates every sensitive term the owner has). The footprint vocabulary is
-  also identical across repos. So `leaks` reads `--leaks-config` →
-  `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`. Because leaks runs by
-  default (incl. in CI, which has no global file), an **absent** config is NOT
-  fatal — it degrades to the built-in patterns plus a warning; a **malformed**
-  config (bad regex) IS fatal (exit 2), since that's a real bug, not the common
-  "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks being default-on
-  means a missing global file is the normal CI/fresh-clone state, and failing there
-  would brick every push. Built-in secret patterns (PEM/AWS/GitHub/Slack shapes)
-  always run and are suppressible by `!` allow lines. History is out of scope
-  (owner's call); that stays with the manual `pre-public-leak-audit` skill.
+  also identical across repos. So `leaks` reads a **TOML** file at
+  `--leaks-config` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks.toml`,
+  with top-level `terms` (literal, case-insensitive) / `regex` (also
+  case-insensitive by default — opt out per-pattern with `(?-i)`; a leak must be
+  caught in any casing) / `allow` / `allow_regex` deny-and-exception arrays, plus
+  `[[dir]]` sections that scope an `ignore`/`allow`/`allow_regex` set to files
+  under an absolute `path` (a leading `~/` expands). Because leaks runs by default
+  (incl. in CI, which has no global file), an **absent** config is NOT fatal — it
+  degrades to the built-in patterns plus a warning; a **malformed** config (bad
+  TOML, a bad regexp in any `regex`/`allow_regex` field, or a non-absolute
+  `[[dir]]` `path`) IS fatal (exit 2), since that's a real bug, not the common
+  "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks
+  being default-on means a missing global file is the normal CI/fresh-clone
+  state, and failing there would brick every push. Built-in secret patterns
+  (PEM/AWS/GitHub/Slack shapes) always run and are suppressible by `allow`/
+  `allow_regex`. History is out of scope (owner's call); that stays with the
+  manual `pre-public-leak-audit` skill.
 - **Enforce-by-default, exclude explicitly — never an opt-in/include model.**
   Every check runs by default; `--skip <check[,check]>` is the only way to not run
   one. The removed `--checks` (include-list) flag could not enforce: a check added
@@ -66,6 +74,13 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   `.claude/` config (excluded from orphans/broken/untracked because it isn't
   documentation) is exactly where owner-specific strings hide and must stay
   in-scope for the leak pass.
+- **Dir-scoped exclusions are keyed by ABSOLUTE path and are local-only.**
+  `[[dir]]` sections match a scanned file by absolute-path containment, so they
+  only take effect where the global config lives (your machine). CI / fresh
+  clones have no config → the scan is built-ins-only there. A repo whose own
+  tracked fixtures trip the built-ins keeps its gate green with a committed
+  `--ignore` glob in its hook/CI (e.g. `--ignore '**/*_test.go'`), never inline
+  comments.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
@@ -111,8 +126,8 @@ docs/" with zero config.
 
 - `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
-  `git.go` (`ls-files` wrappers), `leaks.go` (leak rules parse + content scan),
-  `audit.go` (`Audit` → `Report`).
+  `git.go` (`ls-files` wrappers), `leaks.go` (TOML config decode + dir-scoped
+  content scan), `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
