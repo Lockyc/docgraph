@@ -163,7 +163,8 @@ func TestInstallHookDefaultEnforcesAll(t *testing.T) {
 	}
 	// Default hook runs a bare `docaudit .` — no check selection — so a
 	// newly-added check is enforced automatically without regenerating the hook.
-	if !strings.Contains(string(b), `exec "$bin" .`) {
+	// No longer `exec`'d: a later line (footgun-drift) must run after it.
+	if !strings.Contains(string(b), `"$bin" .`) {
 		t.Errorf("default hook should run bare `docaudit .`:\n%s", b)
 	}
 	if strings.Contains(string(b), "--checks") || strings.Contains(string(b), "--skip") {
@@ -283,6 +284,26 @@ func TestInstallHookIgnorePassthrough(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "--ignore '**/*_test.go'") {
 		t.Errorf("hook missing --ignore passthrough:\n%s", b)
+	}
+}
+
+func TestHookScriptRunsBothChecks(t *testing.T) {
+	s := hookScript("", nil, false)
+	if !strings.Contains(s, `"$bin" `) || !strings.Contains(s, ".") {
+		t.Fatal("hook must run the whole-state check")
+	}
+	if !strings.Contains(s, "footgun-drift") {
+		t.Fatal("hook must run footgun-drift")
+	}
+	if !strings.Contains(s, `refs="$(cat)"`) {
+		t.Fatal("hook must capture pre-push stdin to feed footgun-drift")
+	}
+}
+
+func TestHookScriptNoFootgunDrift(t *testing.T) {
+	s := hookScript("", nil, true)
+	if strings.Contains(s, "footgun-drift") {
+		t.Fatal("--no-footgun-drift must omit the footgun line")
 	}
 }
 

@@ -166,16 +166,20 @@ docaudit install-hook [path]                # gate: enforce ALL checks (default)
 docaudit install-hook --skip orphans        # nav-driven repos (no orphan gate)
 docaudit install-hook --ignore '**/*_test.go'  # bake an --ignore glob into the gated hook
 docaudit install-hook --force               # regenerate an existing hook (e.g. after upgrading)
+docaudit install-hook --no-footgun-drift    # omit the diff-scoped footgun-drift check
 ```
 
-The generated hook runs a bare `docaudit .`, so a check added in a later version
-is enforced without regenerating the hook. It writes a tracked `.githooks/pre-push`
-and sets `core.hooksPath -> .githooks` for this clone (other clones activate it
-with `git config core.hooksPath .githooks`). Refuses to clobber an existing
-`.githooks/pre-push` (pass `--force`, or integrate into it — e.g. call docaudit
-from an existing `make lint`). Fails **closed**: a missing `docaudit` blocks the
-push, because a gate that skips when its tool is absent is a false green, not a
-gate.
+The generated hook runs two checks: the whole-state `docaudit .` (a bare
+invocation, so a check added in a later version is enforced without
+regenerating the hook), then the diff-scoped `docaudit footgun-drift`, fed
+git's pre-push stdin so it can scope itself to only the commit range being
+pushed. Pass `--no-footgun-drift` to omit the second check. It writes a tracked
+`.githooks/pre-push` and sets `core.hooksPath -> .githooks` for this clone
+(other clones activate it with `git config core.hooksPath .githooks`). Refuses
+to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate into
+it — e.g. call docaudit from an existing `make lint`). Fails **closed**: a
+missing `docaudit` blocks the push, because a gate that skips when its tool is
+absent is a false green, not a gate.
 
 ### Doc models and when to `--skip orphans`
 

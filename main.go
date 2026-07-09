@@ -69,6 +69,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "path glob to exclude from the gated scan (repeatable)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
+	noFootgun := fs.Bool("no-footgun-drift", false, "omit the diff-scoped footgun-drift check from the generated hook")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -94,7 +95,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores, *noFootgun)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -110,27 +111,16 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func hookScript(skip string, ignores []string) string {
-	args := ""
-	if skip != "" {
-		args += " --skip " + skip
-	}
-	for _, g := range ignores {
-		args += " --ignore '" + g + "'"
-	}
-	runLine := `exec "$bin"` + args + ` .`
-	return `#!/usr/bin/env bash
-# docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
-# clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
-# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
-set -euo pipefail
-
-# Resolve docaudit even under a minimal hook PATH. Git runs hooks with whatever
-# PATH the caller had; GUI clients and some agent harnesses push with a bare PATH
-# that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and would
-# make the gate fail-closed (blocked) purely because it couldn't see an installed
-# binary. Fall back to the Go install dirs before giving up.
-docaudit_bin() {
+// docauditBinFunc returns the docaudit_bin() shell function the generated hook
+// uses to resolve docaudit even under a minimal hook PATH. Git runs hooks with
+// whatever PATH the caller had; GUI clients and some agent harnesses push with a
+// bare PATH that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and
+// would make the gate fail-closed (blocked) purely because it couldn't see an
+// installed binary. Fall back to the Go install dirs before giving up. Both the
+// whole-state check and footgun-drift share this one resolution — do not retype
+// it inline a second time.
+func docauditBinFunc() string {
+	return `docaudit_bin() {
   if command -v docaudit >/dev/null 2>&1; then command -v docaudit; return; fi
   local d
   for d in "${GOBIN:-}" "${GOPATH:+${GOPATH%%:*}/bin}" "$HOME/go/bin"; do
@@ -141,14 +131,48 @@ docaudit_bin() {
     [ -x "$d/docaudit" ] && { printf '%s\n' "$d/docaudit"; return; }
   fi
   return 1
+}`
 }
+
+// hookScript generates the tracked .githooks/pre-push gate. It runs the
+// whole-state check (`docaudit .`) and, unless noFootgun, the diff-scoped
+// `docaudit footgun-drift` fed git's pre-push stdin (ref lines: local/remote
+// SHA pairs for what's being pushed) so footgun-drift can scope itself to the
+// pushed commit range. The whole-state line is a plain command, not `exec` —
+// `exec` would replace the shell process, so a failing `docaudit .` would never
+// reach the footgun-drift line below it. Under `set -e` a non-zero exit from
+// the plain command still aborts the script (and the push) immediately, so
+// fail-closed behavior is unchanged.
+func hookScript(skip string, ignores []string, noFootgun bool) string {
+	args := ""
+	if skip != "" {
+		args += " --skip " + skip
+	}
+	for _, g := range ignores {
+		args += " --ignore '" + g + "'"
+	}
+	stateLine := `"$bin"` + args + ` .`
+	footgun := ""
+	if !noFootgun {
+		footgun = `
+# Diff-scoped: only footgun declarations ADDED in the pushed range.
+printf '%s' "$refs" | "$bin" footgun-drift .`
+	}
+	return `#!/usr/bin/env bash
+# docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
+# clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
+# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
+set -euo pipefail
+refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running anything
+
+` + docauditBinFunc() + `
 
 if ! bin="$(docaudit_bin)"; then
   echo "docaudit: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
   echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
   exit 1
 fi
-` + runLine + `
+` + stateLine + footgun + `
 `
 }
 
