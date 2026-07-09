@@ -235,6 +235,22 @@ func TestRunLeaksBuiltinsWithoutConfig(t *testing.T) {
 	}
 }
 
+func TestInstallHookIgnorePassthrough(t *testing.T) {
+	dir := gitInit(t)
+	var out, errb bytes.Buffer
+	code := runInstallHook([]string{"--ignore", "**/*_test.go", "--force", dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\n%s", code, errb.String())
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".githooks", "pre-push"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "--ignore '**/*_test.go'") {
+		t.Errorf("hook missing --ignore passthrough:\n%s", b)
+	}
+}
+
 func TestRunLeaksBadRegexExit2(t *testing.T) {
 	dir := gitInit(t)
 	cfg := filepath.Join(dir, "leaks.toml")

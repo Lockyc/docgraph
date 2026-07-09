@@ -63,6 +63,8 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docaudit install-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	skip := fs.String("skip", "", "checks to EXCLUDE from the gate, comma-separated (default: none — all enforced)")
+	var ignores multiFlag
+	fs.Var(&ignores, "ignore", "path glob to exclude from the gated scan (repeatable)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -89,7 +91,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*skip)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -105,11 +107,15 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func hookScript(skip string) string {
-	runLine := `exec "$bin" .`
+func hookScript(skip string, ignores []string) string {
+	args := ""
 	if skip != "" {
-		runLine = `exec "$bin" --skip ` + skip + ` .`
+		args += " --skip " + skip
 	}
+	for _, g := range ignores {
+		args += " --ignore '" + g + "'"
+	}
+	runLine := `exec "$bin"` + args + ` .`
 	return `#!/usr/bin/env bash
 # docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
 # clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
