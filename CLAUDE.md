@@ -7,8 +7,9 @@ patterns. Reachability follows markdown links **and** bare/inline-code path
 mentions. All four checks are **enforced by default**; you exclude one explicitly
 with `--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
 non-zero on any finding in an enforced check. Stdlib + `github.com/BurntSushi/toml`
-(config decode); shells out to `git`. Usage and checks are in `README.md` — this
-file carries the invariants and footguns.
+(config decode); shells out to `git`. It also has an **opt-in usage log** (one JSONL
+record per run, for trend-watching — see the logging footgun). Usage and checks are
+in `README.md` — this file carries the invariants and footguns.
 
 ## Intended use
 
@@ -111,6 +112,28 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   `docs/`-only scope wrongly made such docs invisible (neither flagged nor
   checked). `.claude/**` files are runtime tooling; a config-dir README is not.
   Keep that distinction.
+- **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** One JSONL
+  record per run appends to `$XDG_STATE_HOME/docaudit/usage.jsonl` (XDG *state*, not
+  config) **only** when a global `config.toml` `[log]` table opts in — resolved
+  `--config` → `$DOCAUDIT_CONFIG` → `$XDG_CONFIG_HOME/docaudit/config.toml` (same XDG
+  discipline as leaks, never `os.UserConfigDir()`). Invariants that are load-bearing:
+  - **Separate file from `leaks.toml`.** `leaks.toml` is a dedicated rules file that
+    may be synced on its own; `config.toml` holds `[log]`. Don't merge them.
+  - **Malformed `config.toml` is NON-fatal here** — warn, disable logging, run
+    continues. This deliberately DIVERGES from malformed-`leaks.toml`-is-fatal:
+    leaks is an enforced protection, logging is auxiliary, so a log-config typo must
+    never block a push. Absent config → silently off (no warning; the normal
+    CI/clone/fresh state). Do NOT make either fatal.
+  - **Level gates leak exposure.** L1 counts only, L2 adds paths (`file:line`), L3
+    adds full findings **including leak match text**. Levels 1–2 must NEVER write a
+    leak `Match` — the log must not become the sensitive-string sink the `leaks`
+    check exists to prevent. Only L3 (a documented, trusted-machine opt-in) does.
+  - **Best-effort, never fails the run.** `maybeLog` swallows every error; the exit
+    code is decided by findings alone. `DOCAUDIT_NO_LOG=1` is the one-off kill switch
+    (mirrors `DOC_DRIFT_OFF`).
+  - **`cmd` is a seam, not decoration.** Each record carries `"cmd":"run"`. It exists
+    so a future `docaudit drift` subcommand logs through the *same* file with the
+    *same* record shape — trends span both. Keep the field when adding a subcommand.
 
 ## Doc models (why `--skip` exists)
 
@@ -131,10 +154,12 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format.
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format,
+  `maybeLog` (opt-in usage logging side-channel).
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers), `leaks.go` (TOML config decode + dir-scoped
-  content scan), `audit.go` (`Audit` → `Report`).
+  content scan), `audit.go` (`Audit` → `Report`), `usage.go` (usage-log config +
+  tiered `BuildRecord` + best-effort `LogRun`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not

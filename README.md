@@ -120,6 +120,7 @@ docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
 docaudit --skip orphans             # exclude a check (comma-separated; e.g. nav-driven MkDocs)
 docaudit --skip leaks               # exclude the content leak scan
 docaudit --leaks-config <path>      # override the global leak rules file
+docaudit --config <path>            # override the global config.toml (usage logging)
 docaudit version                    # print version (also --version, -v)
 ```
 
@@ -178,6 +179,52 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 (gitignore syntax, `#` comments) or repeatable `--ignore` globs. Globs support
 `**` (any number of path segments), `*`, `?`. Note the leak scan honors only
 `--ignore` (not the default/`.docauditignore` layers) — see the leaks section.
+
+## Usage logging
+
+docaudit can append one JSON line per run to a local log, so you can see usage and
+finding trends over time (across all your repos). It is **opt-in** and machine-local:
+off unless a global `config.toml` enables it, so CI, fresh clones, and contributors
+never log.
+
+Enable it in `~/.config/docaudit/config.toml` (resolved `--config` →
+`$DOCAUDIT_CONFIG` → `$XDG_CONFIG_HOME/docaudit/config.toml`):
+
+```toml
+[log]
+enabled = true
+level   = 1                                   # 1 counts · 2 +paths · 3 +findings
+# path  = "~/.local/state/docaudit/usage.jsonl"   # optional; this is the default
+```
+
+Records land in `$XDG_STATE_HOME/docaudit/usage.jsonl` (default
+`~/.local/state/docaudit/usage.jsonl`), overridable via `[log].path` or the
+`DOCAUDIT_LOG` env var. A level-1 record:
+
+```json
+{"ts":"2026-07-09T21:30:00+10:00","version":"2.0.0","repo":"/abs/git/root",
+ "cmd":"run","checks":["broken","leaks","orphans","untracked"],"exit":1,
+ "counts":{"orphans":0,"broken":1,"untracked":0,"leaks":0}}
+```
+
+**Detail level** trades richness for exposure:
+
+- **1 — counts only.** No paths, no content. Safe default.
+- **2 — adds `files`.** The flagged paths (broken/leaks include `file:line`), but
+  **never leak match text.**
+- **3 — adds `findings`.** Full detail **including leak match strings.** This turns
+  the log into exactly the sensitive-string sink the `leaks` check exists to
+  prevent — a deliberate opt-in; use it only on a trusted machine.
+
+Notes:
+
+- **Absent config → silently off** (no warning — an unconfigured log is the normal
+  state). A **malformed** `config.toml` prints a warning and disables logging but
+  **does not fail the run** — logging is auxiliary, so a log-config typo must never
+  block a push (unlike a malformed `leaks.toml`, which is fatal).
+- `DOCAUDIT_NO_LOG=1` disables logging for one run even when the config enables it.
+- Logging is best-effort: an unwritable log file is silently skipped and never
+  changes the exit code.
 
 ## Known gaps
 
