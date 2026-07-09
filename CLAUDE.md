@@ -17,7 +17,10 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 
 - **Agent-facing, not human-facing.** It measures the graph an agent traverses
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
-- **It never reads code.** Input is the doc link graph only.
+- **Reads doc-graph structure and, for the `leaks` check, file content.** The
+  three doc-graph checks (orphans/broken/untracked) traverse only the link graph.
+  The opt-in `leaks` check additionally scans tracked file *content* (code
+  included) for configured leak patterns. It never reads git history.
 
 ## Footguns
 
@@ -28,10 +31,18 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   to MkDocs nav — it would make the tool always report zero orphans and destroy
   its purpose.
 - **Do NOT merge this with `doc-drift.sh`.** That Stop hook is a *content-vs-code*
-  check (a changed constant whose old literal lingers in a doc; a deleted symbol
-  still referenced) — its input is the code diff. `docaudit` is *graph
-  integrity* — its input is the doc link graph, and it never touches code.
-  Different inputs, different concerns; keep them as two tools.
+  drift check driven by the code diff (a changed constant whose old literal lingers
+  in a doc). `docaudit` audits *repo state* — doc-graph integrity plus, opt-in, a
+  content leak scan — not diffs. Different inputs and cadence; keep them separate.
+- **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
+  per-repo deny list committed to a public repo *is itself the leak* (it
+  enumerates every sensitive term the owner has). The footprint vocabulary is
+  also identical across repos. So `leaks` reads `--leaks-config` →
+  `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`, and selecting `leaks`
+  with no resolvable file is **fail-closed (exit 2)** — a silent skip would be a
+  false green. Built-in secret patterns (PEM/AWS/GitHub/Slack shapes) always run
+  and are suppressible by `!` allow lines. History is out of scope (owner's call);
+  that stays with the manual `pre-public-leak-audit` skill.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
@@ -77,7 +88,8 @@ docs/" with zero config.
 
 - `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
-  `git.go` (`ls-files` wrappers), `audit.go` (`Audit` → `Report`).
+  `git.go` (`ls-files` wrappers), `leaks.go` (leak rules parse + content scan),
+  `audit.go` (`Audit` → `Report`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Self-deploy hooks**: tracked `.githooks/post-commit` + `post-merge` both run

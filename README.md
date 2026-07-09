@@ -6,8 +6,10 @@
 
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep + following `[x](y.md)` links, not the rendered site a human
-browses. Flags three things and exits non-zero on any finding, so it drops into
-a pre-push hook or CI without a wrapper.
+browses. Flags three doc-graph problems by default, plus an opt-in scan of
+tracked file content for leaked owner-specific/secret strings, and exits
+non-zero on any finding in a selected check, so it drops into a pre-push hook
+or CI without a wrapper.
 
 **Scope: project *documents*, not project *content*.** It audits the docs that
 explain the project (`docs/`, `CLAUDE.md`, config-dir READMEs). It is *not* for
@@ -27,6 +29,36 @@ a seed-data corpus) — exclude those per-repo via `.docauditignore`.
 3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`) —
    absent from clones, the built site, and any mirror.
 
+Checks 1–3 run by default (`--checks orphans,broken,untracked`). A fourth,
+opt-in check scans file content rather than the doc graph — see below.
+
+### `leaks` (opt-in — not in the default check set)
+
+Scans **tracked file content** (working tree only, never git history) for
+owner-specific / secret strings, for use before a repo goes public. Enable with
+`--checks leaks` (alone or alongside the others).
+
+Patterns come from a **global** rules file — never committed to a repo, because a
+per-repo deny list would itself enumerate your sensitive terms. Resolution order:
+`--leaks-config <path>` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`
+(e.g. `~/.config/docaudit/leaks`). Selecting `leaks` with no resolvable file exits
+2 (fail-closed).
+
+Format — one Go regexp per line; `!` prefixes an allow-exception that suppresses a
+deny match it covers; `#` and blank lines are ignored; a ` #` trailing comment is
+stripped:
+
+    lsjc\.au
+    /Users/[a-z]+
+    !au\.lsjc\.curator      # bundle id — meant to ship
+
+A small built-in set of unambiguous secret shapes (PEM private-key headers, AWS
+`AKIA…`, GitHub `ghp_…`, Slack `xox…` tokens) always runs and is suppressible with
+`!` allow lines.
+
+**v1 gaps:** no git-history scan (rewriting history is the owner's call — use the
+manual leak-audit skill), no per-rule messages.
+
 ## Install
 
 ```bash
@@ -42,6 +74,8 @@ docaudit [path]                     # path defaults to the current directory
 docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
 docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
 docaudit --checks broken,untracked  # run/gate a subset (default: all three)
+docaudit --checks leaks             # opt in to the content leak scan (see above)
+docaudit --leaks-config <path>      # override the global leak rules file
 docaudit version                    # print version (also --version, -v)
 ```
 
@@ -56,8 +90,9 @@ Clean/CI runs stay terse.
 ### Install as a pre-push gate
 
 ```bash
-docaudit install-hook [path]                    # gate all three checks
-docaudit install-hook --checks broken,untracked # nav-driven repos (no orphan gate)
+docaudit install-hook [path]                       # gate the default three checks
+docaudit install-hook --checks broken,untracked    # nav-driven repos (no orphan gate)
+docaudit install-hook --checks orphans,broken,untracked,leaks  # also gate leaks
 ```
 
 Writes a tracked `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for
