@@ -14,41 +14,37 @@ func TestDeclBareBulletIsFinding(t *testing.T) {
 	}
 }
 
-func TestDeclInlineRationalePasses(t *testing.T) {
+// Every footgun declaration flags — a rationale word in the same line does NOT
+// suppress it. docaudit can't judge whether a stated "why" is real, so it nags
+// on the declaration regardless and leaves the judgement to the pusher.
+func TestDeclRationaleDoesNotSuppress(t *testing.T) {
 	got := decls(t, "- **Footgun:** don't touch the cache, because writes race the flush.\n")
-	if len(got) != 0 {
-		t.Fatalf("rationale should suppress, got %+v", got)
+	if len(got) != 1 || got[0].Line != 1 {
+		t.Fatalf("rationale must NOT suppress; want one finding at line 1, got %+v", got)
 	}
 }
 
-// An inline suppression comment is NOT honored — docaudit reads no in-file
-// marker, so a footgun declaration is silenced only by a nearby rationale.
+// No in-file marker suppresses a declaration — there is no rationale escape and
+// no annotation escape. Suppression is only DOCAUDIT_FOOTGUN_OFF / --no-footgun-drift.
 func TestDeclInlineMarkerIsIgnored(t *testing.T) {
 	got := decls(t, "- **Footgun:** terse. <!-- footgun-ok: hit in prod -->\n")
 	if len(got) != 1 || got[0].Line != 1 {
-		t.Fatalf("inline marker must not suppress (no rationale present), got %+v", got)
+		t.Fatalf("inline marker must not suppress, got %+v", got)
 	}
 }
 
-func TestDeclHeadingRationaleInNextParagraph(t *testing.T) {
-	// Lone heading declaration; rationale in the following paragraph → window extends.
+// A heading declaration flags at its own line — there is no window that reaches
+// into following prose to excuse it (the whole rationale-window machinery is gone).
+func TestDeclHeadingIsFinding(t *testing.T) {
 	got := decls(t, "## Footgun — don't merge the hooks\n\nThe reason is they run on different cadences.\n")
-	if len(got) != 0 {
-		t.Fatalf("heading window should extend to next paragraph, got %+v", got)
-	}
-}
-
-func TestDeclHeadingNoBodyIsFinding(t *testing.T) {
-	got := decls(t, "## Footgun — don't merge the hooks\n\n## Next unrelated section\n\nsome text\n")
 	if len(got) != 1 || got[0].Line != 1 {
-		t.Fatalf("heading with no rationale should flag at line 1, got %+v", got)
+		t.Fatalf("heading declaration should flag at line 1, got %+v", got)
 	}
 }
 
 func TestDeclBoldedMidParagraph(t *testing.T) {
 	// A bolded declaration embedded in prose is still a declaration.
 	got := decls(t, "Long intro sentence. **Footgun — a trailing newline is ignored.** More prose after.\n")
-	// no rationale word present → finding
 	if len(got) != 1 {
 		t.Fatalf("bolded mid-paragraph declaration should be checked, got %+v", got)
 	}
@@ -71,35 +67,16 @@ func TestContainerHeadingIsNotDeclaration(t *testing.T) {
 func TestDeclOnePerDeclaration(t *testing.T) {
 	got := decls(t, "- **Footgun:** A, no why.\n- **Footgun:** B, no why.\n")
 	if len(got) != 2 {
-		t.Fatalf("two bullet declarations (contiguous) → two findings, got %+v", got)
+		t.Fatalf("two bullet declarations → two findings, got %+v", got)
 	}
 }
 
-func TestDeclMixedSiblingsInParagraph(t *testing.T) {
-	// Contiguous bullets (one paragraph): A justified, B not. B must still flag.
+// A rationale word on one sibling suppresses nothing — both flag. (Guards that
+// removing the suppression didn't leave a residual per-line rationale check.)
+func TestDeclSiblingsBothFlag(t *testing.T) {
 	got := decls(t, "- **Footgun:** A, because reasons.\n- **Footgun:** B, no why.\n")
-	if len(got) != 1 || got[0].Line != 2 {
-		t.Fatalf("unjustified sibling B must flag at line 2, got %+v", got)
-	}
-}
-
-func TestDeclMultilineParagraphTailNoExtend(t *testing.T) {
-	// An unjustified declaration that is merely the LAST line of a MULTI-line
-	// paragraph must NOT absorb the following paragraph's rationale. The window
-	// extends only when the paragraph is a lone line or a heading — a tight bullet
-	// list is neither.
-	got := decls(t, "- Some setup note.\n- **Footgun:** never use raw SQL.\n\nWe chose Postgres because it scales.\n")
-	if len(got) != 1 || got[0].Line != 2 {
-		t.Fatalf("multi-line-paragraph tail must not extend into next paragraph; want finding at line 2, got %+v", got)
-	}
-}
-
-func TestDeclLoneLineRationaleInNextParagraph(t *testing.T) {
-	// A lone-line (non-heading) declaration owning its paragraph DOES extend into
-	// the next paragraph, same as a heading — the fix must not break this.
-	got := decls(t, "**Footgun:** don't merge the hooks.\n\nThe reason is they run on different cadences.\n")
-	if len(got) != 0 {
-		t.Fatalf("lone-line declaration window should extend to next paragraph, got %+v", got)
+	if len(got) != 2 || got[0].Line != 1 || got[1].Line != 2 {
+		t.Fatalf("both siblings must flag at lines 1 and 2, got %+v", got)
 	}
 }
 

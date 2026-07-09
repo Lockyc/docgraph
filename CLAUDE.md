@@ -7,11 +7,15 @@ configured `leaks` patterns. Reachability follows markdown links **and**
 bare/inline-code path mentions. All four are **enforced by default**; you
 exclude one explicitly with `--skip` (there is no opt-in — an opt-in check
 enforces nothing). Separately, `docaudit footgun-drift` is a **diff-scoped**
-pre-push subcommand: it flags only footgun *declarations added in the pushed
-range* that lack a nearby rationale — it never re-scans the existing corpus,
-and honors no inline suppression marker (see the no-inline-markers footgun). `footguns` is deliberately **not** one of the
-four `checkNames`; it's a separate subcommand with a separate trigger (a git
-range, not a repo path). Exits non-zero on any finding. Stdlib +
+pre-push subcommand: it flags *every* footgun declaration added in the pushed
+range — it makes no attempt to judge rationale, never re-scans the existing
+corpus, and honors no inline suppression marker (see the no-inline-markers
+footgun). It is **advisory** (exits 0, never blocks the push): the finding is a
+nag to go double-check the declaration is a real footgun, not a gate. `footguns`
+is deliberately **not** one of the four `checkNames`; it's a separate subcommand
+with a separate trigger (a git range, not a repo path). The four whole-state
+checks exit non-zero on any finding (that's the gate); footgun-drift does not.
+Stdlib +
 `github.com/BurntSushi/toml` (config decode); shells out to `git`. It also has
 an **opt-in usage log** (one JSONL record per run, for trend-watching — see the
 logging footgun). Usage and checks are in `README.md` — this file carries the
@@ -19,9 +23,11 @@ invariants and footguns.
 
 ## Intended use
 
-docaudit is built to run as a **pre-push documentation gate** (and in CI): it
-exits non-zero on a finding so a broken doc-graph blocks the push without a
-wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
+docaudit is built to run as a **pre-push documentation gate** (and in CI): the
+four whole-state checks exit non-zero on a finding so a broken doc-graph blocks
+the push without a wrapper. `docaudit install-hook` writes a tracked
+`.githooks/pre-push` for that; the generated hook also runs `footgun-drift` as an
+**advisory** rider (it prints its nag but never blocks — see its footgun below).
 
 ## What it is (and is not)
 
@@ -49,9 +55,10 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   tried first and abandoned.** An earlier attempt made `footguns` a fifth
   *whole-state* check re-scanning every tracked `.md` on every `docaudit .` run.
   It was dropped before shipping because that re-scan produced a validated
-  flood of false positives against the existing corpus — already-accepted
-  footgun notes whose rationale sat just outside whatever window the scanner
-  used, re-litigated on every unrelated push. Do NOT re-add `footguns` to
+  flood of false positives against the existing corpus — every already-accepted
+  footgun note in the tree re-flagged on every unrelated push (and now that the
+  check flags *every* declaration rather than trying to detect rationale, a
+  whole-state re-scan would flood even harder). Do NOT re-add `footguns` to
   `checkNames` to "fix" this; the flood is exactly why it isn't there. The fix
   was to scope the check to what's *new*: `footgun-drift` shares `doc-drift.sh`'s
   diff-driven model — check what changed, not the whole tree — but runs as a
@@ -130,23 +137,24 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   with a `[[dir]] ignore` for that repo (e.g. docaudit's own config entry ignores
   `**/*_test.go`) — the config is the single control surface, not a per-repo
   `--skip`/`--ignore` or an inline marker (see next).
-- **No inline suppression markers — every control is config, CLI, or (for
-  `footgun-drift`) a nearby rationale.** docaudit never parses a suppression
-  comment/pragma out of the files it audits: there is no `<!-- docaudit-ignore -->`,
-  no `# docaudit:allow`, no `# nosec`-style per-line escape, and **no
-  `<!-- footgun-ok -->` for `footgun-drift`** either. Suppression is *only*
-  `.docauditignore`/`--ignore`/`--skip` (doc-graph scope), the leaks config's
-  `allow`/`allow_regex`/`[[dir]]` (leak scope), and — for footgun declarations —
-  a rationale signal in the declaration's window (never an annotation). This is
-  deliberate: an inline marker committed to a public repo would be a visible
-  "here be a secret" annotation (same reason the leaks deny-list stays out of the
-  repo), and a marker in a scanned file is exactly the kind of local override the
-  config-as-single-source-of-truth model exists to avoid. Do NOT add one — a
-  line-level comment scanner would have to read file content just to honor
-  self-referential annotations, and would silently un-gate whatever it's placed
-  on. (`footgun-drift` shipped a `<!-- footgun-ok -->` marker in an early cut; it
-  was dropped precisely to keep this invariant absolute — a justified footgun
-  states its "why," it does not annotate itself exempt.)
+- **No inline suppression markers — every control is config or CLI.** docaudit
+  never parses a suppression comment/pragma out of the files it audits: there is
+  no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`-style
+  per-line escape, and **no `<!-- footgun-ok -->` for `footgun-drift`** either.
+  Suppression is *only* `.docauditignore`/`--ignore`/`--skip` (doc-graph scope),
+  the leaks config's `allow`/`allow_regex`/`[[dir]]` (leak scope), and — for
+  footgun-drift, which flags every added declaration with no in-file escape at
+  all — the whole-check opt-outs `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`.
+  This is deliberate: an inline marker committed to a public repo would be a
+  visible "here be a secret" annotation (same reason the leaks deny-list stays
+  out of the repo), and a marker in a scanned file is exactly the kind of local
+  override the config-as-single-source-of-truth model exists to avoid. Do NOT add
+  one — a line-level comment scanner would have to read file content just to honor
+  self-referential annotations, and would silently un-nag whatever it's placed on.
+  (`footgun-drift` shipped a `<!-- footgun-ok -->` marker in an early cut; it was
+  dropped precisely to keep this invariant absolute — and now that footgun-drift
+  is advisory and flags every added declaration, there is nothing in-file to
+  exempt in the first place.)
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
@@ -192,29 +200,21 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   - **`cmd` is a seam, not decoration.** Each record carries `"cmd":"run"`. It exists
     so a future `docaudit drift` subcommand logs through the *same* file with the
     *same* record shape — trends span both. Keep the field when adding a subcommand.
-- **`footgun-drift` is a heuristic, not a judge.** It catches the bare-assertion
-  case — a footgun *declaration* (a line-leading `Footgun:` marker or a bolded
-  mid-line footgun lead, not a passing mention — a cross-reference or a bare
-  container heading with no delimiter never counts) added with no rationale
-  anywhere nearby — but it cannot rank whether a stated rationale is actually
-  *good*, because judging rationale quality is a judgment task and docaudit is a
-  deterministic pattern scanner. The two-question test it prints on a finding
-  (is this a real footgun; is it at the right doc level) is the same test the
-  `doc-and-audit-rigor` skill applies — docaudit only mechanizes the
-  bare-assertion half of it.
-- **A declaration's window is bounded by its next sibling, not by the whole
-  paragraph.** `scanDeclarations` (`internal/audit/footguns.go`) starts a
-  declaration's window at its own line and stops at the *next* declaration in
-  the same paragraph, so a justified bullet can't launder an unjustified
-  neighbour in a tight list. Only when a declaration owns the tail of its
-  paragraph, and that paragraph is a lone line or a heading, does the window
-  extend into the following paragraph — so a heading declaration *does* see an
-  explanation written as the next paragraph. (This window-extension is the ONLY
-  way a heading gets justified: there is no inline suppression marker to fall
-  back on — see the no-inline-markers footgun.) Narrowing this back to "whole
-  paragraph only" would
-  let an unjustified sibling hide behind a justified one; widening it to "next
-  N paragraphs" would start pulling in unrelated prose.
+- **`footgun-drift` is a nag, not a judge — so it flags EVERY added
+  declaration.** It detects a footgun *declaration* (a line-leading `Footgun:`
+  marker or a bolded mid-line footgun lead, not a passing mention — a
+  cross-reference or a bare container heading with no delimiter never counts) and
+  reports it, full stop. It deliberately does **not** look for a rationale: it
+  cannot rank whether a stated "why" is actually *good* (that's a judgment task,
+  and docaudit is a deterministic pattern scanner), and an earlier cut that
+  suppressed a declaration when a rationale *word* sat nearby just rewarded typing
+  "because" — a gameable in-file escape that judged nothing. So it nags on the
+  declaration itself and prints the two-question test (is this a real footgun; is
+  it at the right doc level — the same test the `doc-and-audit-rigor` skill
+  applies), leaving that judgment to the pusher. Because it judges nothing, it
+  does not block — see the advisory note in the intro. Do NOT reintroduce
+  rationale detection to "reduce noise": it can't tell a real rationale from a
+  plausible-sounding one, and pretending to is worse than an honest nag.
 - **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'` —
   not the doc-graph ignore layers, and not the leaks git-tracking scope
   either.** Any `.md` file the diff touches is in scope, including a
@@ -222,16 +222,7 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   non-documentation: a footgun declaration added inside agent tooling is just
   as undocumented as one in `CLAUDE.md`, so narrowing to the doc-graph roots
   would blind the check to exactly the files most likely to accumulate
-  unjustified footgun notes over time. Do not apply `defaultIgnores` or
-  `.docauditignore` here.
-- **The rationale vocabulary is a built-in Go constant
-  (`footgunRationaleSignals` in `internal/audit/footguns.go`), not a config
-  file.** Unlike `leaks`, these words aren't secret and don't vary per repo,
-  because they're a fixed set of English connectives rather than an owner's
-  private footprint, so a global TOML file would add indirection with no
-  privacy payoff. Anchor to the symbol — don't restate the phrase list here,
-  since a restated copy would drift out of sync the next time the constant
-  changes.
+  footgun notes over time. Do not apply `defaultIgnores` or `.docauditignore` here.
 
 ## Doc models (why `--skip` exists)
 
@@ -244,7 +235,7 @@ Repos fall into models the orphan check treats differently:
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
 
-A repo that doesn't use the footgun-with-rationale convention at all skips
+A repo that doesn't use the `Footgun:` note convention at all opts out of
 `footgun-drift` entirely rather than passing `--skip` (it isn't a `docaudit .`
 check to skip): set `DOCAUDIT_FOOTGUN_OFF=1`, or generate the hook with
 `install-hook --no-footgun-drift` so it's never invoked in the first place.
@@ -266,8 +257,9 @@ docs/" with zero config.
   `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` uses to read a
   range instead of a tree snapshot), `leaks.go` (TOML config decode +
   dir-scoped content scan), `footguns.go` (the declaration scanner —
-  `scanDeclarations`/`isFootgunDeclaration`/`footgunRationaleSignals`; a
-  *declaration* is a footgun being introduced, not a passing mention of one),
+  `scanDeclarations`/`isFootgunDeclaration`; a *declaration* is a footgun being
+  introduced, not a passing mention of one, and every one is reported —
+  `scanDeclarations` does no rationale filtering),
   `footgun_drift.go` (`FootgunDrift`: runs `scanDeclarations` per range,
   keeps only declarations whose line is in that range's added-line set,
   dedupes by file:line), `audit.go` (`Audit` → `Report`, the whole-state

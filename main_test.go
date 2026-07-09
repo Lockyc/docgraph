@@ -299,6 +299,11 @@ func TestHookScriptRunsBothChecks(t *testing.T) {
 	if !strings.Contains(s, `refs="$(cat)"`) {
 		t.Fatal("hook must capture pre-push stdin to feed footgun-drift")
 	}
+	// footgun-drift is advisory: its hook line must never abort the push, even on
+	// an operational error, so it is guarded with `|| true`.
+	if !strings.Contains(s, `footgun-drift . || true`) {
+		t.Fatal("footgun-drift hook line must be advisory (|| true), never blocking")
+	}
 }
 
 func TestHookScriptNoFootgunDrift(t *testing.T) {
@@ -580,30 +585,36 @@ func commitRepoMain(t *testing.T, base, head map[string]string) (string, string,
 	return dir, baseSHA, headSHA
 }
 
-func TestFootgunDriftSubcommandRange(t *testing.T) {
+// Advisory, not blocking: an added declaration prints the nag but exits 0, so the
+// push is never aborted — the message alone prompts the pusher to double-check.
+func TestFootgunDriftSubcommandRangeIsAdvisory(t *testing.T) {
 	dir, base, head := commitRepoMain(t,
 		map[string]string{"CLAUDE.md": "intro\n"},
 		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
 	)
 	var out, errb bytes.Buffer
 	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
-	if code != 1 {
-		t.Fatalf("want exit 1, got %d\n%s", code, out.String())
+	if code != 0 {
+		t.Fatalf("footgun-drift is advisory — want exit 0, got %d\n%s", code, out.String())
 	}
 	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
 		t.Fatalf("want a FOOTGUN finding naming the line, got:\n%s", out.String())
 	}
 }
 
-func TestFootgunDriftSubcommandClean(t *testing.T) {
+// No added declaration → no output at all (nothing to nag about), exit 0.
+func TestFootgunDriftSubcommandSilentWhenNoDeclaration(t *testing.T) {
 	dir, base, head := commitRepoMain(t,
 		map[string]string{"CLAUDE.md": "intro\n"},
-		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** don't, because it races.\n"},
+		map[string]string{"CLAUDE.md": "intro\n\njust some added prose, no declaration.\n"},
 	)
 	var out, errb bytes.Buffer
 	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
 	if code != 0 {
-		t.Fatalf("justified declaration should be clean, got %d\n%s", code, out.String())
+		t.Fatalf("want exit 0, got %d\n%s", code, out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("FOOTGUN")) {
+		t.Fatalf("no declaration added → no FOOTGUN output, got:\n%s", out.String())
 	}
 }
 

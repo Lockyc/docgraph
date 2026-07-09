@@ -13,10 +13,11 @@ and exits non-zero on any finding, so it drops into a pre-push hook or CI
 without a wrapper. You *exclude* a check explicitly (`--skip`); nothing is
 opt-in, because an opt-in check enforces nothing.
 
-Separately, `docaudit footgun-drift` is a **diff-scoped** subcommand: at
-pre-push it checks only what a push *adds* — new "footgun" declarations in
-tracked markdown that lack a rationale — never the existing corpus. It isn't
-one of the checks below and isn't exclude-able with `--skip`; see
+Separately, `docaudit footgun-drift` is a **diff-scoped, advisory** subcommand:
+at pre-push it flags every new "footgun" declaration a push *adds* to tracked
+markdown — never the existing corpus — and prints a nag to go verify each is a
+real footgun, but **exits 0 and never blocks the push**. It isn't one of the
+checks below and isn't exclude-able with `--skip`; see
 [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check).
 
 **Scope: project *documents*, not project *content*** (for the doc-graph
@@ -143,14 +144,13 @@ rewrite is broader than the audit's scope. Review the result.
 ### `footgun-drift` — the diff-scoped pre-push check
 
 Unlike the four checks above, `footgun-drift` never scans the whole repo — only
-what a push *adds*. It flags a footgun **declaration** (a line-leading
+what a push *adds* — and it is **advisory**: it prints a nag but exits 0 and
+never blocks the push. It flags a footgun **declaration** (a line-leading
 `Footgun:` marker or a bolded mid-line footgun lead — introducing one, not just
 mentioning it; a cross-reference or a bare `## Footguns` container heading
-never counts) whose *added lines* have no rationale signal nearby (docaudit
-honors no inline suppression marker — see below). The rationale
-vocabulary is a fixed internal word list (`footgunRationaleSignals` in
-`internal/audit/footguns.go`) — not configurable, since it's a small set of
-English connectives, not an owner-specific footprint like `leaks`.
+never counts) on any *added line*. It makes **no** attempt to detect a rationale
+and has no in-file escape: every added declaration is reported, and you go
+double-check it yourself.
 
 ```bash
 docaudit footgun-drift                       # reads git's pre-push ref lines from stdin
@@ -165,24 +165,26 @@ nearest integration branch. A declaration counts only if its line is in the
 a declaration already on the remote, even if the file around it also changed,
 is never re-flagged. File scope is every `.md` the diff touches, **not** the
 doc-graph ignore layers or the `leaks` git-tracking scope — a `.claude/` skill
-file added in the same push is checked exactly like `CLAUDE.md`, because an
-unjustified footgun there is just as undocumented.
+file added in the same push is checked exactly like `CLAUDE.md`, because a
+footgun there is just as undocumented.
 
-Exit codes match the other checks: `1` on a finding, `0` clean, `2` on a git/
-usage error. `DOCAUDIT_FOOTGUN_OFF=1` disables it outright (for a repo that
-doesn't use the footgun-with-rationale convention); `docaudit install-hook
---no-footgun-drift` generates a hook that never invokes it.
+Because it's advisory, its exit code is always `0` on findings (only `2` on a
+git/usage error), so it can ride in the pre-push hook without ever aborting a
+push. `DOCAUDIT_FOOTGUN_OFF=1` silences it outright (for a repo that doesn't use
+the `Footgun:` note convention); `docaudit install-hook --no-footgun-drift`
+generates a hook that never invokes it.
 
-It is a **heuristic, not a judge**: it catches the bare-assertion case (a
-footgun declaration added with no "why" anywhere nearby) but cannot rank
-whether a given rationale is actually *good* — that's a judgment call docaudit,
-being deterministic, doesn't make. On a finding, the printed message asks two
-questions: (1) is this a real footgun — a trap you hit, a tempting-but-wrong
-approach, a re-litigated decision? (2) is it at the right doc level — an
-invariant belongs in `CLAUDE.md`, in-depth rationale in `docs/`, human-facing
-prose in `README`? If yes to both, state the "why" inline; if not, reword it
-as a plain note or move it. (There is no suppression marker — see "No inline
-markers" below; a footgun is silenced only by a nearby rationale.)
+It is a **nag, not a judge**: it reports every added declaration precisely
+because it *cannot* rank whether a stated "why" is actually good — that's a
+judgment call docaudit, being deterministic, doesn't make, so it doesn't pretend
+to. On a finding, the printed message asks two questions: (1) is this a real
+footgun — a trap you hit, a tempting-but-wrong approach, a re-litigated
+decision? (2) is it at the right doc level — an invariant belongs in
+`CLAUDE.md`, in-depth rationale in `docs/`, human-facing prose in `README`? If
+it's a real footgun, leave it (ideally with its "why"); if it's a
+note-just-in-case, reword it as a plain note or remove it — a follow-up commit is
+fine, since nothing was blocked. (There is no suppression marker — see "No
+inline markers" below.)
 
 ## Install
 
@@ -207,9 +209,9 @@ docaudit footgun-drift --range base..head  # diff-scoped: explicit range
 docaudit version                    # print version (also --version, -v)
 ```
 
-Exit codes (`docaudit [path]` and `footgun-drift` alike): `0` clean · `1`
-findings in an enforced check · `2` usage / not a git repo / malformed leak
-config.
+Exit codes for `docaudit [path]`: `0` clean · `1` findings in an enforced
+check · `2` usage / not a git repo / malformed leak config. `footgun-drift` is
+advisory — `0` whether or not it prints findings, `2` only on a git/usage error.
 
 > **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any
@@ -232,11 +234,12 @@ docaudit install-hook --force               # regenerate an existing hook (e.g. 
 docaudit install-hook --no-footgun-drift    # omit the diff-scoped footgun-drift check
 ```
 
-The generated hook runs two checks: the whole-state `docaudit .` (a bare
-invocation, so a check added in a later version is enforced without
-regenerating the hook), then the diff-scoped `docaudit footgun-drift`, fed
-git's pre-push stdin so it can scope itself to only the commit range being
-pushed. Pass `--no-footgun-drift` to omit the second check. It writes a tracked
+The generated hook runs the whole-state gate `docaudit .` (a bare invocation, so
+a check added in a later version is enforced without regenerating the hook), then
+the diff-scoped `docaudit footgun-drift`, fed git's pre-push stdin so it can scope
+itself to only the commit range being pushed. Only the first can block a push —
+`footgun-drift` is advisory (`|| true` in the hook, and it exits 0 on findings),
+so it only ever prints its nag. Pass `--no-footgun-drift` to omit it. It writes a tracked
 `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for this clone
 (other clones activate it with `git config core.hooksPath .githooks`). Refuses
 to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate into
@@ -255,10 +258,10 @@ their way through `docs/`). That fits most repos. Two exceptions:
 - Repos with genuinely unreferenced design docs will report real orphans — link
   them from `CLAUDE.md`/`README`, or accept and exclude with `--skip orphans`.
 
-Repos that don't use the footgun-with-rationale convention at all skip
-`footgun-drift` outright, since there's no rationale-labeling scheme to check
-against — it isn't a `docaudit [path]` check, so there's no `--skip` name for
-it; use `DOCAUDIT_FOOTGUN_OFF=1` or `install-hook --no-footgun-drift` instead
+Repos that don't use the `Footgun:` note convention at all opt out of
+`footgun-drift` outright — it isn't a `docaudit [path]` check, so there's no
+`--skip` name for it; use `DOCAUDIT_FOOTGUN_OFF=1` or `install-hook
+--no-footgun-drift` instead
 (see [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check)).
 
 ### Entry points (roots)
@@ -281,9 +284,10 @@ tooling that is never part of the doc graph). Add more via a `.docauditignore` f
 and `[[dir]]` sections. docaudit **never** reads a suppression comment or pragma inside
 the audited files (no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`
 equivalent, and no `<!-- footgun-ok -->` for `footgun-drift`). Such a marker would be
-silently ignored, not honored — so an unwanted finding is silenced by tuning the
-config/flags, or (for `footgun-drift`) by stating the rationale, never by annotating
-the file.
+silently ignored, not honored — so an unwanted doc-graph/leak finding is silenced by
+tuning the config/flags, never by annotating the file. `footgun-drift` has no in-file
+escape at all: it's advisory, flags every added declaration, and is opted out only
+whole-check via `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`.
 
 ## Usage logging
 

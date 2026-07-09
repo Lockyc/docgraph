@@ -192,9 +192,10 @@ func docauditBinFunc() string {
 // SHA pairs for what's being pushed) so footgun-drift can scope itself to the
 // pushed commit range. The whole-state line is a plain command, not `exec` —
 // `exec` would replace the shell process, so a failing `docaudit .` would never
-// reach the footgun-drift line below it. Under `set -e` a non-zero exit from
-// the plain command still aborts the script (and the push) immediately, so
-// fail-closed behavior is unchanged.
+// reach the footgun-drift line below it. Under `set -e` a non-zero exit from the
+// whole-state command aborts the script (and the push) immediately, so its
+// fail-closed behavior is unchanged. The footgun-drift line is ADVISORY (`|| true`,
+// and the subcommand exits 0 on findings): it prints a nag but never blocks.
 func hookScript(skip string, ignores []string, noFootgun bool) string {
 	args := ""
 	if skip != "" {
@@ -206,9 +207,11 @@ func hookScript(skip string, ignores []string, noFootgun bool) string {
 	stateLine := `"$bin"` + args + ` .`
 	footgun := ""
 	if !noFootgun {
+		// Advisory, never blocks: footgun-drift exits 0 on findings, and `|| true`
+		// swallows even an operational error so this line can never abort a push.
 		footgun = `
-# Diff-scoped: only footgun declarations ADDED in the pushed range.
-printf '%s' "$refs" | "$bin" footgun-drift .`
+# Diff-scoped ADVISORY nag: footgun declarations ADDED in the pushed range. Never blocks.
+printf '%s' "$refs" | "$bin" footgun-drift . || true`
 	}
 	return `#!/usr/bin/env bash
 # docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
@@ -569,7 +572,11 @@ func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	printFootgunDrift(stdout, findings)
-	return 1
+	// Advisory, NOT a gate: exit 0 so a footgun declaration never aborts the push.
+	// docaudit can't judge whether an added declaration is a real footgun, so it
+	// nags (the two-question test) and trusts the pusher to double-check — rather
+	// than blocking on something it can't evaluate and training a --no-verify habit.
+	return 0
 }
 
 func splitRange(s string) (string, string, bool) {
@@ -612,20 +619,23 @@ func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
 	return out
 }
 
-// printFootgunDrift renders findings with the two-question remediation.
+// printFootgunDrift renders findings with the two-question remediation. This is
+// advisory (the caller exits 0): the message exists to prompt a double-check, not
+// to justify a block.
 func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	bar := strings.Repeat("─", 82)
-	fmt.Fprintf(w, "FOOTGUNS (%d) — newly-added footgun declaration(s) without a nearby rationale:\n", len(fs))
+	fmt.Fprintf(w, "FOOTGUNS (%d) — footgun declaration(s) added in this push. This is ADVISORY: the\n", len(fs))
+	fmt.Fprintln(w, "push was NOT blocked. Go verify each is a real footgun, not a note-just-in-case:")
 	for _, f := range fs {
 		fmt.Fprintf(w, "  %s:%d → %s\n", f.File, f.Line, f.Text)
 	}
 	fmt.Fprintln(w, bar)
-	fmt.Fprintln(w, "A footgun you ADD must be a real footgun, documented at the right level. Confirm:")
+	fmt.Fprintln(w, "For each, confirm:")
 	fmt.Fprintln(w, "  (1) Is it a real footgun? — a trap you hit, a tempting-but-wrong approach, or a")
 	fmt.Fprintln(w, "      re-litigated decision, recorded WITH its rationale (the \"why\").")
 	fmt.Fprintln(w, "  (2) Is it at the right level? — invariant/footgun → CLAUDE.md; deep rationale →")
 	fmt.Fprintln(w, "      docs/; human-facing prose → README.")
-	fmt.Fprintln(w, "Fix each: state the \"why\" in the same paragraph (docaudit honors no inline")
-	fmt.Fprintln(w, "marker), or reword as a plain note / move it to the right doc.")
+	fmt.Fprintln(w, "If any is just a note-just-in-case, reword it as a plain note or remove it (a")
+	fmt.Fprintln(w, "follow-up commit is fine — docaudit did not hold the push).")
 	fmt.Fprintln(w, bar)
 }

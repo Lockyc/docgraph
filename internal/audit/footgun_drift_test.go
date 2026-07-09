@@ -84,7 +84,9 @@ func TestFootgunDriftIgnoresPreexistingDeclaration(t *testing.T) {
 	}
 }
 
-func TestFootgunDriftAddedButJustifiedPasses(t *testing.T) {
+// A rationale word no longer excuses an added declaration — every one flags, so
+// the pusher is nagged to verify it's a real footgun regardless of wording.
+func TestFootgunDriftFlagsAddedDeclarationDespiteRationale(t *testing.T) {
 	dir, base, head := commitRepo(t,
 		map[string]string{"CLAUDE.md": "intro\n"},
 		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** don't, because it races.\n"},
@@ -93,7 +95,7 @@ func TestFootgunDriftAddedButJustifiedPasses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("added-but-justified declaration must pass, got %+v", got)
+	if len(got) != 1 || got[0].Line != 3 {
+		t.Fatalf("added declaration must flag even with a rationale word, got %+v", got)
 	}
 }
