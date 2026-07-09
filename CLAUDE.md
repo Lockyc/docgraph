@@ -1,21 +1,29 @@
 # docaudit — notes for the next agent
 
-A Go CLI with two layers. `docaudit .` runs four **whole-state** checks against
+A Go CLI with three modes. `docaudit .` runs four **whole-state** checks against
 the current tree — orphans (tracked `docs/` files unreachable from the roots),
 broken internal `.md` links, untracked `.md` files, and a content scan for
 configured `leaks` patterns. Reachability follows markdown links **and**
 bare/inline-code path mentions. All four are **enforced by default**; you
 exclude one explicitly with `--skip` (there is no opt-in — an opt-in check
-enforces nothing). Separately, `docaudit footgun-drift` is a **diff-scoped**
-pre-push subcommand: it flags *every* footgun declaration added in the pushed
-range — it makes no attempt to judge rationale, never re-scans the existing
-corpus, and honors no inline suppression marker (see the no-inline-markers
-footgun). It is **advisory** (exits 0, never blocks the push): the finding is a
-nag to go double-check the declaration is a real footgun, not a gate. `footguns`
-is deliberately **not** one of the four `checkNames`; it's a separate subcommand
-with a separate trigger (a git range, not a repo path). The four whole-state
-checks exit non-zero on any finding (that's the gate); footgun-drift does not.
-Stdlib +
+enforces nothing). `docaudit footgun-drift` is a **diff-scoped** pre-push
+subcommand: it flags *every* footgun declaration added in the pushed range — it
+makes no attempt to judge rationale, never re-scans the existing corpus, and
+honors no inline suppression marker (see the no-inline-markers footgun). It is
+**advisory** (exits 0, never blocks the push): the finding is a nag to go
+double-check the declaration is a real footgun, not a gate. `docaudit doc-drift`
+is a **Stop-hook** subcommand: invoked directly (no wrapper) at the end of an
+agent turn, it scans the branch's working-tree-inclusive diff (base→worktree,
+committed + uncommitted) for two mechanical staleness classes — a **dangling
+reference** (a symbol whose definition was removed on this branch and survives
+nowhere in tracked code, but a tracked doc still names it) and **anchored value
+drift** (a constant whose numeric value changed while a doc still names the
+symbol and shows the old literal) — and **blocks the Stop** (findings on
+stderr, exit 2) on either. Neither `footguns` nor `doc-drift` is one of the four
+`checkNames`; each is a separate subcommand with its own trigger (a git range or
+a Stop invocation, not a repo path). The four whole-state checks exit non-zero
+on any finding (that's the gate); footgun-drift never blocks; doc-drift always
+blocks on a finding. Stdlib +
 `github.com/BurntSushi/toml` (config decode); shells out to `git`. It also has
 an **opt-in usage log** (one JSONL record per run, for trend-watching — see the
 logging footgun). Usage and checks are in `README.md` — this file carries the
@@ -28,6 +36,11 @@ four whole-state checks exit non-zero on a finding so a broken doc-graph blocks
 the push without a wrapper. `docaudit install-hook` writes a tracked
 `.githooks/pre-push` for that; the generated hook also runs `footgun-drift` as an
 **advisory** rider (it prints its nag but never blocks — see its footgun below).
+Separately, `docaudit doc-drift` is meant to be wired as a **Stop hook** by the
+agent harness (e.g. a Claude Code `Stop` hook entry that runs `docaudit
+doc-drift`): it fires at the end of a turn, not at push time, so a dangling
+reference or stale anchored value is caught and blocked before the agent hands
+control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
 
 ## What it is (and is not)
 
@@ -42,6 +55,14 @@ the push without a wrapper. `docaudit install-hook` writes a tracked
   markdown *content* like `leaks` does, but only the lines a `git diff` reports
   as added in the given range — the four `docaudit .` checks above have no
   range concept at all.
+- **`doc-drift` reads a *code* diff and greps *docs*, over a working-tree-
+  inclusive range.** Unlike `footgun-drift` (which diffs and scans the same
+  file type — markdown against markdown), `doc-drift` diffs tracked **code**
+  (definitions removed, constants whose value changed) and greps the *docs* for
+  stale references to what it found. Its range is base→worktree — committed
+  **and** uncommitted changes — because it fires as a Stop hook, before a
+  commit exists to diff against; `footgun-drift`'s range is always committed
+  `base..head`, because it fires at push time.
 
 ## Footguns
 
@@ -60,16 +81,18 @@ the push without a wrapper. `docaudit install-hook` writes a tracked
   check flags *every* declaration rather than trying to detect rationale, a
   whole-state re-scan would flood even harder). Do NOT re-add `footguns` to
   `checkNames` to "fix" this; the flood is exactly why it isn't there. The fix
-  was to scope the check to what's *new*: `footgun-drift` shares `doc-drift.sh`'s
-  diff-driven model — check what changed, not the whole tree — but runs as a
-  **pre-push** command, where git hands it the exact pushed range (ref lines on
-  stdin, or `--range base..head` for manual use), so it flags only footgun
-  *declarations added in that range*; content already on the remote is never
-  re-scanned. That's also why it stays a **separate subcommand** rather than
-  merging into `doc-drift.sh`: `doc-drift.sh` is a Stop hook driven by the
-  in-session code diff (a changed constant whose old literal lingers in a doc);
-  `footgun-drift` is a pre-push gate driven by git's pushed-ref range — different
-  trigger, different diff source. The four `docaudit .` checks remain
+  was to scope the check to what's *new*: it flags only footgun *declarations
+  added in that range*; content already on the remote is never re-scanned.
+  `footgun-drift` and `doc-drift` both share this check-what-changed-not-
+  the-whole-tree model, and both live in docaudit as subcommands, but stay
+  **separate** subcommands because their trigger and diff source differ:
+  `doc-drift` is a **Stop-hook** subcommand driven by the branch's
+  working-tree-inclusive code diff (a definition removed or a constant's value
+  changed, with a doc still referencing the old state); `footgun-drift` is a
+  **pre-push** subcommand driven by git's pushed-ref range (ref lines on stdin,
+  or `--range base..head` for manual use) diffing markdown against markdown.
+  Different trigger, different diff source, different file types compared — do
+  not merge them into one subcommand. The four `docaudit .` checks remain
   whole-state, unchanged: reachability, link existence, and leak content have
   no meaningful "diff" version — they're properties of the current tree, not of
   a range.
@@ -154,7 +177,15 @@ the push without a wrapper. `docaudit install-hook` writes a tracked
   (`footgun-drift` shipped a `<!-- footgun-ok -->` marker in an early cut; it was
   dropped precisely to keep this invariant absolute — and now that footgun-drift
   is advisory and flags every added declaration, there is nothing in-file to
-  exempt in the first place.)
+  exempt in the first place.) `doc-drift` keeps this invariant fully
+  consistent: it has **no** suppression surface at all — not `.docauditignore`,
+  not a CLI opt-out for a single finding, not an inline marker. Its predecessor
+  (a bash script of the same name) carried a `<!-- doc-drift-ignore -->`
+  marker; that marker did not come across. A flagged reference here is a
+  situation-based judgment call — reconcile the doc, or confirm it's
+  intentional framed history and move on — de-duped only by the once-per-HEAD
+  loop-guard (`DOC_DRIFT_OFF=1` remains the one whole-check opt-out, mirroring
+  `DOCAUDIT_FOOTGUN_OFF`).
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
@@ -239,6 +270,10 @@ A repo that doesn't use the `Footgun:` note convention at all opts out of
 `footgun-drift` entirely rather than passing `--skip` (it isn't a `docaudit .`
 check to skip): set `DOCAUDIT_FOOTGUN_OFF=1`, or generate the hook with
 `install-hook --no-footgun-drift` so it's never invoked in the first place.
+Likewise, a repo that doesn't use the anchored-symbol-and-value convention
+`doc-drift` relies on (a doc naming a code symbol, a constant it also shows the
+literal value of) disables `doc-drift` outright with `DOC_DRIFT_OFF=1` — it
+isn't a `docaudit .` check either, so there's no `--skip` name for it.
 
 ## Roots
 
@@ -250,21 +285,30 @@ docs/" with zero config.
 
 - `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the four
   whole-state checks), `runFootgunDrift(args, stdout, stderr) int` (the
-  diff-scoped subcommand), report format, `maybeLog` (opt-in usage logging
-  side-channel).
+  diff-scoped pre-push subcommand), `runDocDrift(args, stdin, stdout, stderr)
+  int` (the Stop-hook subcommand — checks `DOC_DRIFT_OFF`, resolves the diff
+  spec via `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints
+  via `printDocDrift` and returns 2, gated on bare invocation by
+  `docDriftGuardOK`'s once-per-HEAD marker under `docDriftStateDir()`), report
+  format, `maybeLog` (opt-in usage logging side-channel).
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
-  `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` uses to read a
-  range instead of a tree snapshot), `leaks.go` (TOML config decode +
-  dir-scoped content scan), `footguns.go` (the declaration scanner —
-  `scanDeclarations`/`isFootgunDeclaration`; a *declaration* is a footgun being
-  introduced, not a passing mention of one, and every one is reported —
-  `scanDeclarations` does no rationale filtering),
+  `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` and
+  `doc_drift.go` use to read a range instead of a tree snapshot), `leaks.go`
+  (TOML config decode + dir-scoped content scan), `footguns.go` (the
+  declaration scanner — `scanDeclarations`/`isFootgunDeclaration`; a
+  *declaration* is a footgun being introduced, not a passing mention of one,
+  and every one is reported — `scanDeclarations` does no rationale filtering),
   `footgun_drift.go` (`FootgunDrift`: runs `scanDeclarations` per range,
   keeps only declarations whose line is in that range's added-line set,
-  dedupes by file:line), `audit.go` (`Audit` → `Report`, the whole-state
-  orchestrator; unrelated to `FootgunDrift`), `usage.go` (usage-log config +
-  tiered `BuildRecord` + best-effort `LogRun`).
+  dedupes by file:line), `doc_drift.go` (`DocDrift` + helpers
+  `looksLikeSymbol`, `removedNotReadded`, `changedConstants`, `gitDiff`,
+  `stillDefinedInCode`, `docGrepSymbol`, `docGrepValue`: diffs `gitDiff(root,
+  spec)`, finds removed-and-not-readded definitions and changed numeric
+  constants, then greps tracked docs for a lingering reference to either),
+  `audit.go` (`Audit` → `Report`, the whole-state orchestrator; unrelated to
+  `FootgunDrift`/`DocDrift`), `usage.go` (usage-log config + tiered
+  `BuildRecord` + best-effort `LogRun`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not

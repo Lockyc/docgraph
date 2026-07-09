@@ -20,6 +20,13 @@ real footgun, but **exits 0 and never blocks the push**. It isn't one of the
 checks below and isn't exclude-able with `--skip`; see
 [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check).
 
+`docaudit doc-drift` is a third mode: a **diff-scoped, blocking** subcommand
+meant to run as a **Stop hook** (invoked directly, no wrapper) at the end of an
+agent turn. It scans the branch's working-tree-inclusive diff for code that
+drifted away from what a tracked doc still says, and **exits 2** (findings on
+stderr) to block the turn from ending on stale docs; see
+[`doc-drift`](#docaudit-doc-drift).
+
 **Scope: project *documents*, not project *content*** (for the doc-graph
 checks). Those checks audit the docs that explain the project (`docs/`,
 `CLAUDE.md`, config-dir READMEs), not content a site framework routes and renders
@@ -186,6 +193,57 @@ note-just-in-case, reword it as a plain note or remove it — a follow-up commit
 fine, since nothing was blocked. (There is no suppression marker — see "No
 inline markers" below.)
 
+### `docaudit doc-drift`
+
+A **Stop-hook** doc-staleness gate: wire it into your agent harness's `Stop`
+hook (invoked directly — `docaudit doc-drift`, no wrapper script) so it runs at
+the end of every turn and **blocks** the turn from ending while a tracked doc
+still describes code that just changed underneath it.
+
+It scans a **working-tree-inclusive** range — base→worktree, covering both
+committed and uncommitted changes — because it fires before a commit
+necessarily exists to diff against. On a trunk branch (no integration branch
+ahead of it) the base is `HEAD` itself, so the range is uncommitted-only; on a
+feature branch it's the closest integration branch's merge-base, so the range
+covers everything done on the branch so far. Contrast `footgun-drift`, whose
+range is always a **committed** `base..head`.
+
+It flags two mechanical staleness classes:
+
+1. **Dangling reference** — a symbol whose *definition* was removed in the
+   diff and doesn't survive anywhere else in tracked code, but a tracked doc
+   still names it.
+2. **Anchored value drift** — a constant whose numeric *value* changed in the
+   diff while a tracked doc still names the constant **and** still shows the
+   old literal.
+
+```bash
+docaudit doc-drift                        # bare: resolves the diff base itself, applies the loop-guard
+docaudit doc-drift --range base..head     # explicit range, for manual use — bypasses the loop-guard
+```
+
+Bare invocation applies a **once-per-HEAD loop-guard**: after it nags for a
+given `HEAD`, a repeat bare invocation at the same `HEAD` is silent, so an
+agent that keeps ending its turn without acting on the finding isn't nagged on
+every single Stop. This is a de-dupe on the *nag*, not a suppressor of the
+*finding* — the next commit moves `HEAD` and re-arms it. `--range` bypasses the
+guard entirely (deterministic, for manual runs).
+
+Unlike every other check in this tool, a `doc-drift` finding **blocks**: it
+prints to **stderr** and exits **2**, versus `footgun-drift`'s advisory exit
+`0`. `DOC_DRIFT_OFF=1` disables it outright — for a repo that doesn't use the
+anchored-symbol-and-value convention it relies on (a doc naming a code symbol,
+and for value drift, also showing the literal it's currently set to).
+
+It has **no suppression surface** beyond that whole-check kill switch: no
+`.docauditignore`, no per-finding CLI flag, no inline marker. A flagged
+reference is a situation-based judgment call — reconcile the doc, or confirm
+it's intentional framed history and move on.
+
+It only catches the two mechanical classes above — a paraphrased value or a
+reversed decision with no anchored symbol is out of scope; run a semantic doc
+sweep for those.
+
 ## Install
 
 ```bash
@@ -206,12 +264,16 @@ docaudit --leaks-config <path>      # override the global leak rules file
 docaudit --config <path>            # override the global config.toml (usage logging)
 docaudit footgun-drift              # diff-scoped: reads pre-push ref lines from stdin
 docaudit footgun-drift --range base..head  # diff-scoped: explicit range
+docaudit doc-drift                  # Stop-hook: working-tree-inclusive diff, once-per-HEAD loop-guard
+docaudit doc-drift --range base..head  # Stop-hook: explicit range, bypasses the loop-guard
 docaudit version                    # print version (also --version, -v)
 ```
 
 Exit codes for `docaudit [path]`: `0` clean · `1` findings in an enforced
 check · `2` usage / not a git repo / malformed leak config. `footgun-drift` is
 advisory — `0` whether or not it prints findings, `2` only on a git/usage error.
+`doc-drift` **blocks**: `0` clean (or silenced by the loop-guard) · `2` on a
+finding (printed to stderr) or a git/usage error.
 
 > **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any
@@ -287,7 +349,11 @@ equivalent, and no `<!-- footgun-ok -->` for `footgun-drift`). Such a marker wou
 silently ignored, not honored — so an unwanted doc-graph/leak finding is silenced by
 tuning the config/flags, never by annotating the file. `footgun-drift` has no in-file
 escape at all: it's advisory, flags every added declaration, and is opted out only
-whole-check via `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`.
+whole-check via `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`. `doc-drift` has no
+in-file escape either, and no per-finding CLI flag: the sole opt-out is the
+whole-check `DOC_DRIFT_OFF=1`; a flagged reference is otherwise a situation-based
+judgment call, de-duped as a *nag* (not silenced as a finding) by its
+once-per-HEAD loop-guard.
 
 ## Usage logging
 
@@ -378,6 +444,7 @@ Layout: `main.go` is a thin CLI (flags → audit → report → exit code), beca
 keeping flag-parsing and reporting separate from the audit logic lets the
 checks be tested without a CLI in the loop; `internal/audit/` holds that logic
 (link parsing, glob-ignore, git wrappers plus diff helpers, the whole-state
-`Audit` orchestrator, the leak scanner, and the diff-scoped `FootgunDrift`
-orchestrator built on the declaration scanner). See `CLAUDE.md` for design
-invariants.
+`Audit` orchestrator, the leak scanner, the diff-scoped `FootgunDrift`
+orchestrator built on the declaration scanner, and the diff-scoped `DocDrift`
+orchestrator that diffs code and greps docs for the two staleness classes). See
+`CLAUDE.md` for design invariants.
