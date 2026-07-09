@@ -74,6 +74,31 @@ func TestLeakScan(t *testing.T) {
 	}
 }
 
+func TestLeakScanScansTrackedToolingDespiteDefaultIgnores(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		".claude/skills/foo.md": "internal note: lsjc.au\n",
+		".docauditignore":       ".claude/**\n",
+	}, []string{".claude/skills/foo.md", ".docauditignore"})
+
+	rules, err := ParseLeakRules(strings.NewReader("lsjc\\.au\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := LeakScan(dir, rules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hit bool
+	for _, f := range found {
+		if f.File == ".claude/skills/foo.md" {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Errorf("want leak found in tracked .claude/skills/foo.md despite defaultIgnores + .docauditignore, got %+v", found)
+	}
+}
+
 func TestLeakScanAllowSuppressesBuiltin(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		"README.md": "example key ghp_0123456789abcdefghijklmnopqrstuvwx\n",

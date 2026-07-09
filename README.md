@@ -38,6 +38,13 @@ Scans **tracked file content** (working tree only, never git history) for
 owner-specific / secret strings, for use before a repo goes public. Enable with
 `--checks leaks` (alone or alongside the others).
 
+Scope is governed by **git tracking**, not the doc-graph ignore layers: every
+`git ls-files` entry is scanned (so `.gitignore` governs what's excluded), and
+the `defaultIgnores`/`.docauditignore` used by the orphans/broken/untracked
+checks do **not** narrow the leak pass — only an explicit `--ignore` glob does.
+A tracked `.claude/` config still ships in a public clone, so it stays in
+scope even though it's excluded from the doc-graph checks.
+
 Patterns come from a **global** rules file — never committed to a repo, because a
 per-repo deny list would itself enumerate your sensitive terms. Resolution order:
 `--leaks-config <path>` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`

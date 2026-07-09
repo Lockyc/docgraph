@@ -102,23 +102,24 @@ func looksBinary(b []byte) bool {
 	return false
 }
 
-// LeakScan walks tracked files and reports every line span matching a deny rule
-// (user rules + built-ins) that no allow rule covers. Binary and ignored files
-// (defaults + .docauditignore + extraIgnores) are skipped. History is never read.
+// LeakScan walks every git-tracked file and reports every line span matching a
+// deny rule (user rules + built-ins) that no allow rule covers. Binary files are
+// skipped. Scope is governed by git tracking, not the doc-graph ignore layers: a
+// tracked file ships publicly, so it is in-scope regardless of defaultIgnores or
+// .docauditignore (both are doc-graph-scoped and do not apply here) — a tracked
+// .claude/ config still ships and is exactly where owner-specific strings hide.
+// Only the explicit extraIgnores (the CLI --ignore flag) narrows the scan, as a
+// per-run escape hatch. History is never read.
 func LeakScan(repoRoot string, rules LeakRules, extraIgnores []string) ([]LeakFinding, error) {
 	deny := append(append([]LeakRule{}, rules.deny...), builtinLeakRules()...)
 	scanRules := LeakRules{deny: deny, allow: rules.allow}
-	globs, err := loadIgnores(repoRoot, extraIgnores)
-	if err != nil {
-		return nil, err
-	}
 	files, err := gitLines(repoRoot, "ls-files")
 	if err != nil {
 		return nil, err
 	}
 	var findings []LeakFinding
 	for _, f := range files {
-		if matchesIgnore(f, globs) {
+		if matchesIgnore(f, extraIgnores) {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(f)))

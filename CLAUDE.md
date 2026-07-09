@@ -43,6 +43,14 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   false green. Built-in secret patterns (PEM/AWS/GitHub/Slack shapes) always run
   and are suppressible by `!` allow lines. History is out of scope (owner's call);
   that stays with the manual `pre-public-leak-audit` skill.
+- **`leaks` scope is git tracking, not the doc-graph ignore layers.** `LeakScan`
+  scans every file `git ls-files` returns — so `.gitignore` governs what's
+  in-scope — and honors only the explicit `--ignore` CLI globs as a per-run
+  escape hatch. It does **not** apply `defaultIgnores` or `.docauditignore`: a
+  tracked file ships publicly regardless of the doc-graph scope, so a tracked
+  `.claude/` config (excluded from orphans/broken/untracked because it isn't
+  documentation) is exactly where owner-specific strings hide and must stay
+  in-scope for the leak pass.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive
