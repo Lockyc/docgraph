@@ -72,3 +72,11 @@ func TestDeclOnePerDeclaration(t *testing.T) {
 		t.Fatalf("two bullet declarations (contiguous) → two findings, got %+v", got)
 	}
 }
+
+func TestDeclMixedSiblingsInParagraph(t *testing.T) {
+	// Contiguous bullets (one paragraph): A justified, B not. B must still flag.
+	got := decls(t, "- **Footgun:** A, because reasons.\n- **Footgun:** B, no why.\n")
+	if len(got) != 1 || got[0].Line != 2 {
+		t.Fatalf("unjustified sibling B must flag at line 2, got %+v", got)
+	}
+}

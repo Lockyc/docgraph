@@ -41,13 +41,14 @@ func isFootgunDeclaration(line string) bool {
 }
 
 // scanDeclarations reports every footgun declaration whose window lacks a
-// rationale signal or ack marker. Window = the declaration's paragraph (a
-// maximal run of contiguous non-blank lines); if that paragraph is a single line
-// or a heading, it extends to include the next paragraph, so a heading
+// rationale signal or ack marker. A declaration's window starts at its own line
+// and is bounded by the NEXT declaration in the same paragraph (so a justified
+// sibling in a tight bullet list cannot suppress an unjustified neighbour). If
+// the declaration owns the tail of its paragraph and that paragraph is a lone
+// line or a heading, the window extends into the next paragraph — so a heading
 // declaration sees the explanation that follows it.
 func scanDeclarations(content string) []declFinding {
 	lines := strings.Split(content, "\n")
-	// paragraph index per line: for each line, the [start,end) of its paragraph.
 	type para struct{ start, end int } // end exclusive
 	var paras []para
 	i := 0
@@ -62,31 +63,36 @@ func scanDeclarations(content string) []declFinding {
 		}
 		paras = append(paras, para{start, i})
 	}
-	// map a line -> its paragraph index
 	paraOf := make(map[int]int)
 	for pi, p := range paras {
 		for l := p.start; l < p.end; l++ {
 			paraOf[l] = pi
 		}
 	}
-	windowText := func(pi int) string {
-		p := paras[pi]
-		text := strings.Join(lines[p.start:p.end], "\n")
-		single := p.end-p.start == 1
-		heading := footgunHeading.MatchString(lines[p.start])
-		if (single || heading) && pi+1 < len(paras) {
-			np := paras[pi+1]
-			text += "\n" + strings.Join(lines[np.start:np.end], "\n")
-		}
-		return text
-	}
 	var out []declFinding
 	for ln, line := range lines {
 		if !isFootgunDeclaration(line) {
 			continue
 		}
-		w := windowText(paraOf[ln])
-		if footgunRationaleSignals.MatchString(w) || footgunAckMarker.MatchString(w) {
+		pi := paraOf[ln]
+		p := paras[pi]
+		boundEnd := p.end
+		for k := ln + 1; k < p.end; k++ {
+			if isFootgunDeclaration(lines[k]) {
+				boundEnd = k
+				break
+			}
+		}
+		text := strings.Join(lines[ln:boundEnd], "\n")
+		if boundEnd == p.end {
+			single := boundEnd-ln == 1
+			heading := footgunHeading.MatchString(line)
+			if (single || heading) && pi+1 < len(paras) {
+				np := paras[pi+1]
+				text += "\n" + strings.Join(lines[np.start:np.end], "\n")
+			}
+		}
+		if footgunRationaleSignals.MatchString(text) || footgunAckMarker.MatchString(text) {
 			continue
 		}
 		out = append(out, declFinding{Line: ln + 1, Text: strings.TrimSpace(line)})
