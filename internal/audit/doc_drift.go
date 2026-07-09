@@ -209,3 +209,72 @@ func docGrepValue(root, name, old string) ([]DocHit, error) {
 	}
 	return hits, nil
 }
+
+// DriftKind distinguishes the two mechanical staleness classes.
+type DriftKind int
+
+const (
+	Dangling   DriftKind = iota // symbol definition removed, doc still names it
+	ValueDrift                  // constant value changed, doc still shows the old literal
+)
+
+// DocDriftFinding groups one stale symbol with the doc locations referencing it.
+// Old is the previous literal (ValueDrift only).
+type DocDriftFinding struct {
+	Symbol string
+	Kind   DriftKind
+	Old    string
+	Hits   []DocHit
+}
+
+// DocDrift scans `git diff <spec>` for (A) definitions removed on this change set
+// that survive nowhere in code yet are still named in a tracked doc, and (B)
+// constants whose value changed while a doc still names the symbol and shows the
+// old literal. spec is passed straight to `git diff` (see gitDiff).
+func DocDrift(root, spec string) ([]DocDriftFinding, error) {
+	diff, err := gitDiff(root, spec)
+	if err != nil {
+		return nil, err
+	}
+	if diff == "" {
+		return nil, nil
+	}
+	var out []DocDriftFinding
+
+	// (A) dangling references
+	n := 0
+	for _, sym := range removedNotReadded(diff) {
+		if !looksLikeSymbol(sym) || stillDefinedInCode(root, sym) {
+			continue
+		}
+		if n++; n > 40 {
+			break
+		}
+		hits, err := docGrepSymbol(root, sym)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			out = append(out, DocDriftFinding{Symbol: sym, Kind: Dangling, Hits: hits})
+		}
+	}
+
+	// (B) anchored value drift
+	m := 0
+	for _, c := range changedConstants(diff) {
+		if !looksLikeSymbol(c.Name) {
+			continue
+		}
+		if m++; m > 40 {
+			break
+		}
+		hits, err := docGrepValue(root, c.Name, c.Old)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) > 0 {
+			out = append(out, DocDriftFinding{Symbol: c.Name, Kind: ValueDrift, Old: c.Old, Hits: hits})
+		}
+	}
+	return out, nil
+}

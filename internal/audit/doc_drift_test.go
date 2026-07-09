@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -115,5 +116,100 @@ func TestDocGrepValueNoMatch(t *testing.T) {
 	}
 	if len(hits) != 0 {
 		t.Fatalf("docGrepValue hits = %+v, want none", hits)
+	}
+}
+
+func TestDocDriftDanglingReference(t *testing.T) {
+	// base defines OldWidget and a doc names it; head removes the def, doc unchanged.
+	dir, base, _ := commitRepo(t,
+		map[string]string{"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n"},
+		map[string]string{"x.go": "package x\n"},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Symbol != "OldWidget" || got[0].Kind != Dangling {
+		t.Fatalf("want one Dangling OldWidget finding, got %+v", got)
+	}
+	if len(got[0].Hits) != 1 || got[0].Hits[0].File != "CLAUDE.md" {
+		t.Fatalf("want a CLAUDE.md hit, got %+v", got[0].Hits)
+	}
+}
+
+func TestDocDriftStillDefinedElsewhereNotFlagged(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{"a.go": "type OldWidget struct{}\n", "b.go": "type OldWidget struct{}\n", "CLAUDE.md": "OldWidget\n"},
+		map[string]string{"a.go": "package x\n"}, // removed from a.go; b.go still has it
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("symbol still defined in b.go -> not dangling, got %+v", got)
+	}
+}
+
+func TestDocDriftFiltersUndistinctiveSymbol(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{"x.go": "func handleClick() {}\n", "CLAUDE.md": "handleClick\n"},
+		map[string]string{"x.go": "package x\n"},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("camelCase handleClick is not distinctive -> filtered, got %+v", got)
+	}
+}
+
+func TestDocDriftValueDrift(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{"cfg.go": "const MAX_ROOTS = 1000\n", "CLAUDE.md": "MAX_ROOTS is 1000.\n"},
+		map[string]string{"cfg.go": "const MAX_ROOTS = 2000\n"},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Symbol != "MAX_ROOTS" || got[0].Kind != ValueDrift || got[0].Old != "1000" {
+		t.Fatalf("want one ValueDrift MAX_ROOTS old=1000, got %+v", got)
+	}
+}
+
+func TestDocDriftValueReconciledNotFlagged(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{"cfg.go": "const MAX_ROOTS = 1000\n", "CLAUDE.md": "MAX_ROOTS is 1000.\n"},
+		map[string]string{"cfg.go": "const MAX_ROOTS = 2000\n", "CLAUDE.md": "MAX_ROOTS is 2000.\n"},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("doc updated to new value -> no drift, got %+v", got)
+	}
+}
+
+func TestDocDriftIncludesUncommittedWorkingTree(t *testing.T) {
+	// base committed with def + doc; remove the def in the WORKING TREE, no commit.
+	dir := setupRepo(t, map[string]string{
+		"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n",
+	}, []string{"x.go", "CLAUDE.md"})
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	writeFile(t, dir, "x.go", "package x\n") // uncommitted removal
+	got, err := DocDrift(dir, "HEAD")        // diff worktree vs HEAD
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Symbol != "OldWidget" {
+		t.Fatalf("uncommitted removal must be flagged, got %+v", got)
 	}
 }
