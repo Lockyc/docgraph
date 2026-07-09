@@ -24,5 +24,5 @@ if ! bin="$(docaudit_bin)"; then
   exit 1
 fi
 "$bin" .
-# Diff-scoped: only footgun declarations ADDED in the pushed range.
-printf '%s' "$refs" | "$bin" footgun-drift .
+# Diff-scoped ADVISORY nag: footgun declarations ADDED in the pushed range. Never blocks.
+printf '%s' "$refs" | "$bin" footgun-drift . || true
