@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,6 +34,56 @@ func TestCompileLeaksBadRegex(t *testing.T) {
 	_, err := LeakConfig{Regex: []string{"(unclosed"}}.compile()
 	if err == nil || !strings.Contains(err.Error(), "leaks regex") {
 		t.Errorf("want a leaks-regex compile error, got %v", err)
+	}
+}
+
+// J1: a regexp deny is case-insensitive by default — a footprint term written in
+// a different casing must NOT slip the gate (false negatives are the cardinal sin).
+func TestLeakScanRegexDenyIsCaseInsensitive(t *testing.T) {
+	dir := setupRepo(t, map[string]string{"a.md": "host Nucleus-Prod here\n"}, []string{"a.md"})
+	found, err := LeakScan(dir, LeakConfig{Regex: []string{"nucleus"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("regex deny must be case-insensitive (catch 'Nucleus'), got %+v", found)
+	}
+}
+
+// J1: allow_regex is case-insensitive too, so it suppresses a deny match whose
+// casing differs from the allow pattern.
+func TestLeakScanAllowRegexIsCaseInsensitive(t *testing.T) {
+	dir := setupRepo(t, map[string]string{"a.md": "id au.LSJC.curator ok\n"}, []string{"a.md"})
+	found, err := LeakScan(dir, LeakConfig{Terms: []string{"lsjc"}, AllowRegex: []string{`au\.lsjc\.[a-z]+`}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("case-insensitive allow_regex should suppress the match, got %+v", found)
+	}
+}
+
+// J2: a non-absolute [[dir]] path is a fatal config error, not a silent no-op.
+func TestCompileDirPathRelativeIsError(t *testing.T) {
+	_, err := LeakConfig{Dir: []DirRule{{Path: "relative/dir"}}}.compile()
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("a non-absolute [[dir]] path must be a config error, got %v", err)
+	}
+}
+
+// J2: a leading ~/ in a [[dir]] path expands to the home dir.
+func TestCompileDirPathTildeExpanded(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	cl, err := LeakConfig{Dir: []DirRule{{Path: "~/proj"}}}.compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, "proj")
+	if len(cl.dirs) != 1 || cl.dirs[0].path != want {
+		t.Errorf("~ must expand to %q, got %+v", want, cl.dirs)
 	}
 }
 

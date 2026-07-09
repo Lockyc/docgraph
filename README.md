@@ -56,11 +56,14 @@ per-repo deny (or allow) list would itself enumerate your sensitive terms.
 Resolution order: `--leaks-config <path>` → `$DOCAUDIT_LEAKS` →
 `os.UserConfigDir()/docaudit/leaks.toml`.
 
-Top-level `terms` match literally and case-insensitively; `regex` are Go regexps
-(opt into `(?i)` yourself). `allow`/`allow_regex` suppress a deny match they cover.
-`[[dir]]` sections scope exceptions to files under an absolute `path` (a whole repo
-or a subdir): `ignore` globs (relative to `path`) drop files from the scan, and
-`allow`/`allow_regex` suppress terms within that subtree.
+Top-level `terms` match literally and case-insensitively; `regex`/`allow_regex`
+are Go regexps, **also case-insensitive by default** (a leak must be caught in any
+casing — opt out per-pattern with `(?-i)`). `allow`/`allow_regex` suppress a deny
+match they cover. `[[dir]]` sections scope exceptions to files under an absolute
+`path` (a whole repo or a subdir; a leading `~/` is expanded, and a non-absolute
+`path` is a fatal config error rather than a silent no-op): `ignore` globs
+(relative to `path`) drop files from the scan, and `allow`/`allow_regex` suppress
+terms within that subtree.
 
     terms       = ["nucleus", "lachlan@lsjc.com.au", "/Users/lockyc"]
     regex       = ['192\.168\.1\.\d+']

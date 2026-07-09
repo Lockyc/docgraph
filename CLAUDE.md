@@ -42,14 +42,16 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   enumerates every sensitive term the owner has). The footprint vocabulary is
   also identical across repos. So `leaks` reads a **TOML** file at
   `--leaks-config` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks.toml`,
-  with top-level `terms` (literal, case-insensitive) / `regex` (opt into `(?i)`
-  yourself) / `allow` / `allow_regex` deny-and-exception arrays, plus `[[dir]]`
-  sections that scope an `ignore`/`allow`/`allow_regex` set to files under an
-  absolute `path`. Because leaks runs by default (incl. in CI, which has no
-  global file), an **absent** config is NOT fatal — it degrades to the built-in
-  patterns plus a warning; a **malformed** config (bad TOML, or a bad regexp in
-  any `regex`/`allow_regex` field) IS fatal (exit 2), since that's a real bug,
-  not the common "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks
+  with top-level `terms` (literal, case-insensitive) / `regex` (also
+  case-insensitive by default — opt out per-pattern with `(?-i)`; a leak must be
+  caught in any casing) / `allow` / `allow_regex` deny-and-exception arrays, plus
+  `[[dir]]` sections that scope an `ignore`/`allow`/`allow_regex` set to files
+  under an absolute `path` (a leading `~/` expands). Because leaks runs by default
+  (incl. in CI, which has no global file), an **absent** config is NOT fatal — it
+  degrades to the built-in patterns plus a warning; a **malformed** config (bad
+  TOML, a bad regexp in any `regex`/`allow_regex` field, or a non-absolute
+  `[[dir]]` `path`) IS fatal (exit 2), since that's a real bug, not the common
+  "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks
   being default-on means a missing global file is the normal CI/fresh-clone
   state, and failing there would brick every push. Built-in secret patterns
   (PEM/AWS/GitHub/Slack shapes) always run and are suppressible by `allow`/
