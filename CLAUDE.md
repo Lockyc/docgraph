@@ -1,13 +1,13 @@
 # docaudit — notes for the next agent
 
-A Go CLI that audits a repo's **agent-facing documentation graph**: orphans
+A Go CLI that audits a repo's **agent-facing documentation graph** — orphans
 (tracked `docs/` files unreachable from the roots), broken internal `.md` links,
-and untracked `.md` files. Reachability follows markdown links **and** bare/
-inline-code path mentions. A fourth, opt-in `leaks` check scans tracked file
-content for configured leak patterns (see the footgun below). Exits non-zero on
-a finding in a selected check (`--checks`, default the three doc-graph checks;
-`leaks` is opt-in). Stdlib only; shells out to `git`. Usage and checks are in
-`README.md` — this file carries the invariants and footguns.
+untracked `.md` files — **and** scans tracked file content for configured `leaks`
+patterns. Reachability follows markdown links **and** bare/inline-code path
+mentions. All four checks are **enforced by default**; you exclude one explicitly
+with `--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
+non-zero on any finding in an enforced check. Stdlib only; shells out to `git`.
+Usage and checks are in `README.md` — this file carries the invariants and footguns.
 
 ## Intended use
 
@@ -21,8 +21,8 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
 - **Reads doc-graph structure and, for the `leaks` check, file content.** The
   three doc-graph checks (orphans/broken/untracked) traverse only the link graph.
-  The opt-in `leaks` check additionally scans tracked file *content* (code
-  included) for configured leak patterns. It never reads git history.
+  The `leaks` check additionally scans tracked file *content* (code included) for
+  configured leak patterns. It never reads git history.
 
 ## Footguns
 
@@ -34,17 +34,30 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   its purpose.
 - **Do NOT merge this with `doc-drift.sh`.** That Stop hook is a *content-vs-code*
   drift check driven by the code diff (a changed constant whose old literal lingers
-  in a doc). `docaudit` audits *repo state* — doc-graph integrity plus, opt-in, a
-  content leak scan — not diffs. Different inputs and cadence; keep them separate.
+  in a doc). `docaudit` audits *repo state* — doc-graph integrity plus a content
+  leak scan — not diffs. Different inputs and cadence; keep them separate.
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates every sensitive term the owner has). The footprint vocabulary is
   also identical across repos. So `leaks` reads `--leaks-config` →
-  `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`, and selecting `leaks`
-  with no resolvable file is **fail-closed (exit 2)** — a silent skip would be a
-  false green. Built-in secret patterns (PEM/AWS/GitHub/Slack shapes) always run
-  and are suppressible by `!` allow lines. History is out of scope (owner's call);
-  that stays with the manual `pre-public-leak-audit` skill.
+  `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`. Because leaks runs by
+  default (incl. in CI, which has no global file), an **absent** config is NOT
+  fatal — it degrades to the built-in patterns plus a warning; a **malformed**
+  config (bad regex) IS fatal (exit 2), since that's a real bug, not the common
+  "not set up yet" case. Do NOT restore hard-fail-on-absent: leaks being default-on
+  means a missing global file is the normal CI/fresh-clone state, and failing there
+  would brick every push. Built-in secret patterns (PEM/AWS/GitHub/Slack shapes)
+  always run and are suppressible by `!` allow lines. History is out of scope
+  (owner's call); that stays with the manual `pre-public-leak-audit` skill.
+- **Enforce-by-default, exclude explicitly — never an opt-in/include model.**
+  Every check runs by default; `--skip <check[,check]>` is the only way to not run
+  one. The removed `--checks` (include-list) flag could not enforce: a check added
+  later is silently absent from every existing `--checks` list, so it enforces
+  nowhere until each repo edits its list — exactly how `leaks` first shipped,
+  invisible, under that model. With the exclude model a new check is enforced
+  everywhere the day it lands, and the generated hook runs a bare `docaudit .` for
+  the same reason. `run` and `install-hook` reject a stray `--checks` with a
+  migration message (exit 2). Do NOT reintroduce an include-list default.
 - **`leaks` scope is git tracking, not the doc-graph ignore layers.** `LeakScan`
   scans every file `git ls-files` returns — so `.gitignore` governs what's
   in-scope — and honors only the explicit `--ignore` CLI globs as a per-run
@@ -77,14 +90,14 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   checked). `.claude/**` files are runtime tooling; a config-dir README is not.
   Keep that distinction.
 
-## Doc models (why `--checks` exists)
+## Doc models (why `--skip` exists)
 
 Repos fall into models the orphan check treats differently:
 - **A — prose-linked**: entry docs link/mention through `docs/`. Orphans are
-  real. Gate all three checks.
+  real. Enforce every check (the default).
 - **B — nav-driven MkDocs**: `docs/` with no `nav:` block; MkDocs auto-builds
   the sidebar, pages never cross-link → every page is a prose-orphan *by design*.
-  Gate `--checks broken,untracked` only.
+  Run with `--skip orphans`.
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
 
@@ -117,8 +130,8 @@ docs/" with zero config.
 - **Semver, `v`-prefixed tags.** The tracked root **`VERSION`** file is the single source
   of truth, `go:embed`-ed via `version.go` so `docaudit version` (also `--version`, `-v`)
   self-reports — never restate the version elsewhere. Consumers `go install …@latest`, so
-  a release moves everyone's pinned tool: keep `main` releasable and bump minor for a new
-  feature, patch for a fix.
+  a release moves everyone's pinned tool: keep `main` releasable and bump major for a
+  breaking CLI change, minor for a new feature, patch for a fix.
 - **Cut a release** from `dev` with `VERSION` bumped + committed: `just release` runs
   `gate`, fast-forwards `main`, tags `v<VERSION>`, and publishes the GitHub release.
 

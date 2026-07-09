@@ -9,6 +9,11 @@ import (
 	"testing"
 )
 
+// noCfg returns a leaks-config path guaranteed not to exist, so a test that isn't
+// about leak rules stays deterministic (built-in patterns only) instead of picking
+// up the dev machine's real ~/.config/docaudit/leaks.
+func noCfg(dir string) string { return filepath.Join(dir, "no-leaks-cfg") }
+
 func mkRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -32,7 +37,7 @@ func mkRepo(t *testing.T) string {
 func TestRunFindingsExit1(t *testing.T) {
 	dir := mkRepo(t)
 	var out, errb bytes.Buffer
-	code := run([]string{dir}, &out, &errb)
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1\n%s", code, out.String())
 	}
@@ -61,31 +66,44 @@ func mkOrphanRepo(t *testing.T) string {
 	return dir
 }
 
-func TestRunChecksExcludesOrphans(t *testing.T) {
+func TestRunSkipExcludesOrphans(t *testing.T) {
 	dir := mkOrphanRepo(t)
 	var out, errb bytes.Buffer
-	code := run([]string{"--checks", "broken,untracked", dir}, &out, &errb)
+	code := run([]string{"--skip", "orphans", "--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if code != 0 {
-		t.Fatalf("exit = %d, want 0 (orphans not selected)\n%s", code, out.String())
+		t.Fatalf("exit = %d, want 0 (orphans skipped)\n%s", code, out.String())
 	}
 	if bytes.Contains(out.Bytes(), []byte("ORPHANS")) {
-		t.Errorf("ORPHANS section shown despite not being selected:\n%s", out.String())
+		t.Errorf("ORPHANS section shown despite --skip orphans:\n%s", out.String())
 	}
 }
 
-func TestRunChecksDefaultGatesOrphans(t *testing.T) {
+func TestRunEnforcesOrphansByDefault(t *testing.T) {
 	dir := mkOrphanRepo(t)
 	var out, errb bytes.Buffer
-	code := run([]string{dir}, &out, &errb)
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (orphan gated by default)", code)
 	}
 }
 
-func TestRunChecksInvalidExit2(t *testing.T) {
+func TestRunSkipInvalidExit2(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run([]string{"--checks", "bogus", t.TempDir()}, &out, &errb); code != 2 {
+	if code := run([]string{"--skip", "bogus", t.TempDir()}, &out, &errb); code != 2 {
 		t.Fatalf("exit = %d, want 2 for invalid check name", code)
+	}
+}
+
+// The removed --checks flag must fail loudly with a migration message rather than
+// flag's cryptic "flag provided but not defined", because old hooks bake in --checks.
+func TestRunChecksFlagRemovedExit2(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{"--checks", "orphans", t.TempDir()}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 for removed --checks flag", code)
+	}
+	if !strings.Contains(errb.String(), "--checks was removed") || !strings.Contains(errb.String(), "--skip") {
+		t.Errorf("want a --checks migration message pointing at --skip, got: %s", errb.String())
 	}
 }
 
@@ -98,10 +116,10 @@ func gitInit(t *testing.T) string {
 	return dir
 }
 
-func TestInstallHook(t *testing.T) {
+func TestInstallHookDefaultEnforcesAll(t *testing.T) {
 	dir := gitInit(t)
 	var out, errb bytes.Buffer
-	if code := runInstallHook([]string{"--checks", "broken,untracked", dir}, &out, &errb); code != 0 {
+	if code := runInstallHook([]string{dir}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d\n%s", code, errb.String())
 	}
 	hook := filepath.Join(dir, ".githooks", "pre-push")
@@ -109,8 +127,13 @@ func TestInstallHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "--checks broken,untracked") {
-		t.Errorf("hook missing checks:\n%s", b)
+	// Default hook runs a bare `docaudit .` — no check selection — so a
+	// newly-added check is enforced automatically without regenerating the hook.
+	if !strings.Contains(string(b), `exec "$bin" .`) {
+		t.Errorf("default hook should run bare `docaudit .`:\n%s", b)
+	}
+	if strings.Contains(string(b), "--checks") || strings.Contains(string(b), "--skip") {
+		t.Errorf("default hook should carry no check flags:\n%s", b)
 	}
 	// The hook must resolve docaudit even under a minimal PATH (git runs hooks
 	// with the caller's PATH; GUI clients / agent harnesses often lack ~/go/bin).
@@ -124,6 +147,21 @@ func TestInstallHook(t *testing.T) {
 	hp, _ := exec.Command("git", "-C", dir, "config", "core.hooksPath").Output()
 	if strings.TrimSpace(string(hp)) != ".githooks" {
 		t.Errorf("core.hooksPath = %q, want .githooks", strings.TrimSpace(string(hp)))
+	}
+}
+
+func TestInstallHookSkip(t *testing.T) {
+	dir := gitInit(t)
+	var out, errb bytes.Buffer
+	if code := runInstallHook([]string{"--skip", "orphans", dir}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d\n%s", code, errb.String())
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".githooks", "pre-push"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `--skip orphans`) {
+		t.Errorf("hook missing --skip orphans:\n%s", b)
 	}
 }
 
@@ -145,17 +183,55 @@ func TestRunNotAGitRepoExit2(t *testing.T) {
 	}
 }
 
-func TestRunLeaksNoConfigExit2(t *testing.T) {
-	dir := gitInit(t)
-	var out, errb bytes.Buffer
-	// Force a nonexistent config path so this never depends on the dev machine's
-	// real ~/.config/docaudit/leaks.
-	code := run([]string{"--checks", "leaks", "--leaks-config", filepath.Join(dir, "nope"), dir}, &out, &errb)
-	if code != 2 {
-		t.Fatalf("exit = %d, want 2 (leaks selected, no rules file)\n%s", code, errb.String())
+// Absent leak config is NON-fatal: leaks runs by default (incl. CI, which has no
+// global file), so it degrades to built-in patterns + a warning, not exit 2.
+func TestRunLeaksAbsentConfigNonFatal(t *testing.T) {
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
 	}
-	if !strings.Contains(errb.String(), "no rules file") {
-		t.Errorf("want a 'no rules file' message, got: %s", errb.String())
+	write("README.md", "nothing sensitive here\n")
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "README.md").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	var out, errb bytes.Buffer
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (absent config is non-fatal, no findings)\n%s", code, out.String())
+	}
+	if !strings.Contains(errb.String(), "no leak rules file") || !strings.Contains(errb.String(), "built-in") {
+		t.Errorf("want a warning about the absent config + built-in fallback, got: %s", errb.String())
+	}
+}
+
+// Built-in secret patterns enforce even with no config file at all.
+func TestRunLeaksBuiltinsWithoutConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	write("README.md", "hello\n")
+	write("secrets.env", "AWS=AKIAIOSFODNN7EXAMPLE\n")
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "add", "README.md", "secrets.env").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	var out, errb bytes.Buffer
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (built-in AWS pattern fires without a config)\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("LEAKS (1)")) {
+		t.Errorf("missing LEAKS section from a built-in match:\n%s", out.String())
 	}
 }
 
@@ -164,19 +240,21 @@ func TestRunLeaksBadRegexExit2(t *testing.T) {
 	cfg := filepath.Join(dir, "leaks.rules")
 	os.WriteFile(cfg, []byte("(unclosed\n"), 0o644)
 	var out, errb bytes.Buffer
-	code := run([]string{"--checks", "leaks", "--leaks-config", cfg, dir}, &out, &errb)
+	code := run([]string{"--leaks-config", cfg, dir}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (malformed rules file)\n%s", code, errb.String())
 	}
-	if strings.Contains(errb.String(), "no rules file") {
-		t.Errorf("an existing-but-malformed rules file must not be reported as missing: %s", errb.String())
+	if strings.Contains(errb.String(), "built-in secret patterns only") {
+		t.Errorf("an existing-but-malformed rules file must not degrade to built-ins: %s", errb.String())
 	}
 	if !strings.Contains(errb.String(), "bad regex") {
 		t.Errorf("want the parse error surfaced, got: %s", errb.String())
 	}
 }
 
-func TestRunLeaksFindingExit1(t *testing.T) {
+// leaks is enforced by DEFAULT — no opt-in flag needed for a user-configured
+// pattern to gate.
+func TestRunEnforcesLeaksByDefault(t *testing.T) {
 	dir := t.TempDir()
 	write := func(p, c string) {
 		full := filepath.Join(dir, filepath.FromSlash(p))
@@ -193,9 +271,9 @@ func TestRunLeaksFindingExit1(t *testing.T) {
 		t.Fatalf("git add: %v\n%s", err, out)
 	}
 	var out, errb bytes.Buffer
-	code := run([]string{"--checks", "leaks", "--leaks-config", cfg, dir}, &out, &errb)
+	code := run([]string{"--leaks-config", cfg, dir}, &out, &errb)
 	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (leak present)\n%s", code, out.String())
+		t.Fatalf("exit = %d, want 1 (leak present, enforced by default)\n%s", code, out.String())
 	}
 	if !bytes.Contains(out.Bytes(), []byte("LEAKS (1)")) {
 		t.Errorf("missing LEAKS section:\n%s", out.String())

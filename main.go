@@ -32,19 +32,41 @@ func main() {
 	os.Exit(run(args, os.Stdout, os.Stderr))
 }
 
+// checksFlagRemoved reports (with a migration message) whether args still use the
+// removed --checks flag. docaudit enforces every check by default now — an
+// allow-list of checks to *run* can't enforce, because a newly-added check is
+// silently absent from every existing --checks list. Excluding a check is the
+// explicit exception (--skip). Old hooks bake in `--checks …`, so a clear message
+// beats flag's cryptic "flag provided but not defined".
+func checksFlagRemoved(args []string, stderr io.Writer) bool {
+	for _, a := range args {
+		if a == "--checks" || a == "-checks" ||
+			strings.HasPrefix(a, "--checks=") || strings.HasPrefix(a, "-checks=") {
+			fmt.Fprintln(stderr, "docaudit: --checks was removed in v2 — all checks are enforced by default.")
+			fmt.Fprintln(stderr, "  exclude one with --skip <check[,check]>, and regenerate any installed hook:")
+			fmt.Fprintln(stderr, "  docaudit install-hook --force")
+			return true
+		}
+	}
+	return false
+}
+
 // runInstallHook writes a tracked .githooks/pre-push that runs docaudit, and
 // points core.hooksPath at .githooks (activated for this clone). The hook fails
 // closed: if docaudit isn't installed the push is blocked, because a gate that
 // silently skips when its tool is missing is a false green, not a gate.
 func runInstallHook(args []string, stdout, stderr io.Writer) int {
+	if checksFlagRemoved(args, stderr) {
+		return 2
+	}
 	fs := flag.NewFlagSet("docaudit install-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	checks := fs.String("checks", "orphans,broken,untracked", "checks to gate (comma-separated)")
+	skip := fs.String("skip", "", "checks to EXCLUDE from the gate, comma-separated (default: none — all enforced)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if _, err := parseChecks(*checks); err != nil {
+	if _, err := parseSkip(*skip); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -66,7 +88,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*checks)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*skip)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -74,11 +96,19 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: git config core.hooksPath failed: %v\n", err)
 		return 2
 	}
-	fmt.Fprintf(stdout, "installed .githooks/pre-push (checks: %s); core.hooksPath -> .githooks\n", *checks)
+	if *skip == "" {
+		fmt.Fprintln(stdout, "installed .githooks/pre-push (enforcing all checks); core.hooksPath -> .githooks")
+	} else {
+		fmt.Fprintf(stdout, "installed .githooks/pre-push (enforcing all checks except %s); core.hooksPath -> .githooks\n", *skip)
+	}
 	return 0
 }
 
-func hookScript(checks string) string {
+func hookScript(skip string) string {
+	runLine := `exec "$bin" .`
+	if skip != "" {
+		runLine = `exec "$bin" --skip ` + skip + ` .`
+	}
 	return `#!/usr/bin/env bash
 # docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
 # clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
@@ -108,27 +138,33 @@ if ! bin="$(docaudit_bin)"; then
   echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
   exit 1
 fi
-exec "$bin" --checks ` + checks + ` .
+` + runLine + `
 `
 }
 
 var checkNames = []string{"orphans", "broken", "untracked", "leaks"}
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if checksFlagRemoved(args, stderr) {
+		return 2
+	}
 	fs := flag.NewFlagSet("docaudit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
-	checks := fs.String("checks", "orphans,broken,untracked", "comma-separated checks to run/gate: orphans,broken,untracked")
+	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leak rules file (default: $DOCAUDIT_LEAKS or os.UserConfigDir()/docaudit/leaks)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	selected, err := parseChecks(*checks)
+	selected, err := parseSkip(*skip)
 	if err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
+	}
+	if len(selected) == 0 {
+		fmt.Fprintln(stderr, "docaudit: every check skipped — nothing is being enforced")
 	}
 	path := "."
 	if fs.NArg() > 0 {
@@ -152,12 +188,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		rules, err := loadLeakRules(cfgPath)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(stderr, "docaudit: leaks selected but no rules file at %s — create it or pass --leaks-config\n", cfgPath)
-			} else {
-				fmt.Fprintf(stderr, "docaudit: leaks rules file %s: %v\n", cfgPath, err)
-			}
+		if errors.Is(err, os.ErrNotExist) {
+			// Absent config is NOT fatal: leaks runs by default (incl. CI, which has
+			// no global file), so a hard-fail would block every push. Built-in secret
+			// patterns still run — baseline enforcement — and the warning nudges the
+			// owner to define their footprint file for full coverage.
+			fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — scanning with built-in secret patterns only;\n", cfgPath)
+			fmt.Fprintln(stderr, "  add one (or pass --leaks-config) to enforce your own footprint patterns.")
+			rules = audit.LeakRules{}
+		} else if err != nil {
+			// A present-but-malformed config IS fatal: it's a real config bug, not the
+			// common "not set up yet" case, so fail closed rather than silently degrade.
+			fmt.Fprintf(stderr, "docaudit: leaks rules file %s: %v\n", cfgPath, err)
 			return 2
 		}
 		leaks, err = audit.LeakScan(root, rules, ignores)
@@ -173,8 +215,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func parseChecks(s string) (map[string]bool, error) {
+// parseSkip returns the set of checks to RUN: every check by default, minus the
+// comma-separated names in s. An unknown name is an error. Enforcement is the
+// default; skipping is the explicit, per-repo exception (e.g. a nav-driven MkDocs
+// repo skips orphans). A newly-added check is enforced everywhere automatically —
+// nobody has to remember to add it to a run-list.
+func parseSkip(s string) (map[string]bool, error) {
 	sel := map[string]bool{}
+	for _, name := range checkNames {
+		sel[name] = true
+	}
 	for _, c := range strings.Split(s, ",") {
 		c = strings.TrimSpace(c)
 		if c == "" {
@@ -189,10 +239,7 @@ func parseChecks(s string) (map[string]bool, error) {
 		if !valid {
 			return nil, fmt.Errorf("unknown check %q (valid: %s)", c, strings.Join(checkNames, ","))
 		}
-		sel[c] = true
-	}
-	if len(sel) == 0 {
-		return nil, fmt.Errorf("no checks selected")
+		delete(sel, c)
 	}
 	return sel, nil
 }
@@ -220,17 +267,16 @@ func loadLeakRules(path string) (audit.LeakRules, error) {
 	return audit.ParseLeakRules(f)
 }
 
-// printReport prints the selected sections and reports whether any selected
-// category has findings. The output is written to be self-describing: a reader
-// (often a fresh agent seeing only a failed `git push`) should learn from the
-// text alone what docaudit is, that a finding is a doc-graph — not code —
-// problem, why a non-zero exit aborts a push, and how to remediate or bypass.
-// The banner prints always; the explain-and-remediate footer only on findings,
-// so green/CI runs stay terse.
+// printReport prints the sections for the checks being run and reports whether any
+// has findings. The output is written to be self-describing: a reader (often a
+// fresh agent seeing only a failed `git push`) should learn from the text alone
+// what docaudit is, what a finding means, why a non-zero exit aborts a push, and
+// how to remediate. The banner prints always; the explain-and-remediate footer
+// only on findings, so green/CI runs stay terse.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
-	fmt.Fprintln(w, "docaudit — audits the agent-facing doc graph: every tracked .md should be reachable")
-	fmt.Fprintln(w, "by an agent following links/path-mentions from a root doc. With --checks leaks it also")
-	fmt.Fprintln(w, "scans tracked file content for configured leak patterns.")
+	fmt.Fprintln(w, "docaudit — enforces agent-facing repo hygiene: doc-graph reachability")
+	fmt.Fprintln(w, "(orphans/broken/untracked .md) plus a content scan for configured leak patterns.")
+	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
 	if sel["orphans"] {

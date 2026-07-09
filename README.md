@@ -6,17 +6,24 @@
 
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep + following `[x](y.md)` links, not the rendered site a human
-browses. Flags three doc-graph problems by default, plus an opt-in scan of
-tracked file content for leaked owner-specific/secret strings, and exits
-non-zero on any finding in a selected check, so it drops into a pre-push hook
-or CI without a wrapper.
+browses — **and** scans tracked file content for leaked owner-specific/secret
+strings. It **enforces every check by default** and exits non-zero on any
+finding, so it drops into a pre-push hook or CI without a wrapper. You *exclude*
+a check explicitly (`--skip`); nothing is opt-in, because an opt-in check
+enforces nothing.
 
-**Scope: project *documents*, not project *content*.** It audits the docs that
-explain the project (`docs/`, `CLAUDE.md`, config-dir READMEs). It is *not* for
-content a site framework routes and renders (an Astro/MkDocs content collection,
-a seed-data corpus) — exclude those per-repo via `.docauditignore`.
+**Scope: project *documents*, not project *content*** (for the doc-graph
+checks). Those checks audit the docs that explain the project (`docs/`,
+`CLAUDE.md`, config-dir READMEs), not content a site framework routes and renders
+(an Astro/MkDocs content collection, a seed-data corpus) — exclude those per-repo
+via `.docauditignore`. The `leaks` check is broader: it scans *all* tracked files
+(see below).
 
 ## Checks
+
+All four run by default. Exclude one with `--skip <check[,check]>` (e.g. a
+nav-driven MkDocs repo runs `--skip orphans`). A newly-added check is enforced
+everywhere automatically — there is no run-list to update.
 
 1. **Orphans** — a tracked doc not reachable from the entry points.
    Reachability follows both markdown links *and* bare/inline-code path mentions
@@ -28,15 +35,14 @@ a seed-data corpus) — exclude those per-repo via `.docauditignore`.
    deleted, link not updated). Checked across all tracked `.md`.
 3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`) —
    absent from clones, the built site, and any mirror.
+4. **Leaks** — tracked file *content* matching a configured leak pattern (see
+   below). Scans file content rather than the doc graph.
 
-Checks 1–3 run by default (`--checks orphans,broken,untracked`). A fourth,
-opt-in check scans file content rather than the doc graph — see below.
-
-### `leaks` (opt-in — not in the default check set)
+### `leaks` — the content scan
 
 Scans **tracked file content** (working tree only, never git history) for
-owner-specific / secret strings, for use before a repo goes public. Enable with
-`--checks leaks` (alone or alongside the others).
+owner-specific / secret strings, to catch them before a repo goes public. Runs
+by default like the other checks; `--skip leaks` turns it off.
 
 Scope is governed by **git tracking**, not the doc-graph ignore layers: every
 `git ls-files` entry is scanned (so `.gitignore` governs what's excluded), and
@@ -48,8 +54,7 @@ scope even though it's excluded from the doc-graph checks.
 Patterns come from a **global** rules file — never committed to a repo, because a
 per-repo deny list would itself enumerate your sensitive terms. Resolution order:
 `--leaks-config <path>` → `$DOCAUDIT_LEAKS` → `os.UserConfigDir()/docaudit/leaks`
-(e.g. `~/.config/docaudit/leaks`). Selecting `leaks` with no resolvable file exits
-2 (fail-closed).
+(e.g. `~/.config/docaudit/leaks`).
 
 Format — one Go regexp per line; `!` prefixes an allow-exception that suppresses a
 deny match it covers; `#` and blank lines are ignored; a ` #` trailing comment is
@@ -63,7 +68,16 @@ A small built-in set of unambiguous secret shapes (PEM private-key headers, AWS
 `AKIA…`, GitHub `ghp_…`, Slack `xox…` tokens) always runs and is suppressible with
 `!` allow lines.
 
-**v1 gaps:** no git-history scan (rewriting history is the owner's call — use the
+**Config handling** (leaks runs by default, incl. in CI, which has no global file):
+- **No config file** → scans with the built-in patterns only and prints a
+  warning; **not** fatal. Baseline secret detection is always on; define your
+  global file (or pass `--leaks-config`) to enforce your own footprint patterns —
+  they take effect wherever that file exists (your local pre-push).
+- **Malformed config** (a bad regex) → exit 2 (fail-closed). A broken config is a
+  real bug, not the common "not set up yet" case, so it fails loudly rather than
+  silently degrading.
+
+**Known gaps:** no git-history scan (rewriting history is the owner's call — use the
 manual leak-audit skill), no per-rule messages.
 
 ## Install
@@ -77,49 +91,55 @@ Stdlib only — no dependencies. Requires `git` on PATH.
 ## Usage
 
 ```bash
-docaudit [path]                     # path defaults to the current directory
+docaudit [path]                     # path defaults to the current directory; enforces all checks
 docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
 docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
-docaudit --checks broken,untracked  # run/gate a subset (default: all three)
-docaudit --checks leaks             # opt in to the content leak scan (see above)
+docaudit --skip orphans             # exclude a check (comma-separated; e.g. nav-driven MkDocs)
+docaudit --skip leaks               # exclude the content leak scan
 docaudit --leaks-config <path>      # override the global leak rules file
 docaudit version                    # print version (also --version, -v)
 ```
 
-Exit codes: `0` clean · `1` findings in a selected check · `2` usage / not a git repo.
+Exit codes: `0` clean · `1` findings in an enforced check · `2` usage / not a git repo / malformed leak config.
+
+> **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
+> enforces every check by default; use `--skip` to exclude one, and regenerate any
+> installed hook with `docaudit install-hook --force`. A stray `--checks` prints a
+> migration message and exits 2.
 
 On a finding, the output is self-describing: below the findings it prints what
-docaudit is, that its non-zero exit is what aborts a pre-push, that a finding is a
-doc-graph (not code) problem, and how to remediate each category. A reader who sees
-only a failed push — human or agent — should not have to reverse-engineer the gate.
-Clean/CI runs stay terse.
+docaudit is, that its non-zero exit is what aborts a pre-push, what a finding
+means, and how to remediate each category. A reader who sees only a failed push —
+human or agent — should not have to reverse-engineer the gate. Clean/CI runs stay
+terse.
 
 ### Install as a pre-push gate
 
 ```bash
-docaudit install-hook [path]                       # gate the default three checks
-docaudit install-hook --checks broken,untracked    # nav-driven repos (no orphan gate)
-docaudit install-hook --checks orphans,broken,untracked,leaks  # also gate leaks
+docaudit install-hook [path]                # gate: enforce ALL checks (default)
+docaudit install-hook --skip orphans        # nav-driven repos (no orphan gate)
+docaudit install-hook --force               # regenerate an existing hook (e.g. after upgrading)
 ```
 
-Writes a tracked `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for
-this clone (other clones activate it with `git config core.hooksPath .githooks`).
-Refuses to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate
-into it — e.g. call docaudit from an existing `make lint`). Fails **closed**: a
-missing `docaudit` blocks the push, because a gate that skips when its tool is
-absent is a false green, not a gate.
+The generated hook runs a bare `docaudit .`, so a check added in a later version
+is enforced without regenerating the hook. It writes a tracked `.githooks/pre-push`
+and sets `core.hooksPath -> .githooks` for this clone (other clones activate it
+with `git config core.hooksPath .githooks`). Refuses to clobber an existing
+`.githooks/pre-push` (pass `--force`, or integrate into it — e.g. call docaudit
+from an existing `make lint`). Fails **closed**: a missing `docaudit` blocks the
+push, because a gate that skips when its tool is absent is a false green, not a
+gate.
 
-### Doc models and when to drop `--checks orphans`
+### Doc models and when to `--skip orphans`
 
 The orphan check assumes a **prose-linked** doc graph (entry docs link/mention
 their way through `docs/`). That fits most repos. Two exceptions:
 
 - **Nav-driven MkDocs sites** (a `docs/` with no `nav:` block — MkDocs
   auto-builds the sidebar from the file tree, pages never cross-link). Every
-  page is a prose-orphan by design. Gate these with
-  `--checks broken,untracked`.
+  page is a prose-orphan by design. Gate these with `--skip orphans`.
 - Repos with genuinely unreferenced design docs will report real orphans — link
-  them from `CLAUDE.md`/`README`, or accept and narrow with `--checks`.
+  them from `CLAUDE.md`/`README`, or accept and exclude with `--skip orphans`.
 
 ### Entry points (roots)
 
@@ -129,11 +149,13 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 ### Ignoring paths
 
-`**/superpowers/**` is ignored by default (intentionally-untracked scratch). Add
-more via a `.docauditignore` file (gitignore syntax, `#` comments) or repeatable
-`--ignore` globs. Globs support `**` (any number of path segments), `*`, `?`.
+`**/superpowers/**` is ignored by default for the doc-graph checks
+(intentionally-untracked scratch). Add more via a `.docauditignore` file
+(gitignore syntax, `#` comments) or repeatable `--ignore` globs. Globs support
+`**` (any number of path segments), `*`, `?`. Note the leak scan honors only
+`--ignore` (not the default/`.docauditignore` layers) — see the leaks section.
 
-## v1 gaps (known, not silent)
+## Known gaps
 
 Anchor validity (`y.md#missing`), external-URL liveness, raw `<a href>` in HTML
 blocks, per-section `index.md` implicit-nav, and repo-specific conventions are
@@ -174,4 +196,4 @@ reason (tool present but unseen).
 
 Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
 `internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers, the
-`Audit` orchestrator). See `CLAUDE.md` for design invariants.
+`Audit` orchestrator, and the leak scanner). See `CLAUDE.md` for design invariants.
