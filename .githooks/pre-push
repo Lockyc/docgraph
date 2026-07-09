@@ -3,12 +3,8 @@
 # clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
 # the push is blocked (install: go install github.com/lockyc/docaudit@latest).
 set -euo pipefail
+refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running anything
 
-# Resolve docaudit even under a minimal hook PATH. Git runs hooks with whatever
-# PATH the caller had; GUI clients and some agent harnesses push with a bare PATH
-# that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and would
-# make the gate fail-closed (blocked) purely because it couldn't see an installed
-# binary. Fall back to the Go install dirs before giving up.
 docaudit_bin() {
   if command -v docaudit >/dev/null 2>&1; then command -v docaudit; return; fi
   local d
@@ -27,4 +23,6 @@ if ! bin="$(docaudit_bin)"; then
   echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
   exit 1
 fi
-exec "$bin" .
+"$bin" .
+# Diff-scoped: only footgun declarations ADDED in the pushed range.
+printf '%s' "$refs" | "$bin" footgun-drift .
