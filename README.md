@@ -7,10 +7,16 @@
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep + following `[x](y.md)` links, not the rendered site a human
 browses — **and** scans tracked file content for leaked owner-specific/secret
-strings. It **enforces every check by default** and exits non-zero on any
-finding, so it drops into a pre-push hook or CI without a wrapper. You *exclude*
-a check explicitly (`--skip`); nothing is opt-in, because an opt-in check
-enforces nothing.
+strings. `docaudit [path]` **enforces every one of these checks by default**
+and exits non-zero on any finding, so it drops into a pre-push hook or CI
+without a wrapper. You *exclude* a check explicitly (`--skip`); nothing is
+opt-in, because an opt-in check enforces nothing.
+
+Separately, `docaudit footgun-drift` is a **diff-scoped** subcommand: at
+pre-push it checks only what a push *adds* — new "footgun" declarations in
+tracked markdown that lack a rationale — never the existing corpus. It isn't
+one of the checks below and isn't exclude-able with `--skip`; see
+[`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check).
 
 **Scope: project *documents*, not project *content*** (for the doc-graph
 checks). Those checks audit the docs that explain the project (`docs/`,
@@ -21,9 +27,10 @@ via `.docauditignore`. The `leaks` check is broader: it scans *all* tracked file
 
 ## Checks
 
-All four run by default. Exclude one with `--skip <check[,check]>` (e.g. a
-nav-driven MkDocs repo runs `--skip orphans`). A newly-added check is enforced
-everywhere automatically — there is no run-list to update.
+All four run by default when you run `docaudit [path]`. Exclude one with
+`--skip <check[,check]>` (e.g. a nav-driven MkDocs repo runs `--skip orphans`).
+A newly-added check is enforced everywhere automatically — there is no
+run-list to update.
 
 1. **Orphans** — a tracked doc not reachable from the entry points.
    Reachability follows both markdown links *and* bare/inline-code path mentions
@@ -132,6 +139,50 @@ rewrite is broader than the audit's scope. Review the result.
 > The rewrite changes commit SHAs: force-push and have every collaborator re-clone.
 > docaudit itself never reads or rewrites history — it only exports the rules.
 
+### `footgun-drift` — the diff-scoped pre-push check
+
+Unlike the four checks above, `footgun-drift` never scans the whole repo — only
+what a push *adds*. It flags a footgun **declaration** (a line-leading
+`Footgun:` marker or a bolded mid-line footgun lead — introducing one, not just
+mentioning it; a cross-reference or a bare `## Footguns` container heading
+never counts) whose *added lines* have no rationale signal nearby (docaudit
+honors no inline suppression marker — see below). The rationale
+vocabulary is a fixed internal word list (`footgunRationaleSignals` in
+`internal/audit/footguns.go`) — not configurable, since it's a small set of
+English connectives, not an owner-specific footprint like `leaks`.
+
+```bash
+docaudit footgun-drift                       # reads git's pre-push ref lines from stdin
+docaudit footgun-drift --range base..head    # explicit range, for manual use
+```
+
+With no `--range`, it reads the ref lines git feeds a `pre-push` hook on stdin
+(`<localref> <localsha> <remoteref> <remotesha>`) and derives `remotesha..localsha`
+per ref — a new branch (zero remote sha) falls back to the merge-base with the
+nearest integration branch. A declaration counts only if its line is in the
+*added*-line set for that range (via `git diff`), read at the *head* revision —
+a declaration already on the remote, even if the file around it also changed,
+is never re-flagged. File scope is every `.md` the diff touches, **not** the
+doc-graph ignore layers or the `leaks` git-tracking scope — a `.claude/` skill
+file added in the same push is checked exactly like `CLAUDE.md`, because an
+unjustified footgun there is just as undocumented.
+
+Exit codes match the other checks: `1` on a finding, `0` clean, `2` on a git/
+usage error. `DOCAUDIT_FOOTGUN_OFF=1` disables it outright (for a repo that
+doesn't use the footgun-with-rationale convention); `docaudit install-hook
+--no-footgun-drift` generates a hook that never invokes it.
+
+It is a **heuristic, not a judge**: it catches the bare-assertion case (a
+footgun declaration added with no "why" anywhere nearby) but cannot rank
+whether a given rationale is actually *good* — that's a judgment call docaudit,
+being deterministic, doesn't make. On a finding, the printed message asks two
+questions: (1) is this a real footgun — a trap you hit, a tempting-but-wrong
+approach, a re-litigated decision? (2) is it at the right doc level — an
+invariant belongs in `CLAUDE.md`, in-depth rationale in `docs/`, human-facing
+prose in `README`? If yes to both, state the "why" inline; if not, reword it
+as a plain note or move it. (There is no suppression marker — see "No inline
+markers" below; a footgun is silenced only by a nearby rationale.)
+
 ## Install
 
 ```bash
@@ -150,10 +201,14 @@ docaudit --skip orphans             # exclude a check (comma-separated; e.g. nav
 docaudit --skip leaks               # exclude the content leak scan
 docaudit --leaks-config <path>      # override the global leak rules file
 docaudit --config <path>            # override the global config.toml (usage logging)
+docaudit footgun-drift              # diff-scoped: reads pre-push ref lines from stdin
+docaudit footgun-drift --range base..head  # diff-scoped: explicit range
 docaudit version                    # print version (also --version, -v)
 ```
 
-Exit codes: `0` clean · `1` findings in an enforced check · `2` usage / not a git repo / malformed leak config.
+Exit codes (`docaudit [path]` and `footgun-drift` alike): `0` clean · `1`
+findings in an enforced check · `2` usage / not a git repo / malformed leak
+config.
 
 > **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any
@@ -173,16 +228,20 @@ docaudit install-hook [path]                # gate: enforce ALL checks (default)
 docaudit install-hook --skip orphans        # nav-driven repos (no orphan gate)
 docaudit install-hook --ignore '**/*_test.go'  # bake an --ignore glob into the gated hook
 docaudit install-hook --force               # regenerate an existing hook (e.g. after upgrading)
+docaudit install-hook --no-footgun-drift    # omit the diff-scoped footgun-drift check
 ```
 
-The generated hook runs a bare `docaudit .`, so a check added in a later version
-is enforced without regenerating the hook. It writes a tracked `.githooks/pre-push`
-and sets `core.hooksPath -> .githooks` for this clone (other clones activate it
-with `git config core.hooksPath .githooks`). Refuses to clobber an existing
-`.githooks/pre-push` (pass `--force`, or integrate into it — e.g. call docaudit
-from an existing `make lint`). Fails **closed**: a missing `docaudit` blocks the
-push, because a gate that skips when its tool is absent is a false green, not a
-gate.
+The generated hook runs two checks: the whole-state `docaudit .` (a bare
+invocation, so a check added in a later version is enforced without
+regenerating the hook), then the diff-scoped `docaudit footgun-drift`, fed
+git's pre-push stdin so it can scope itself to only the commit range being
+pushed. Pass `--no-footgun-drift` to omit the second check. It writes a tracked
+`.githooks/pre-push` and sets `core.hooksPath -> .githooks` for this clone
+(other clones activate it with `git config core.hooksPath .githooks`). Refuses
+to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate into
+it — e.g. call docaudit from an existing `make lint`). Fails **closed**: a
+missing `docaudit` blocks the push, because a gate that skips when its tool is
+absent is a false green, not a gate.
 
 ### Doc models and when to `--skip orphans`
 
@@ -194,6 +253,12 @@ their way through `docs/`). That fits most repos. Two exceptions:
   page is a prose-orphan by design. Gate these with `--skip orphans`.
 - Repos with genuinely unreferenced design docs will report real orphans — link
   them from `CLAUDE.md`/`README`, or accept and exclude with `--skip orphans`.
+
+Repos that don't use the footgun-with-rationale convention at all skip
+`footgun-drift` outright, since there's no rationale-labeling scheme to check
+against — it isn't a `docaudit [path]` check, so there's no `--skip` name for
+it; use `DOCAUDIT_FOOTGUN_OFF=1` or `install-hook --no-footgun-drift` instead
+(see [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check)).
 
 ### Entry points (roots)
 
@@ -213,8 +278,10 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 `.docauditignore`, `--ignore`, `--skip`, and the leaks config's `allow`/`allow_regex`
 and `[[dir]]` sections. docaudit **never** reads a suppression comment or pragma inside
 the audited files (no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`
-equivalent). Such a marker would be silently ignored, not honored — so an unwanted
-finding is silenced by tuning the config/flags, never by annotating the file.
+equivalent, and no `<!-- footgun-ok -->` for `footgun-drift`). Such a marker would be
+silently ignored, not honored — so an unwanted finding is silenced by tuning the
+config/flags, or (for `footgun-drift`) by stating the rationale, never by annotating
+the file.
 
 ## Usage logging
 
@@ -269,7 +336,9 @@ blocks, per-section `index.md` implicit-nav, and repo-specific conventions are
 out of scope. Markdown-link extraction (used for broken-link detection and link
 edges) skips fenced/inline code so example paths aren't treated as real links;
 the orphan *reachability* pass, by contrast, does read inline-code path mentions
-(that's how it follows `` `docs/x.md` ``).
+(that's how it follows `` `docs/x.md` ``). `footgun-drift`'s declaration scan
+has no code-fence awareness at all — an example `Footgun:` line inside a
+` ``` ` block reads as a real declaration.
 
 ## Development
 
@@ -299,6 +368,10 @@ PATH — GUI clients and sandboxed agents often push with a bare PATH that omits
 `~/go/bin`, and a `command -v`-only hook would then fail-closed for the wrong
 reason (tool present but unseen).
 
-Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
-`internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers, the
-`Audit` orchestrator, and the leak scanner). See `CLAUDE.md` for design invariants.
+Layout: `main.go` is a thin CLI (flags → audit → report → exit code), because
+keeping flag-parsing and reporting separate from the audit logic lets the
+checks be tested without a CLI in the loop; `internal/audit/` holds that logic
+(link parsing, glob-ignore, git wrappers plus diff helpers, the whole-state
+`Audit` orchestrator, the leak scanner, and the diff-scoped `FootgunDrift`
+orchestrator built on the declaration scanner). See `CLAUDE.md` for design
+invariants.

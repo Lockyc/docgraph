@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,8 @@ func main() {
 			os.Exit(runInstallHook(args[1:], os.Stdout, os.Stderr))
 		case "leaks-rules":
 			os.Exit(runLeaksRules(args[1:], os.Stdout, os.Stderr))
+		case "footgun-drift":
+			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -69,6 +72,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "path glob to exclude from the gated scan (repeatable)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
+	noFootgun := fs.Bool("no-footgun-drift", false, "omit the diff-scoped footgun-drift check from the generated hook")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -94,7 +98,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores, *noFootgun)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)
 		return 2
 	}
@@ -159,27 +163,16 @@ func runLeaksRules(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func hookScript(skip string, ignores []string) string {
-	args := ""
-	if skip != "" {
-		args += " --skip " + skip
-	}
-	for _, g := range ignores {
-		args += " --ignore '" + g + "'"
-	}
-	runLine := `exec "$bin"` + args + ` .`
-	return `#!/usr/bin/env bash
-# docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
-# clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
-# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
-set -euo pipefail
-
-# Resolve docaudit even under a minimal hook PATH. Git runs hooks with whatever
-# PATH the caller had; GUI clients and some agent harnesses push with a bare PATH
-# that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and would
-# make the gate fail-closed (blocked) purely because it couldn't see an installed
-# binary. Fall back to the Go install dirs before giving up.
-docaudit_bin() {
+// docauditBinFunc returns the docaudit_bin() shell function the generated hook
+// uses to resolve docaudit even under a minimal hook PATH. Git runs hooks with
+// whatever PATH the caller had; GUI clients and some agent harnesses push with a
+// bare PATH that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and
+// would make the gate fail-closed (blocked) purely because it couldn't see an
+// installed binary. Fall back to the Go install dirs before giving up. Both the
+// whole-state check and footgun-drift share this one resolution — do not retype
+// it inline a second time.
+func docauditBinFunc() string {
+	return `docaudit_bin() {
   if command -v docaudit >/dev/null 2>&1; then command -v docaudit; return; fi
   local d
   for d in "${GOBIN:-}" "${GOPATH:+${GOPATH%%:*}/bin}" "$HOME/go/bin"; do
@@ -190,14 +183,48 @@ docaudit_bin() {
     [ -x "$d/docaudit" ] && { printf '%s\n' "$d/docaudit"; return; }
   fi
   return 1
+}`
 }
+
+// hookScript generates the tracked .githooks/pre-push gate. It runs the
+// whole-state check (`docaudit .`) and, unless noFootgun, the diff-scoped
+// `docaudit footgun-drift` fed git's pre-push stdin (ref lines: local/remote
+// SHA pairs for what's being pushed) so footgun-drift can scope itself to the
+// pushed commit range. The whole-state line is a plain command, not `exec` —
+// `exec` would replace the shell process, so a failing `docaudit .` would never
+// reach the footgun-drift line below it. Under `set -e` a non-zero exit from
+// the plain command still aborts the script (and the push) immediately, so
+// fail-closed behavior is unchanged.
+func hookScript(skip string, ignores []string, noFootgun bool) string {
+	args := ""
+	if skip != "" {
+		args += " --skip " + skip
+	}
+	for _, g := range ignores {
+		args += " --ignore '" + g + "'"
+	}
+	stateLine := `"$bin"` + args + ` .`
+	footgun := ""
+	if !noFootgun {
+		footgun = `
+# Diff-scoped: only footgun declarations ADDED in the pushed range.
+printf '%s' "$refs" | "$bin" footgun-drift .`
+	}
+	return `#!/usr/bin/env bash
+# docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
+# clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
+# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
+set -euo pipefail
+refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running anything
+
+` + docauditBinFunc() + `
 
 if ! bin="$(docaudit_bin)"; then
   echo "docaudit: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
   echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
   exit 1
 fi
-` + runLine + `
+` + stateLine + footgun + `
 `
 }
 
@@ -439,7 +466,6 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		}
 		fmt.Fprintln(w)
 	}
-
 	orphans := sel["orphans"] && len(r.Orphans) > 0
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
@@ -494,5 +520,112 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bo
 		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
 		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
 	}
+	fmt.Fprintln(w, bar)
+}
+
+// runFootgunDrift checks only footgun declarations ADDED in a range. With
+// --range it uses that range; otherwise it reads pre-push ref lines from stdin
+// (`<localref> <localsha> <remoteref> <remotesha>`), deriving remotesha..localsha
+// per ref (a new branch — zero remotesha — falls back to the closest base).
+func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
+	if os.Getenv("DOCAUDIT_FOOTGUN_OFF") != "" {
+		return 0
+	}
+	fs := flag.NewFlagSet("docaudit footgun-drift", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rangeFlag := fs.String("range", "", "explicit base..head to check (else read pre-push stdin)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
+	}
+	root, err := audit.GitRoot(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: not a git repository: %s\n", path)
+		return 2
+	}
+	var ranges []audit.RevRange
+	if *rangeFlag != "" {
+		b, h, ok := splitRange(*rangeFlag)
+		if !ok {
+			fmt.Fprintf(stderr, "docaudit: bad --range %q (want base..head)\n", *rangeFlag)
+			return 2
+		}
+		ranges = []audit.RevRange{{Base: b, Head: h}}
+	} else {
+		ranges = rangesFromPrePushStdin(os.Stdin, root)
+	}
+	if len(ranges) == 0 {
+		return 0
+	}
+	findings, err := audit.FootgunDrift(root, ranges)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	if len(findings) == 0 {
+		return 0
+	}
+	printFootgunDrift(stdout, findings)
+	return 1
+}
+
+func splitRange(s string) (string, string, bool) {
+	i := strings.Index(s, "..")
+	if i < 0 {
+		return "", "", false
+	}
+	b, h := s[:i], s[i+2:]
+	if b == "" || h == "" {
+		return "", "", false
+	}
+	return b, h, true
+}
+
+const zeroSHA = "0000000000000000000000000000000000000000"
+
+// rangesFromPrePushStdin parses git's pre-push stdin into ranges. Deletions
+// (zero local sha) are skipped; a new branch (zero remote sha) falls back to the
+// closest base.
+func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
+	var out []audit.RevRange
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 4 {
+			continue
+		}
+		localSHA, remoteSHA := f[1], f[3]
+		if localSHA == zeroSHA {
+			continue // deletion
+		}
+		if remoteSHA == zeroSHA {
+			if base, ok := audit.ClosestBase(root, localSHA); ok {
+				out = append(out, audit.RevRange{Base: base, Head: localSHA})
+			}
+			continue
+		}
+		out = append(out, audit.RevRange{Base: remoteSHA, Head: localSHA})
+	}
+	return out
+}
+
+// printFootgunDrift renders findings with the two-question remediation.
+func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
+	bar := strings.Repeat("─", 82)
+	fmt.Fprintf(w, "FOOTGUNS (%d) — newly-added footgun declaration(s) without a nearby rationale:\n", len(fs))
+	for _, f := range fs {
+		fmt.Fprintf(w, "  %s:%d → %s\n", f.File, f.Line, f.Text)
+	}
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w, "A footgun you ADD must be a real footgun, documented at the right level. Confirm:")
+	fmt.Fprintln(w, "  (1) Is it a real footgun? — a trap you hit, a tempting-but-wrong approach, or a")
+	fmt.Fprintln(w, "      re-litigated decision, recorded WITH its rationale (the \"why\").")
+	fmt.Fprintln(w, "  (2) Is it at the right level? — invariant/footgun → CLAUDE.md; deep rationale →")
+	fmt.Fprintln(w, "      docs/; human-facing prose → README.")
+	fmt.Fprintln(w, "Fix each: state the \"why\" in the same paragraph (docaudit honors no inline")
+	fmt.Fprintln(w, "marker), or reword as a plain note / move it to the right doc.")
 	fmt.Fprintln(w, bar)
 }

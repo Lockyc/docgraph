@@ -164,7 +164,8 @@ func TestInstallHookDefaultEnforcesAll(t *testing.T) {
 	}
 	// Default hook runs a bare `docaudit .` — no check selection — so a
 	// newly-added check is enforced automatically without regenerating the hook.
-	if !strings.Contains(string(b), `exec "$bin" .`) {
+	// No longer `exec`'d: a later line (footgun-drift) must run after it.
+	if !strings.Contains(string(b), `"$bin" .`) {
 		t.Errorf("default hook should run bare `docaudit .`:\n%s", b)
 	}
 	if strings.Contains(string(b), "--checks") || strings.Contains(string(b), "--skip") {
@@ -284,6 +285,26 @@ func TestInstallHookIgnorePassthrough(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "--ignore '**/*_test.go'") {
 		t.Errorf("hook missing --ignore passthrough:\n%s", b)
+	}
+}
+
+func TestHookScriptRunsBothChecks(t *testing.T) {
+	s := hookScript("", nil, false)
+	if !strings.Contains(s, `"$bin" `) || !strings.Contains(s, ".") {
+		t.Fatal("hook must run the whole-state check")
+	}
+	if !strings.Contains(s, "footgun-drift") {
+		t.Fatal("hook must run footgun-drift")
+	}
+	if !strings.Contains(s, `refs="$(cat)"`) {
+		t.Fatal("hook must capture pre-push stdin to feed footgun-drift")
+	}
+}
+
+func TestHookScriptNoFootgunDrift(t *testing.T) {
+	s := hookScript("", nil, true)
+	if strings.Contains(s, "footgun-drift") {
+		t.Fatal("--no-footgun-drift must omit the footgun line")
 	}
 }
 
@@ -511,5 +532,92 @@ func TestRunNoLogEnvDisables(t *testing.T) {
 	run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if _, err := os.Stat(logf); !os.IsNotExist(err) {
 		t.Errorf("DOCAUDIT_NO_LOG=1 should suppress logging, but the file exists")
+	}
+}
+
+// contains reports whether s is present in sl.
+func contains(sl []string, s string) bool {
+	for _, v := range sl {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// commitRepoMain builds a repo, commits `base` content, then commits `head`
+// content, returning (dir, baseSHA, headSHA). Mirrors internal/audit's
+// commitRepo, duplicated here because main is a separate package with no
+// access to the audit package's unexported test helpers.
+func commitRepoMain(t *testing.T, base, head map[string]string) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
+	git("init")
+	for p, c := range base {
+		write(p, c)
+		git("add", p)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	baseSHA := strings.TrimSpace(git("rev-parse", "HEAD"))
+	for p, c := range head {
+		write(p, c)
+		git("add", p)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "head")
+	headSHA := strings.TrimSpace(git("rev-parse", "HEAD"))
+	return dir, baseSHA, headSHA
+}
+
+func TestFootgunDriftSubcommandRange(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
+	)
+	var out, errb bytes.Buffer
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("want exit 1, got %d\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
+		t.Fatalf("want a FOOTGUN finding naming the line, got:\n%s", out.String())
+	}
+}
+
+func TestFootgunDriftSubcommandClean(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** don't, because it races.\n"},
+	)
+	var out, errb bytes.Buffer
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("justified declaration should be clean, got %d\n%s", code, out.String())
+	}
+}
+
+func TestFootgunDriftOffEnv(t *testing.T) {
+	t.Setenv("DOCAUDIT_FOOTGUN_OFF", "1")
+	var out, errb bytes.Buffer
+	code := runFootgunDrift([]string{"--range", "x..y", "."}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("DOCAUDIT_FOOTGUN_OFF must short-circuit to 0, got %d", code)
+	}
+}
+
+func TestFootgunsNotInStateChecks(t *testing.T) {
+	if contains(checkNames, "footguns") {
+		t.Fatal("footguns must NOT be a whole-state check")
 	}
 }
