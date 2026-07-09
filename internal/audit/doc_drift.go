@@ -116,11 +116,19 @@ type DocHit struct {
 	Text string
 }
 
-// gitDiff returns the unified diff of `git diff <spec>`. spec may be a base SHA
-// (diffs base vs the WORKING TREE — committed and uncommitted), "HEAD"
-// (uncommitted only), or "base..head" (committed only).
+// gitDiff returns the unified diff of the CODE side of `git diff <spec>` —
+// scoped to non-doc paths (mirrors stillDefinedInCode's pathspec), because a
+// definition/constant that changed only inside a tracked .md/.mdx file is the
+// doc itself being edited, not code drifting away from it: scanning docs here
+// would extract a "removed definition"/"changed constant" out of doc prose or
+// a fenced code-block example and then find that same doc's own mention as a
+// phantom finding. The doc-GREP side (docGrepSymbol/docGrepValue) is
+// unaffected by this — it still searches *.md/*.mdx directly, on purpose.
+// spec may be a base SHA (diffs base vs the WORKING TREE — committed and
+// uncommitted), "HEAD" (uncommitted only), or "base..head" (committed only).
 func gitDiff(root, spec string) (string, error) {
-	out, err := exec.Command("git", "-C", root, "diff", spec).Output()
+	out, err := exec.Command("git", "-C", root, "diff", spec,
+		"--", ".", ":!*.md", ":!*.mdx").Output()
 	if err != nil {
 		return "", err
 	}

@@ -678,6 +678,16 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		spec = docDriftDiffBase(root)
 	}
 
+	if guard && exec.Command("git", "-C", root, "rev-parse", "HEAD").Run() != nil {
+		// Unborn HEAD (a freshly `git init`'d repo, no commits yet): bare mode
+		// resolved spec to "HEAD" via docDriftDiffBase's own rev-parse fallback,
+		// but `git diff HEAD` against an unborn HEAD exits 128 — a real git error,
+		// not a doc-drift finding. Blocking the Stop on that would gate every turn
+		// during repo bootstrap, before there's any commit to diff against. --range
+		// mode is unaffected: an explicit ref is the caller's responsibility.
+		return 0
+	}
+
 	findings, err := audit.DocDrift(root, spec)
 	if err != nil {
 		fmt.Fprintf(stderr, "docaudit: %v\n", err)

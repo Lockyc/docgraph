@@ -670,6 +670,32 @@ func TestDocDriftOffKillSwitch(t *testing.T) {
 	}
 }
 
+// TestDocDriftUnbornHeadNoOp regression-tests bare (no --range) doc-drift in a
+// freshly `git init`'d repo with NO commit yet. Before the fix, bare mode
+// resolved the diff base to "HEAD" (docDriftDiffBase's own rev-parse-HEAD
+// fallback on failure), then `git diff HEAD` against an unborn HEAD exits 128,
+// which runDocDrift surfaced as a real git error — wrongly BLOCKING the Stop
+// (exit 2) on every turn during repo bootstrap, before any commit exists to
+// diff against. It must instead no-op (exit 0, no stderr).
+func TestDocDriftUnbornHeadNoOp(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately NOT committed -- this is the unborn-HEAD case.
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("unborn HEAD -> want exit 0 (no-op), got %d\nstderr:\n%s", code, errb.String())
+	}
+	if errb.Len() != 0 {
+		t.Fatalf("unborn HEAD -> want no stderr, got: %s", errb.String())
+	}
+}
+
 func setupRepoMain(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()

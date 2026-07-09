@@ -193,6 +193,33 @@ func TestDocDriftValueReconciledNotFlagged(t *testing.T) {
 	}
 }
 
+// TestDocDriftIgnoresMarkdownOnlyChange regression-tests the code-diff scope: a
+// commit that ONLY edits a .md file (removing a line naming a distinctive
+// symbol that is never defined in any tracked code file) must produce zero
+// findings. Before the fix, gitDiff had no pathspec, so the removed doc line
+// "the type QueueManager did things" was misparsed by defKW as a REMOVED CODE
+// DEFINITION of QueueManager; since QueueManager is (rightly) undefined in any
+// .go file, stillDefinedInCode said "gone", and b.md's surviving mention of
+// QueueManager turned prose-editing into a false dangling-reference finding.
+func TestDocDriftIgnoresMarkdownOnlyChange(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{
+			"a.md": "intro\nthe type QueueManager did things\n",
+			"b.md": "QueueManager is mentioned here too.\n",
+		},
+		map[string]string{
+			"a.md": "intro\n", // doc prose trimmed; no code anywhere ever defined QueueManager
+		},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a doc-only edit must not be mistaken for code drift, got %+v", got)
+	}
+}
+
 func TestDocDriftIncludesUncommittedWorkingTree(t *testing.T) {
 	// base committed with def + doc; remove the def in the WORKING TREE, no commit.
 	dir := setupRepo(t, map[string]string{
