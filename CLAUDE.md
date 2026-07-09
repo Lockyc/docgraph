@@ -139,11 +139,11 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 - **The rationale vocabulary is a built-in Go constant
   (`footgunRationaleSignals` in `internal/audit/footguns.go`), not a config
   file.** Unlike `leaks`, these words aren't secret and don't vary per repo,
-  because they're a fixed set of English connectives ("because", "otherwise",
-  …) rather than an owner's private footprint, so a global TOML file would add
-  indirection with no privacy payoff. Anchor to the symbol — don't restate the
-  phrase list here, since a restated copy would drift out of sync the next
-  time the constant changes.
+  because they're a fixed set of English connectives rather than an owner's
+  private footprint, so a global TOML file would add indirection with no
+  privacy payoff. Anchor to the symbol — don't restate the phrase list here,
+  since a restated copy would drift out of sync the next time the constant
+  changes.
 
 ## Doc models (why `--skip` exists)
 
