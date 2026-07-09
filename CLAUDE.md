@@ -1,16 +1,19 @@
 # docaudit — notes for the next agent
 
-A Go CLI that audits a repo's **agent-facing documentation graph** — orphans
-(tracked `docs/` files unreachable from the roots), broken internal `.md` links,
-untracked `.md` files — scans tracked file content for configured `leaks`
-patterns, **and** flags unjustified `footguns` labels in tracked markdown,
-because a footgun recorded with no stated reason is functionally undocumented.
-Reachability follows markdown links **and** bare/inline-code path mentions. All
-five checks are **enforced by default**; you exclude one explicitly with
-`--skip` (there is no opt-in — an opt-in check enforces nothing). Exits
-non-zero on any finding in an enforced check. Stdlib + `github.com/BurntSushi/toml`
-(config decode); shells out to `git`. Usage and checks are in `README.md` — this
-file carries the invariants and footguns.
+A Go CLI with two layers. `docaudit .` runs four **whole-state** checks against
+the current tree — orphans (tracked `docs/` files unreachable from the roots),
+broken internal `.md` links, untracked `.md` files, and a content scan for
+configured `leaks` patterns. Reachability follows markdown links **and**
+bare/inline-code path mentions. All four are **enforced by default**; you
+exclude one explicitly with `--skip` (there is no opt-in — an opt-in check
+enforces nothing). Separately, `docaudit footgun-drift` is a **diff-scoped**
+pre-push subcommand: it flags only footgun *declarations added in the pushed
+range* that lack a rationale or `<!-- footgun-ok -->` marker — it never
+re-scans the existing corpus. `footguns` is deliberately **not** one of the
+four `checkNames`; it's a separate subcommand with a separate trigger (a git
+range, not a repo path). Exits non-zero on any finding. Stdlib +
+`github.com/BurntSushi/toml` (config decode); shells out to `git`. Usage and
+checks are in `README.md` — this file carries the invariants and footguns.
 
 ## Intended use
 
@@ -22,13 +25,15 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
 
 - **Agent-facing, not human-facing.** It measures the graph an agent traverses
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
-- **Reads doc-graph structure and, for `leaks`/`footguns`, file content.** The
-  three doc-graph checks (orphans/broken/untracked) traverse only the link graph.
-  `leaks` additionally scans tracked file *content* (code included) for
-  configured leak patterns; `footguns` scans tracked markdown content for
-  unjustified "footgun" mentions, because judging whether a label is justified
-  requires reading the surrounding prose, not just the link graph. Neither
-  reads git history.
+- **Reads doc-graph structure and, for `leaks`, file content — both as
+  whole-state.** The three doc-graph checks (orphans/broken/untracked) traverse
+  only the link graph; `leaks` additionally scans tracked file *content* (code
+  included) for configured leak patterns. Both read the current tree, never git
+  history.
+- **`footgun-drift` reads a git diff, not repo state.** It scans tracked
+  markdown *content* like `leaks` does, but only the lines a `git diff` reports
+  as added in the given range — the four `docaudit .` checks above have no
+  range concept at all.
 
 ## Footguns <!-- footgun-ok: section title, not a claim -->
 
@@ -38,10 +43,27 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   an agent doesn't read the sidebar. Do **not** "fix" orphan detection to defer
   to MkDocs nav — it would make the tool always report zero orphans and destroy
   its purpose.
-- **Do NOT merge this with `doc-drift.sh`.** That Stop hook is a *content-vs-code*
-  drift check driven by the code diff (a changed constant whose old literal lingers
-  in a doc). `docaudit` audits *repo state* — doc-graph integrity plus a content
-  leak scan — not diffs. Different inputs and cadence; keep them separate.
+- **`footgun-drift` is diff-scoped ON PURPOSE — a whole-state footgun check was
+  tried first and abandoned.** An earlier attempt made `footguns` a fifth
+  *whole-state* check re-scanning every tracked `.md` on every `docaudit .` run.
+  It was dropped before shipping because that re-scan produced a validated
+  flood of false positives against the existing corpus — already-accepted
+  footgun notes whose rationale sat just outside whatever window the scanner
+  used, re-litigated on every unrelated push. Do NOT re-add `footguns` to
+  `checkNames` to "fix" this; the flood is exactly why it isn't there. The fix
+  was to scope the check to what's *new*: `footgun-drift` shares `doc-drift.sh`'s
+  diff-driven model — check what changed, not the whole tree — but runs as a
+  **pre-push** command, where git hands it the exact pushed range (ref lines on
+  stdin, or `--range base..head` for manual use), so it flags only footgun
+  *declarations added in that range*; content already on the remote is never
+  re-scanned. That's also why it stays a **separate subcommand** rather than
+  merging into `doc-drift.sh`: `doc-drift.sh` is a Stop hook driven by the
+  in-session code diff (a changed constant whose old literal lingers in a doc);
+  `footgun-drift` is a pre-push gate driven by git's pushed-ref range — different
+  trigger, different diff source. The four `docaudit .` checks remain
+  whole-state, unchanged: reachability, link existence, and leak content have
+  no meaningful "diff" version — they're properties of the current tree, not of
+  a range.
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates every sensitive term the owner has). The footprint vocabulary is
@@ -116,26 +138,37 @@ wrapper. `docaudit install-hook` writes a tracked `.githooks/pre-push` for that.
   `docs/`-only scope wrongly made such docs invisible (neither flagged nor
   checked). `.claude/**` files are runtime tooling; a config-dir README is not.
   Keep that distinction.
-- **`footguns` is a heuristic, not a judge.** It catches the bare-assertion
-  case — a "footgun" named with no rationale anywhere nearby — but it cannot
-  rank whether a stated rationale is actually *good*, because judging rationale
-  quality is a judgment task and docaudit is a deterministic pattern scanner.
-  The real footgun test (is this genuinely a trap, recorded at the right doc
-  level) stays in the `doc-and-audit-rigor` skill, not in this tool.
-- **`footguns`' window is the enclosing paragraph, not the whole document.** A
-  footgun written as a lone heading with its rationale in a *separate*
-  paragraph won't be seen and needs an explicit `<!-- footgun-ok -->` marker
-  instead — accepted because the marker is cheap and most real footgun notes
-  are already inline-rationale bullets, so the narrow window only costs the
-  odd heading-plus-separate-paragraph shape.
-- **`footguns` scope is the doc-graph ignore layers, NOT the leaks
-  git-tracking scope — do not copy the leaks scope model here.** It reuses the
-  same tracked-`.md` set `orphans`/`broken`/`untracked` use (`defaultIgnores` +
-  `.docauditignore` + `--ignore`) because `footguns` is a doc-quality check on
-  house documentation: an agent skill file under `.claude/` is runtime
-  tooling, not documentation, so its "footgun" usage is correctly out of
-  scope. Widening it to the leaks git-tracking scope would flag mentions
-  inside files that were never meant to be read as project documentation.
+- **`footgun-drift` is a heuristic, not a judge.** It catches the bare-assertion
+  case — a footgun *declaration* (a line-leading `Footgun:` marker or a bolded
+  mid-line footgun lead, not a passing mention — a cross-reference or a bare
+  container heading with no delimiter never counts) added with no rationale
+  anywhere nearby — but it cannot rank whether a stated rationale is actually
+  *good*, because judging rationale quality is a judgment task and docaudit is a
+  deterministic pattern scanner. The two-question test it prints on a finding
+  (is this a real footgun; is it at the right doc level) is the same test the
+  `doc-and-audit-rigor` skill applies — docaudit only mechanizes the
+  bare-assertion half of it.
+- **A declaration's window is bounded by its next sibling, not by the whole
+  paragraph.** `scanDeclarations` (`internal/audit/footguns.go`) starts a
+  declaration's window at its own line and stops at the *next* declaration in
+  the same paragraph, so a justified bullet can't launder an unjustified
+  neighbour in a tight list. Only when a declaration owns the tail of its
+  paragraph, and that paragraph is a lone line or a heading, does the window
+  extend into the following paragraph — so a heading declaration *does* see an
+  explanation written as the next paragraph (it does not need a separate
+  `<!-- footgun-ok -->` marker for that shape; add one only when no rationale
+  is reachable at all). Narrowing this back to "whole paragraph only" would
+  let an unjustified sibling hide behind a justified one; widening it to "next
+  N paragraphs" would start pulling in unrelated prose.
+- **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'` —
+  not the doc-graph ignore layers, and not the leaks git-tracking scope
+  either.** Any `.md` file the diff touches is in scope, including a
+  `.claude/**` skill file that `orphans`/`broken`/`untracked` exclude as
+  non-documentation: a footgun declaration added inside agent tooling is just
+  as undocumented as one in `CLAUDE.md`, so narrowing to the doc-graph roots
+  would blind the check to exactly the files most likely to accumulate
+  unjustified footgun notes over time. Do not apply `defaultIgnores` or
+  `.docauditignore` here.
 - **The rationale vocabulary is a built-in Go constant
   (`footgunRationaleSignals` in `internal/audit/footguns.go`), not a config
   file.** Unlike `leaks`, these words aren't secret and don't vary per repo,
@@ -156,9 +189,10 @@ Repos fall into models the orphan check treats differently:
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
 
-A repo that doesn't use the footgun-with-rationale convention at all runs with
-`--skip footguns`, because enforcing a convention the repo never adopted would
-just be noise — parallel to `--skip orphans` for model B.
+A repo that doesn't use the footgun-with-rationale convention at all skips
+`footgun-drift` entirely rather than passing `--skip` (it isn't a `docaudit .`
+check to skip): set `DOCAUDIT_FOOTGUN_OFF=1`, or generate the hook with
+`install-hook --no-footgun-drift` so it's never invoked in the first place.
 
 ## Roots
 
@@ -168,11 +202,20 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int`, report format.
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the four
+  whole-state checks), `runFootgunDrift(args, stdout, stderr) int` (the
+  diff-scoped subcommand), report format.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
-  `git.go` (`ls-files` wrappers), `leaks.go` (TOML config decode + dir-scoped
-  content scan), `footguns.go` (paragraph-scoped footgun-label scan),
-  `audit.go` (`Audit` → `Report`).
+  `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
+  `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` uses to read a
+  range instead of a tree snapshot), `leaks.go` (TOML config decode +
+  dir-scoped content scan), `footguns.go` (the declaration scanner —
+  `scanDeclarations`/`isFootgunDeclaration`/`footgunRationaleSignals`; a
+  *declaration* is a footgun being introduced, not a passing mention of one),
+  `footgun_drift.go` (`FootgunDrift`: runs `scanDeclarations` per range,
+  keeps only declarations whose line is in that range's added-line set,
+  dedupes by file:line), `audit.go` (`Audit` → `Report`, the whole-state
+  orchestrator; unrelated to `FootgunDrift`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
