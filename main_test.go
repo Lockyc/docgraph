@@ -345,46 +345,89 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 	}
 }
 
-func mkFootgunRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	full := filepath.Join(dir, "CLAUDE.md")
-	if err := os.WriteFile(full, []byte("- Footgun: no rationale here at all.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git := func(a ...string) {
-		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", a, err, out)
+// contains reports whether s is present in sl.
+func contains(sl []string, s string) bool {
+	for _, v := range sl {
+		if v == s {
+			return true
 		}
 	}
+	return false
+}
+
+// commitRepoMain builds a repo, commits `base` content, then commits `head`
+// content, returning (dir, baseSHA, headSHA). Mirrors internal/audit's
+// commitRepo, duplicated here because main is a separate package with no
+// access to the audit package's unexported test helpers.
+func commitRepoMain(t *testing.T, base, head map[string]string) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
 	git("init")
-	git("add", "CLAUDE.md")
-	return dir
+	for p, c := range base {
+		write(p, c)
+		git("add", p)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+	baseSHA := strings.TrimSpace(git("rev-parse", "HEAD"))
+	for p, c := range head {
+		write(p, c)
+		git("add", p)
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "head")
+	headSHA := strings.TrimSpace(git("rev-parse", "HEAD"))
+	return dir, baseSHA, headSHA
 }
 
-func TestRunFootgunFindingFailsNonZero(t *testing.T) {
-	dir := mkFootgunRepo(t)
+func TestFootgunDriftSubcommandRange(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
+	)
 	var out, errb bytes.Buffer
-	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
 	if code != 1 {
-		t.Fatalf("want exit 1 on footgun finding, got %d\n%s", code, out.String())
+		t.Fatalf("want exit 1, got %d\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("FOOTGUNS (1)")) {
-		t.Fatalf("want a FOOTGUNS section, got:\n%s", out.String())
-	}
-	if !bytes.Contains(out.Bytes(), []byte("no rationale here at all")) {
-		t.Fatalf("want the offending line text in the report, got:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
+		t.Fatalf("want a FOOTGUN finding naming the line, got:\n%s", out.String())
 	}
 }
 
-func TestRunSkipFootguns(t *testing.T) {
-	dir := mkFootgunRepo(t)
+func TestFootgunDriftSubcommandClean(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** don't, because it races.\n"},
+	)
 	var out, errb bytes.Buffer
-	code := run([]string{"--skip", "footguns", "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
 	if code != 0 {
-		t.Fatalf("--skip footguns should pass, got %d\n%s", code, out.String())
+		t.Fatalf("justified declaration should be clean, got %d\n%s", code, out.String())
 	}
-	if bytes.Contains(out.Bytes(), []byte("FOOTGUNS")) {
-		t.Fatalf("skipped check must not print its section:\n%s", out.String())
+}
+
+func TestFootgunDriftOffEnv(t *testing.T) {
+	t.Setenv("DOCAUDIT_FOOTGUN_OFF", "1")
+	var out, errb bytes.Buffer
+	code := runFootgunDrift([]string{"--range", "x..y", "."}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("DOCAUDIT_FOOTGUN_OFF must short-circuit to 0, got %d", code)
+	}
+}
+
+func TestFootgunsNotInStateChecks(t *testing.T) {
+	if contains(checkNames, "footguns") {
+		t.Fatal("footguns must NOT be a whole-state check")
 	}
 }

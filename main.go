@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,6 +26,8 @@ func main() {
 		switch args[0] {
 		case "install-hook":
 			os.Exit(runInstallHook(args[1:], os.Stdout, os.Stderr))
+		case "footgun-drift":
+			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -149,7 +152,7 @@ fi
 `
 }
 
-var checkNames = []string{"orphans", "broken", "untracked", "leaks", "footguns"}
+var checkNames = []string{"orphans", "broken", "untracked", "leaks"}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
@@ -160,7 +163,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
-	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,footguns)")
+	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -215,15 +218,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
-	var footguns []audit.FootgunFinding
-	if selected["footguns"] {
-		footguns, err = audit.FootgunScan(root, ignores)
-		if err != nil {
-			fmt.Fprintf(stderr, "docaudit: %v\n", err)
-			return 2
-		}
-	}
-	findings := printReport(stdout, rep, leaks, footguns, selected)
+	findings := printReport(stdout, rep, leaks, selected)
 	if findings {
 		return 1
 	}
@@ -292,10 +287,10 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // what docaudit is, what a finding means, why a non-zero exit aborts a push, and
 // how to remediate. The banner prints always; the explain-and-remediate footer
 // only on findings, so green/CI runs stay terse.
-func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, footguns []audit.FootgunFinding, sel map[string]bool) bool {
+func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
 	fmt.Fprintln(w, "docaudit — enforces agent-facing repo hygiene: doc-graph reachability")
-	fmt.Fprintln(w, "(orphans/broken/untracked .md), a content scan for configured leak patterns,")
-	fmt.Fprintln(w, "and a footgun-label check. All checks run by default; exclude one with --skip.")
+	fmt.Fprintln(w, "(orphans/broken/untracked .md) plus a content scan for configured leak patterns.")
+	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
 	if sel["orphans"] {
@@ -326,20 +321,11 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, footgun
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["footguns"] {
-		fmt.Fprintf(w, "FOOTGUNS (%d) — \"footgun\" documented without a nearby rationale:\n", len(footguns))
-		for _, fg := range footguns {
-			fmt.Fprintf(w, "  %s:%d → %s\n", fg.File, fg.Line, fg.Text)
-		}
-		fmt.Fprintln(w)
-	}
-
 	orphans := sel["orphans"] && len(r.Orphans) > 0
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
 	leaksFound := sel["leaks"] && len(leaks) > 0
-	footgunsFound := sel["footguns"] && len(footguns) > 0
-	if !orphans && !broken && !untracked && !leaksFound && !footgunsFound {
+	if !orphans && !broken && !untracked && !leaksFound {
 		fmt.Fprintln(w, "clean ✓")
 		return false
 	}
@@ -357,10 +343,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, footgun
 	if sel["leaks"] {
 		n += len(leaks)
 	}
-	if sel["footguns"] {
-		n += len(footguns)
-	}
-	printFailureFooter(w, n, orphans, broken, untracked, leaksFound, footgunsFound)
+	printFailureFooter(w, n, orphans, broken, untracked, leaksFound)
 	return true
 }
 
@@ -368,14 +351,14 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, footgun
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks, footguns bool) {
+func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks bool) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
 	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
 	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
-	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, a configured leak pattern matched in")
-	fmt.Fprintln(w, "tracked content, or a \"footgun\" documented without a nearby rationale.")
+	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, or a configured leak pattern matched")
+	fmt.Fprintln(w, "in tracked content.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Fix the findings listed above:")
 	if orphans {
@@ -392,14 +375,112 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, leaks, f
 		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
 		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
 	}
-	if footguns {
-		fmt.Fprintln(w, "  FOOTGUN   → \"footgun\" documented without a nearby rationale. Confirm two things:")
-		fmt.Fprintln(w, "              (1) Is it a real footgun? — a trap you hit, a tempting-but-wrong")
-		fmt.Fprintln(w, "                  approach, or a re-litigated decision, recorded WITH its rationale.")
-		fmt.Fprintln(w, "              (2) Is it at the right level? — an invariant/footgun belongs in")
-		fmt.Fprintln(w, "                  CLAUDE.md; in-depth rationale in docs/; human-facing prose in README.")
-		fmt.Fprintln(w, "              If yes to both: state the \"why\" inline, or mark <!-- footgun-ok -->.")
-		fmt.Fprintln(w, "              If not: reword as a plain note, or move it to the right doc.")
+	fmt.Fprintln(w, bar)
+}
+
+// runFootgunDrift checks only footgun declarations ADDED in a range. With
+// --range it uses that range; otherwise it reads pre-push ref lines from stdin
+// (`<localref> <localsha> <remoteref> <remotesha>`), deriving remotesha..localsha
+// per ref (a new branch — zero remotesha — falls back to the closest base).
+func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
+	if os.Getenv("DOCAUDIT_FOOTGUN_OFF") != "" {
+		return 0
 	}
+	fs := flag.NewFlagSet("docaudit footgun-drift", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rangeFlag := fs.String("range", "", "explicit base..head to check (else read pre-push stdin)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
+	}
+	root, err := audit.GitRoot(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: not a git repository: %s\n", path)
+		return 2
+	}
+	var ranges []audit.RevRange
+	if *rangeFlag != "" {
+		b, h, ok := splitRange(*rangeFlag)
+		if !ok {
+			fmt.Fprintf(stderr, "docaudit: bad --range %q (want base..head)\n", *rangeFlag)
+			return 2
+		}
+		ranges = []audit.RevRange{{Base: b, Head: h}}
+	} else {
+		ranges = rangesFromPrePushStdin(os.Stdin, root)
+	}
+	if len(ranges) == 0 {
+		return 0
+	}
+	findings, err := audit.FootgunDrift(root, ranges)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	if len(findings) == 0 {
+		return 0
+	}
+	printFootgunDrift(stdout, findings)
+	return 1
+}
+
+func splitRange(s string) (string, string, bool) {
+	i := strings.Index(s, "..")
+	if i < 0 {
+		return "", "", false
+	}
+	b, h := s[:i], s[i+2:]
+	if b == "" || h == "" {
+		return "", "", false
+	}
+	return b, h, true
+}
+
+const zeroSHA = "0000000000000000000000000000000000000000"
+
+// rangesFromPrePushStdin parses git's pre-push stdin into ranges. Deletions
+// (zero local sha) are skipped; a new branch (zero remote sha) falls back to the
+// closest base.
+func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
+	var out []audit.RevRange
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) < 4 {
+			continue
+		}
+		localSHA, remoteSHA := f[1], f[3]
+		if localSHA == zeroSHA {
+			continue // deletion
+		}
+		if remoteSHA == zeroSHA {
+			if base, ok := audit.ClosestBase(root, localSHA); ok {
+				out = append(out, audit.RevRange{Base: base, Head: localSHA})
+			}
+			continue
+		}
+		out = append(out, audit.RevRange{Base: remoteSHA, Head: localSHA})
+	}
+	return out
+}
+
+// printFootgunDrift renders findings with the two-question remediation.
+func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
+	bar := strings.Repeat("─", 82)
+	fmt.Fprintf(w, "FOOTGUNS (%d) — newly-added footgun declaration(s) without a nearby rationale:\n", len(fs))
+	for _, f := range fs {
+		fmt.Fprintf(w, "  %s:%d → %s\n", f.File, f.Line, f.Text)
+	}
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w, "A footgun you ADD must be a real footgun, documented at the right level. Confirm:")
+	fmt.Fprintln(w, "  (1) Is it a real footgun? — a trap you hit, a tempting-but-wrong approach, or a")
+	fmt.Fprintln(w, "      re-litigated decision, recorded WITH its rationale (the \"why\").")
+	fmt.Fprintln(w, "  (2) Is it at the right level? — invariant/footgun → CLAUDE.md; deep rationale →")
+	fmt.Fprintln(w, "      docs/; human-facing prose → README.")
+	fmt.Fprintln(w, "Fix each: state the \"why\" in the same paragraph, or mark <!-- footgun-ok -->;")
+	fmt.Fprintln(w, "or reword as a plain note / move it to the right doc.")
 	fmt.Fprintln(w, bar)
 }
