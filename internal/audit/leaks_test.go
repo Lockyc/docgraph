@@ -130,3 +130,34 @@ func TestLeakScanAllowSuppressesBuiltin(t *testing.T) {
 		t.Errorf("allow should suppress the built-in match, got %+v", found)
 	}
 }
+
+func TestCompileLeaksLiteralAndRegex(t *testing.T) {
+	cfg := LeakConfig{
+		Terms:      []string{"nucleus", "", "  "}, // empty/blank entries dropped
+		Regex:      []string{`192\.168\.1\.\d+`},
+		Allow:      []string{"github.com/lockyc"},
+		AllowRegex: []string{`au\.lsjc\.[a-z]+`},
+		Dir:        []DirRule{{Path: "/x", Ignore: []string{"v/*.json"}, Allow: []string{"mycelium"}}},
+	}
+	cl, err := cfg.compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// deny = 1 literal (blank dropped) + 1 regex + 4 built-ins
+	if len(cl.deny) != 6 {
+		t.Errorf("deny = %d, want 6 (1 term + 1 regex + 4 built-in)", len(cl.deny))
+	}
+	if len(cl.allow) != 2 {
+		t.Errorf("allow = %d, want 2", len(cl.allow))
+	}
+	if len(cl.dirs) != 1 || cl.dirs[0].path != "/x" || len(cl.dirs[0].allow) != 1 {
+		t.Errorf("dirs = %+v, want one dir /x with 1 allow", cl.dirs)
+	}
+}
+
+func TestCompileLeaksBadRegex(t *testing.T) {
+	_, err := LeakConfig{Regex: []string{"(unclosed"}}.compile()
+	if err == nil || !strings.Contains(err.Error(), "leaks regex") {
+		t.Errorf("want a leaks-regex compile error, got %v", err)
+	}
+}
