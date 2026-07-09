@@ -54,9 +54,9 @@ func literalMatcher(s string) (matcher, bool) {
 
 // regexMatcher compiles a user regexp case-insensitively by default: in a
 // leak-prevention gate a false negative from a casing mismatch (a footprint term
-// written `Nucleus` slipping a `nucleus` pattern) is the cardinal sin, so regex
-// matches `terms`' case-folding. A pattern that genuinely needs case sensitivity
-// opts out with an inline (?-i).
+// written `SecretHost` slipping a `secrethost` pattern) is the cardinal sin, so
+// regex matches `terms`' case-folding. A pattern that genuinely needs case
+// sensitivity opts out with an inline (?-i).
 func regexMatcher(s string) (matcher, bool, error) {
 	if strings.TrimSpace(s) == "" {
 		return matcher{}, false, nil

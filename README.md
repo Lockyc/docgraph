@@ -65,17 +65,17 @@ match they cover. `[[dir]]` sections scope exceptions to files under an absolute
 (relative to `path`) drop files from the scan, and `allow`/`allow_regex` suppress
 terms within that subtree.
 
-    terms       = ["nucleus", "lachlan@lsjc.com.au", "/Users/lockyc"]
-    regex       = ['192\.168\.1\.\d+']
-    allow       = ["github.com/lockyc"]
-    allow_regex = ['au\.lsjc\.[a-z]+']
+    terms       = ["acme-host", "you@example.com", "/Users/you"]
+    regex       = ['10\.0\.0\.\d+']
+    allow       = ["github.com/you"]
+    allow_regex = ['com\.example\.[a-z]+']
 
     [[dir]]
     path   = "/abs/path/to/repo"
     ignore = ["vendor/*.json"]        # skip vendored specs
     [[dir]]
     path  = "/abs/path/to/repo/sub"
-    allow = ["mycelium"]              # legit in this subtree
+    allow = ["some-project"]          # legit in this subtree
 
 The footprint list and its exclusions are global (machine-local), so in CI / a
 fresh clone (no file) the scan degrades to the built-in patterns only. A small
