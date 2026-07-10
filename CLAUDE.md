@@ -1,32 +1,28 @@
 # docaudit — notes for the next agent
 
-A Go CLI with three modes. `docaudit .` runs four **whole-state** checks against
-the current tree — orphans (tracked `docs/` files unreachable from the roots),
-broken internal `.md` links, untracked `.md` files, and a content scan for
-configured `leaks` patterns. Reachability follows markdown links **and**
-bare/inline-code path mentions. All four are **enforced by default**; you
-exclude one explicitly with `--skip` (there is no opt-in — an opt-in check
-enforces nothing). `docaudit footgun-drift` is a **diff-scoped** pre-push
-subcommand: it flags *every* footgun declaration added in the pushed range — it
-makes no attempt to judge rationale, never re-scans the existing corpus, and
-honors no inline suppression marker (see the no-inline-markers footgun). It is
-**advisory** (exits 0, never blocks the push): the finding is a nag to go
-double-check the declaration is a real footgun, not a gate. `docaudit doc-drift`
-is a **Stop-hook** subcommand: invoked directly (no wrapper) at the end of an
-agent turn, it scans the branch's working-tree-inclusive diff (base→worktree,
-committed + uncommitted) for two mechanical staleness classes — a **dangling
-reference** (a symbol whose definition was removed on this branch and survives
-nowhere in tracked code, but a tracked doc still names it) and **anchored value
-drift** (a constant whose numeric value changed while a doc still names the
-symbol and shows the old literal) — and **blocks the Stop** (findings on
-stderr, exit 2) on either. Neither `footguns` nor `doc-drift` is one of the four
-`checkNames`; each is a separate subcommand with its own trigger (a git range or
-a Stop invocation, not a repo path). The four whole-state checks exit non-zero
-on any finding (that's the gate); footgun-drift never blocks; doc-drift always
-blocks on a finding. Stdlib +
-`github.com/BurntSushi/toml` (config decode); shells out to `git`. It also has
-an **opt-in usage log** (one JSONL record per run, for trend-watching — see the
-logging footgun). Usage and checks are in `README.md` — this file carries the
+A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
+`git`) with three independent modes, each with its own trigger:
+
+- **`docaudit .`** — four **whole-state** checks against the current tree:
+  orphans (tracked `.md` unreachable from the roots), broken internal `.md`
+  links, untracked `.md`, and a `leaks` content scan. All four are **enforced by
+  default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
+  nothing). A finding exits non-zero — that's the pre-push gate.
+- **`docaudit footgun-drift`** — a **diff-scoped, advisory** pre-push subcommand:
+  flags *every* footgun declaration added in the pushed range (no rationale
+  judgment, never re-scans the existing corpus) and **exits 0** — a nag to
+  double-check the declaration, never a block.
+- **`docaudit doc-drift`** — a **Stop-hook, blocking** subcommand: scans the
+  branch's working-tree-inclusive diff (base→worktree, committed + uncommitted)
+  for two mechanical staleness classes — a **dangling reference** (a symbol whose
+  definition was removed but a tracked doc still names it) and **anchored value
+  drift** (a constant whose numeric value changed while a doc still names the
+  symbol and shows the old literal) — and **exits 2** to block the Stop.
+
+`footgun-drift` and `doc-drift` are **not** `checkNames` — each is its own
+subcommand with its own trigger (a git range / a Stop invocation), not a
+`docaudit .` check. There's also an **opt-in usage log** (see the logging
+footgun). Human-facing usage lives in `README.md`; this file carries the
 invariants and footguns.
 
 ## Intended use
@@ -51,18 +47,12 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   only the link graph; `leaks` additionally scans tracked file *content* (code
   included) for configured leak patterns. Both read the current tree, never git
   history.
-- **`footgun-drift` reads a git diff, not repo state.** It scans tracked
-  markdown *content* like `leaks` does, but only the lines a `git diff` reports
-  as added in the given range — the four `docaudit .` checks above have no
-  range concept at all.
-- **`doc-drift` reads a *code* diff and greps *docs*, over a working-tree-
-  inclusive range.** Unlike `footgun-drift` (which diffs and scans the same
-  file type — markdown against markdown), `doc-drift` diffs tracked **code**
-  (definitions removed, constants whose value changed) and greps the *docs* for
-  stale references to what it found. Its range is base→worktree — committed
-  **and** uncommitted changes — because it fires as a Stop hook, before a
-  commit exists to diff against; `footgun-drift`'s range is always committed
-  `base..head`, because it fires at push time.
+- **`footgun-drift` and `doc-drift` read a *diff*, not repo state.**
+  `footgun-drift` scans added markdown lines (like `leaks`, but diff-scoped);
+  `doc-drift` diffs tracked **code** (removed definitions, changed constants) and
+  greps the *docs* for stale references to what changed — the one check that
+  compares two different file types. The four `docaudit .` checks have no range
+  concept; the intro maps each mode's trigger and range.
 
 ## Footguns
 
@@ -72,69 +62,43 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   an agent doesn't read the sidebar. Do **not** "fix" orphan detection to defer
   to MkDocs nav — it would make the tool always report zero orphans and destroy
   its purpose.
-- **`footgun-drift` is diff-scoped ON PURPOSE — a whole-state footgun check was
-  tried first and abandoned.** An earlier attempt made `footguns` a fifth
-  *whole-state* check re-scanning every tracked `.md` on every `docaudit .` run.
-  It was dropped before shipping because that re-scan produced a validated
-  flood of false positives against the existing corpus — every already-accepted
-  footgun note in the tree re-flagged on every unrelated push (and now that the
-  check flags *every* declaration rather than trying to detect rationale, a
-  whole-state re-scan would flood even harder). Do NOT re-add `footguns` to
-  `checkNames` to "fix" this; the flood is exactly why it isn't there. The fix
-  was to scope the check to what's *new*: it flags only footgun *declarations
-  added in that range*; content already on the remote is never re-scanned.
-  `footgun-drift` and `doc-drift` both share this check-what-changed-not-
-  the-whole-tree model, and both live in docaudit as subcommands, but stay
-  **separate** subcommands because their trigger and diff source differ:
-  `doc-drift` is a **Stop-hook** subcommand driven by the branch's
-  working-tree-inclusive code diff (a definition removed or a constant's value
-  changed, with a doc still referencing the old state); `footgun-drift` is a
-  **pre-push** subcommand driven by git's pushed-ref range (ref lines on stdin,
-  or `--range base..head` for manual use) diffing markdown against markdown.
-  Different trigger, different diff source, different file types compared — do
-  not merge them into one subcommand. The four `docaudit .` checks remain
-  whole-state, unchanged: reachability, link existence, and leak content have
-  no meaningful "diff" version — they're properties of the current tree, not of
-  a range.
+- **`footgun-drift` is diff-scoped ON PURPOSE — do NOT re-add `footguns` to
+  `checkNames`.** A whole-state footgun check re-scanning every tracked `.md`
+  floods on the existing corpus: every already-accepted footgun note re-flags on
+  every unrelated push (worse now that the check flags *every* declaration, not
+  just un-rationalized ones). So the check is scoped to what's *new* —
+  declarations added in the pushed range; content already on the remote is never
+  re-scanned. `footgun-drift` and `doc-drift` share this check-what-changed model
+  but stay **separate** subcommands, because their trigger and diff source differ:
+  `doc-drift` is a Stop-hook driven by the working-tree-inclusive **code** diff,
+  `footgun-drift` a pre-push subcommand driven by git's pushed-ref range diffing
+  **markdown**. Do not merge them. The four `docaudit .` checks stay whole-state:
+  reachability, link existence, and leak content have no meaningful "diff" version
+  — they're properties of the current tree, not of a range.
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
-  enumerates every sensitive term the owner has). The footprint vocabulary is
-  also identical across repos. So `leaks` reads a **TOML** file at
-  `--leaks-config` → `$DOCAUDIT_LEAKS` → `$XDG_CONFIG_HOME/docaudit/leaks.toml`
-  (default `~/.config/docaudit/leaks.toml` — XDG, not `os.UserConfigDir()`, which
-  on macOS is the wrong `~/Library/Application Support` GUI-app home for a CLI tool),
-  with top-level `terms` (literal, case-insensitive) / `regex` (also
-  case-insensitive by default — opt out per-pattern with `(?-i)`; a leak must be
-  caught in any casing) / `allow` / `allow_regex` deny-and-exception arrays, plus
-  `[[dir]]` sections that scope an `ignore`/`allow`/`allow_regex` set to files
-  under an absolute `path` (a leading `~/` expands). **The config is the SOLE
-  source of rules — there are NO hardcoded built-in patterns.** Generic secret
-  shapes (PEM/AWS/GitHub/Slack) are just `regex` entries the owner adds (with a
-  leading `(?-i)` to keep them case-sensitive); the binary ships none. Because
-  leaks runs by default (incl. in CI, which has no machine-local file), an
-  **absent** config is NOT fatal — with no rules the scan is a no-op plus a
-  warning; a **malformed** config (bad TOML, a bad regexp in any
-  `regex`/`allow_regex` field, or a non-absolute `[[dir]]` `path`) IS fatal
-  (exit 2), since that's a real bug, not the common "not set up yet" case. Do NOT
-  restore hard-fail-on-absent: leaks being default-on means a missing global file
-  is the normal CI/fresh-clone state, and failing there would brick every push.
-  Do NOT reintroduce hardcoded built-in patterns either — the config being the
-  single visible source of truth is the point (rules hidden in the binary can't be
-  seen or tuned). History scrubbing is now supported by **exporting** rules for an
-  external rewriter — `docaudit leaks-rules` emits a `git-filter-repo --replace-text`
-  file from the config (terms → `regex:(?i)…` escaped; `regex` kept case-insensitive
-  unless it has a leading `(?-i)`; `allow`/`allow_regex`/`[[dir]]` **dropped with a
-  stderr warning**, since filter-repo rewrites by content across all paths/history and
-  can't honor a span or path exception). Emitted rules target filter-repo's **Python
-  `re` engine**, not Go/RE2: a leading `(?-i)` is normalized to a plain
-  case-sensitive rule rather than emitted verbatim, because Python `re` rejects a
-  bare `(?-i)` flag-clear that Go/RE2 accepts and would otherwise abort the whole
-  rewrite — a `(?-i)` anywhere else in a pattern, or other RE2-only syntax, has no
-  such normalization and needs manual review before running the rewrite. docaudit
-  itself still **never reads or rewrites history** — `leaks-rules` reads only the
-  TOML; the destructive rewrite is a separate external step. History *detection*
-  remains out of scope (owner's call); that stays with the manual
-  `pre-public-leak-audit` skill.
+  enumerates the owner's sensitive terms), and the footprint vocabulary is
+  identical across repos. The README's `leaks` section documents the TOML schema,
+  the `--leaks-config`→`$DOCAUDIT_LEAKS`→`$XDG_CONFIG_HOME` resolution (XDG, never
+  `os.UserConfigDir()` — wrong on macOS for a CLI), and the `leaks-rules` export.
+  The load-bearing invariants:
+  - **The config is the SOLE source of rules — NO hardcoded built-ins.** Generic
+    secret shapes (PEM/AWS/GitHub/Slack) are `regex` entries the owner adds; the
+    binary ships none. Rules hidden in a binary can't be seen or tuned — the config
+    being the single visible source is the point. Do NOT reintroduce built-ins.
+  - **Absent config is NOT fatal; malformed IS.** leaks runs by default (incl. CI,
+    which has no machine-local file), so an absent file is the normal state → no
+    rules, no-op, warn. A malformed config (bad TOML, a bad regexp, or a
+    non-absolute `[[dir]]` `path`) is a real bug → fatal (exit 2). Do NOT restore
+    hard-fail-on-absent — it would brick every CI/fresh-clone push.
+  - **`leaks-rules` targets filter-repo's Python `re`, not Go/RE2.** A leading
+    `(?-i)` is normalized to a plain case-sensitive rule (Python `re` rejects the
+    bare flag-clear Go/RE2 accepts, which would abort the rewrite); other RE2-only
+    syntax needs manual review first. `allow`/`allow_regex`/`[[dir]]` are dropped
+    with a warning (filter-repo rewrites by content across all history, so span/path
+    exceptions can't apply). docaudit never reads or rewrites history itself — the
+    rewrite is a separate external `git filter-repo` step; history *detection* stays
+    out of scope (the `pre-public-leak-audit` skill).
 - **Enforce-by-default, exclude explicitly — never an opt-in/include model.**
   Every check runs by default; `--skip <check[,check]>` is the only way to not run
   one. The removed `--checks` (include-list) flag could not enforce: a check added
@@ -177,18 +141,14 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   de-duped only by doc-drift's once-per-HEAD loop-guard.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
-  in docs don't register as real *links*. Removing this resurrects false-positive
-  broken links (e.g. a `[docs](services/name.md)` template row). This was a real
-  false positive caught on an early real-world run — the skip is load-bearing.
-  (Note the asymmetry: the orphan **reachability** pass, `mentionsPath`, *does*
-  read inline-code path mentions on purpose — that's how an agent follows a
-  bare `` `docs/x.md` `` reference. Link-extraction and reachability answer
-  different questions; don't unify them.)
+  in docs (e.g. a `[docs](services/name.md)` template row) don't register as real
+  *links*. Asymmetry: the orphan **reachability** pass, `mentionsPath`, *does*
+  read inline-code path mentions — that's how an agent follows a bare
+  `` `docs/x.md` `` reference. Link-extraction and reachability answer different
+  questions; don't unify them.
 - **Reachability = markdown links OR path mentions — don't narrow to links.**
   Model-C repos (design docs referenced by path, not clickable link) would show
-  a flood of false orphans under link-only reachability. Validated on real
-  flat-reference repos: link-only reachability reported dozens of false orphans
-  that `mentionsPath` collapsed to the genuine few. Removing `mentionsPath`
+  a flood of false orphans under link-only reachability. Removing `mentionsPath`
   reintroduces the flood.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
@@ -199,10 +159,9 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   checked). `.claude/**` and `.agents/**` files are runtime tooling; a config-dir
   README is not. Keep that distinction.
 - **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** One JSONL
-  record per run appends to `$XDG_STATE_HOME/docaudit/usage.jsonl` (XDG *state*, not
-  config) **only** when a global `config.toml` `[log]` table opts in — resolved
-  `--config` → `$DOCAUDIT_CONFIG` → `$XDG_CONFIG_HOME/docaudit/config.toml` (same XDG
-  discipline as leaks, never `os.UserConfigDir()`). Invariants that are load-bearing:
+  record per run under `$XDG_STATE_HOME/docaudit/usage.jsonl` (XDG *state*, not
+  config), only when a global `config.toml` `[log]` table opts in (the README's
+  Usage-logging section has the config + level table). Load-bearing invariants:
   - **Separate file from `leaks.toml`.** `leaks.toml` is a dedicated rules file that
     may be synced on its own; `config.toml` holds `[log]`. Don't merge them.
   - **Malformed `config.toml` is NON-fatal here** — warn, disable logging, run
@@ -221,20 +180,16 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
     so a future `docaudit drift` subcommand logs through the *same* file with the
     *same* record shape — trends span both. Keep the field when adding a subcommand.
 - **`footgun-drift` is a nag, not a judge — so it flags EVERY added
-  declaration.** It detects a footgun *declaration* (a line-leading `Footgun:`
-  marker or a bolded mid-line footgun lead, not a passing mention — a
-  cross-reference or a bare container heading with no delimiter never counts) and
-  reports it, full stop. It deliberately does **not** look for a rationale: it
-  cannot rank whether a stated "why" is actually *good* (that's a judgment task,
-  and docaudit is a deterministic pattern scanner), and an earlier cut that
-  suppressed a declaration when a rationale *word* sat nearby just rewarded typing
-  "because" — a gameable in-file escape that judged nothing. So it nags on the
-  declaration itself and prints the two-question test (is this a real footgun; is
-  it at the right doc level — the same test the `doc-and-audit-rigor` skill
-  applies), leaving that judgment to the pusher. Because it judges nothing, it
-  does not block — see the advisory note in the intro. Do NOT reintroduce
-  rationale detection to "reduce noise": it can't tell a real rationale from a
-  plausible-sounding one, and pretending to is worse than an honest nag.
+  declaration.** It detects a footgun *declaration* (a line-leading `Footgun:` or a
+  bolded mid-line footgun lead — introducing one, not a cross-reference or a bare
+  container heading with no delimiter) and reports it, full stop. It deliberately
+  does **not** detect a rationale: docaudit is a deterministic scanner and can't
+  rank whether a stated "why" is real — rationale detection would just reward
+  typing "because". So it nags and prints the two-question test (is this a real
+  footgun; is it at the right doc level — the `doc-and-audit-rigor` skill's test),
+  leaving that judgment to the pusher. Because it judges nothing, it does not
+  block. Do NOT reintroduce rationale detection to "reduce noise" — an honest nag
+  beats a fake judge.
 - **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'` —
   not the doc-graph ignore layers, and not the leaks git-tracking scope
   either.** Any `.md` file the diff touches is in scope, including a
