@@ -116,19 +116,25 @@ type DocHit struct {
 	Text string
 }
 
-// gitDiff returns the unified diff of the CODE side of `git diff <spec>` —
-// scoped to non-doc paths (mirrors stillDefinedInCode's pathspec), because a
-// definition/constant that changed only inside a tracked .md/.mdx file is the
-// doc itself being edited, not code drifting away from it: scanning docs here
-// would extract a "removed definition"/"changed constant" out of doc prose or
-// a fenced code-block example and then find that same doc's own mention as a
-// phantom finding. The doc-GREP side (docGrepSymbol/docGrepValue) is
-// unaffected by this — it still searches *.md/*.mdx directly, on purpose.
-// spec may be a base SHA (diffs base vs the WORKING TREE — committed and
-// uncommitted), "HEAD" (uncommitted only), or "base..head" (committed only).
+// nonCodePathspec excludes tracked doc/prose formats from the CODE side of the
+// diff and the still-defined grep. A definition or constant that changed only
+// inside prose is the prose being edited, not code drifting from a doc — and
+// def-keyword-shaped English (e.g. "…the type OrderManager…" in a CHANGELOG) or
+// a fenced code example must not be read as a real definition. gitDiff and
+// stillDefinedInCode MUST share this exact set: they answer "what code changed?"
+// and "does this symbol still exist in code?", so a mismatch would report a
+// symbol as gone from a file class the diff never scanned. Docs are only ever
+// searched for *references* by the doc-GREP side (docGrepSymbol/docGrepValue),
+// which scans *.md/*.mdx directly, on purpose.
+var nonCodePathspec = []string{".", ":!*.md", ":!*.mdx", ":!*.txt", ":!*.rst", ":!*.adoc", ":!*.markdown"}
+
+// gitDiff returns the unified diff of the CODE side of `git diff <spec>`, scoped
+// by nonCodePathspec. spec may be a base SHA (diffs base vs the WORKING TREE —
+// committed and uncommitted), "HEAD" (uncommitted only), or "base..head"
+// (committed only).
 func gitDiff(root, spec string) (string, error) {
-	out, err := exec.Command("git", "-C", root, "diff", spec,
-		"--", ".", ":!*.md", ":!*.mdx").Output()
+	args := append([]string{"-C", root, "diff", spec, "--"}, nonCodePathspec...)
+	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return "", err
 	}
@@ -136,11 +142,12 @@ func gitDiff(root, spec string) (string, error) {
 }
 
 // stillDefinedInCode reports whether sym appears (whole-word) anywhere in tracked
-// NON-doc files. A fixed-string word match; a regex alternation backtracks
-// catastrophically on a large tree.
+// code — the same non-prose file set gitDiff scans (nonCodePathspec). A
+// fixed-string word match; a regex alternation backtracks catastrophically on a
+// large tree.
 func stillDefinedInCode(root, sym string) bool {
-	return exec.Command("git", "-C", root, "grep", "-qwF", "--", sym,
-		"--", ".", ":!*.md", ":!*.mdx").Run() == nil
+	args := append([]string{"-C", root, "grep", "-qwF", "--", sym, "--"}, nonCodePathspec...)
+	return exec.Command("git", args...).Run() == nil
 }
 
 // gitGrepHits runs `git grep -n -F -w` with the given pathspec args and parses

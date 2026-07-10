@@ -217,6 +217,23 @@ It flags two mechanical staleness classes:
    diff while a tracked doc still names the constant **and** still shows the
    old literal.
 
+Scope and known limits:
+
+- **Docs are `.md`/`.mdx`; the "code" side is everything else** except the prose
+  formats `.txt`/`.rst`/`.adoc`/`.markdown`, which are excluded from the code
+  scan so def-shaped prose (a `class …`/`type …` sentence in a `CHANGELOG.txt`)
+  isn't read as a removed definition. Put prose in one of those formats, not a
+  bespoke extension the code scan would parse.
+- **Anchored value drift is not proximity-checked** — it fires when a
+  symbol-naming doc *also* contains the old literal anywhere in the file, so it
+  can over-report (and cite an unrelated line) if that number appears
+  coincidentally in the same doc.
+- **`--range` evaluates references against the current working tree.** The
+  still-defined check and the doc grep run against the working tree, not the
+  named committed head, so a dirty tree changes the verdict for the same range.
+  Bare Stop-hook mode diffs base→worktree and is self-consistent; `--range` is a
+  manual convenience.
+
 ```bash
 docaudit doc-drift                        # bare: resolves the diff base itself, applies the loop-guard
 docaudit doc-drift --range base..head     # explicit range, for manual use — bypasses the loop-guard

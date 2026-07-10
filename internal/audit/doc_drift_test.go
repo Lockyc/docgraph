@@ -220,6 +220,28 @@ func TestDocDriftIgnoresMarkdownOnlyChange(t *testing.T) {
 	}
 }
 
+// Non-.md prose formats (CHANGELOG.txt/.rst/.adoc/…) are excluded from the code
+// side too (nonCodePathspec) — a def-keyword-shaped English sentence trimmed
+// from such a file must not be read as a removed code definition and blocked.
+func TestDocDriftIgnoresNonMarkdownProseChange(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{
+			"CHANGELOG.txt": "Changelog\n\nAdded class OrderManager for orders.\n",
+			"CLAUDE.md":     "The OrderManager handles orders.\n", // named in a real doc
+		},
+		map[string]string{
+			"CHANGELOG.txt": "Changelog\n", // prose line trimmed; no code ever defined OrderManager
+		},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a non-.md prose edit must not be mistaken for code drift, got %+v", got)
+	}
+}
+
 func TestDocDriftIncludesUncommittedWorkingTree(t *testing.T) {
 	// base committed with def + doc; remove the def in the WORKING TREE, no commit.
 	dir := setupRepo(t, map[string]string{
