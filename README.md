@@ -263,11 +263,26 @@ sweep for those.
 
 ## Install
 
+**Guided (Claude Code):** run `/docaudit:install` — it installs the binary, offers to wire
+the `doc-drift` Stop hook into `~/.claude/settings.json`, offers this repo's pre-push gate,
+and seeds the leaks config.
+
+**Manual:**
+
 ```bash
-go install github.com/lockyc/docaudit@latest   # or: just install
+curl -fsSL https://raw.githubusercontent.com/lockyc/docaudit/main/install.sh | bash
 ```
 
-Depends only on `github.com/BurntSushi/toml` (config decode) plus the Go stdlib. Requires `git` on PATH.
+This runs `go install` (from the current checkout if you're in one, else `@latest`), seeds
+`~/.config/docaudit/`, and prints where the binary landed. Or install directly:
+
+```bash
+go install github.com/lockyc/docaudit@latest   # or, from a checkout: just install
+```
+
+Needs **Go** (the install is `go install`) and **git** on PATH (docaudit shells out to it at
+runtime). The only module dependency is `github.com/BurntSushi/toml` (config decode); the rest
+is the Go stdlib.
 
 ## Usage
 

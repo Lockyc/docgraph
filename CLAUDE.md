@@ -258,6 +258,13 @@ docs/" with zero config.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
   reinstalled automatically, because `go install` only runs when invoked — so
   reinstall after changing the CLI or the local binary runs stale logic.
+- `install.sh` + `.claude/commands/docaudit/install.md` (`/docaudit:install`) — the
+  guided installer (`project-standards` item 13). `install.sh` is the curl-pipeable
+  mechanism (`go install`, dual-mode IN_REPO/`@latest`, seeds `~/.config/docaudit/`,
+  edits no global config); `/docaudit:install` is the guided layer that wires the
+  `doc-drift` Stop hook into `~/.claude/settings.json`, offers the per-repo pre-push
+  gate, and seeds the leaks config. Both single-source the module path and never
+  depend on `just`.
 
 ## Branching & releases
 
