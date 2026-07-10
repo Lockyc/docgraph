@@ -361,16 +361,14 @@ tooling that is never part of the doc graph). Add more via a `.docauditignore` f
 **No inline markers.** Every suppression lives in config or on the command line —
 `.docauditignore`, `--ignore`, `--skip`, and the leaks config's `allow`/`allow_regex`
 and `[[dir]]` sections. docaudit **never** reads a suppression comment or pragma inside
-the audited files (no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`
-equivalent, and no `<!-- footgun-ok -->` for `footgun-drift`). Such a marker would be
-silently ignored, not honored — so an unwanted doc-graph/leak finding is silenced by
-tuning the config/flags, never by annotating the file. `footgun-drift` has no in-file
-escape at all: it's advisory, flags every added declaration, and is opted out only
-whole-check via `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`. `doc-drift` has no
-in-file escape either, and no per-finding CLI flag: the sole opt-out is the
-whole-check `DOC_DRIFT_OFF=1`; a flagged reference is otherwise a situation-based
-judgment call, de-duped as a *nag* (not silenced as a finding) by its
-once-per-HEAD loop-guard.
+the audited files; such a marker would be silently ignored, not honored — so an
+unwanted doc-graph/leak finding is silenced by tuning the config/flags, never by
+annotating the file. `footgun-drift` has no in-file escape at all: it's advisory,
+flags every added declaration, and is opted out only whole-check via
+`DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`. `doc-drift` likewise has no in-file
+escape and no per-finding CLI flag: the sole opt-out is the whole-check
+`DOC_DRIFT_OFF=1`; a flagged reference is otherwise a situation-based judgment call,
+de-duped as a *nag* (not silenced as a finding) by its once-per-HEAD loop-guard.
 
 ## Usage logging
 

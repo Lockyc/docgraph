@@ -161,31 +161,20 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   `**/*_test.go`) — the config is the single control surface, not a per-repo
   `--skip`/`--ignore` or an inline marker (see next).
 - **No inline suppression markers — every control is config or CLI.** docaudit
-  never parses a suppression comment/pragma out of the files it audits: there is
-  no `<!-- docaudit-ignore -->`, no `# docaudit:allow`, no `# nosec`-style
-  per-line escape, and **no `<!-- footgun-ok -->` for `footgun-drift`** either.
-  Suppression is *only* `.docauditignore`/`--ignore`/`--skip` (doc-graph scope),
-  the leaks config's `allow`/`allow_regex`/`[[dir]]` (leak scope), and — for
-  footgun-drift, which flags every added declaration with no in-file escape at
-  all — the whole-check opt-outs `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`.
-  This is deliberate: an inline marker committed to a public repo would be a
-  visible "here be a secret" annotation (same reason the leaks deny-list stays
-  out of the repo), and a marker in a scanned file is exactly the kind of local
-  override the config-as-single-source-of-truth model exists to avoid. Do NOT add
-  one — a line-level comment scanner would have to read file content just to honor
-  self-referential annotations, and would silently un-nag whatever it's placed on.
-  (`footgun-drift` shipped a `<!-- footgun-ok -->` marker in an early cut; it was
-  dropped precisely to keep this invariant absolute — and now that footgun-drift
-  is advisory and flags every added declaration, there is nothing in-file to
-  exempt in the first place.) `doc-drift` keeps this invariant fully
-  consistent: it has **no** suppression surface at all — not `.docauditignore`,
-  not a CLI opt-out for a single finding, not an inline marker. Its predecessor
-  (a bash script of the same name) carried a `<!-- doc-drift-ignore -->`
-  marker; that marker did not come across. A flagged reference here is a
-  situation-based judgment call — reconcile the doc, or confirm it's
-  intentional framed history and move on — de-duped only by the once-per-HEAD
-  loop-guard (`DOC_DRIFT_OFF=1` remains the one whole-check opt-out, mirroring
-  `DOCAUDIT_FOOTGUN_OFF`).
+  never parses a suppression comment/pragma out of the files it audits.
+  Suppression is *only* `.docauditignore`/`--ignore`/`--skip` (doc-graph scope)
+  and the leaks config's `allow`/`allow_regex`/`[[dir]]` (leak scope);
+  `footgun-drift` and `doc-drift` have no in-file escape at all, opted out only
+  whole-check via `DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift` and
+  `DOC_DRIFT_OFF=1` respectively. This is deliberate: an inline marker committed
+  to a public repo would be a visible "here be a secret" annotation (same reason
+  the leaks deny-list stays out of the repo), and a per-file override is exactly
+  what the config-as-single-source-of-truth model exists to avoid — a line-level
+  comment scanner would also have to read file content just to honor
+  self-referential annotations, silently un-nagging whatever it's placed on. A
+  flagged `footgun-drift`/`doc-drift` reference is a situation-based judgment call
+  — reconcile the doc, or confirm it's intentional framed history and move on —
+  de-duped only by doc-drift's once-per-HEAD loop-guard.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs don't register as real *links*. Removing this resurrects false-positive

@@ -48,7 +48,13 @@ release:
     fi
     just gate
     git push origin dev
-    # main only fast-forwards to the release commit; it never diverges from dev.
+    # main only ever fast-forwards to a release commit. Assert it hasn't diverged
+    # (an out-of-band commit on main) so we fail loud here instead of silently
+    # rewinding main and losing that commit at the next release.
+    if ! git merge-base --is-ancestor main dev; then
+      echo "✗ main is not an ancestor of dev — it diverged; back-merge main into dev first" >&2
+      exit 1
+    fi
     git branch -f main dev
     git push origin main
     git tag -a "${tag}" -m "${tag}" main

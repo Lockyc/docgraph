@@ -18,7 +18,7 @@ var (
 	// NAME <sep> NUMBER, sep in {= :}, number >=2 digits.
 	assignRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*([0-9][0-9]+)`)
 
-	// Distinctive-symbol sub-checks (ported verbatim from doc-drift.sh).
+	// Distinctive-symbol sub-checks.
 	reAllSnake    = regexp.MustCompile(`^[A-Z0-9_]+$`)
 	reHasUpper    = regexp.MustCompile(`[A-Z]`)
 	rePascalShape = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
