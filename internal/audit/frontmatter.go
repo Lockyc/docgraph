@@ -1,5 +1,11 @@
 package audit
 
+import (
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
 // CoreTypes is the advisory core vocabulary for a doc's `type`. Custom types are
 // allowed (tolerate-unknown) — this is what docgraph understands, not a closed
 // set. Single source for the type vocabulary: the emitted JSON Schema and any
@@ -34,4 +40,42 @@ type Edge struct {
 	Rel  string `yaml:"rel"`
 	To   string `yaml:"to"`
 	Note string `yaml:"note"`
+}
+
+// SplitFrontmatter separates a leading YAML frontmatter block from the body. A
+// block exists only when the file's very first line is exactly `---`; it ends at
+// the next line that is exactly `---`. Returns the frontmatter YAML (without the
+// fences), the remaining body, and whether a block was present. A `---` anywhere
+// but the first line is a markdown horizontal rule, not frontmatter.
+func SplitFrontmatter(content string) (fm, body string, has bool) {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimRight(lines[0], "\r") != "---" {
+		return "", content, false
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], "\r") == "---" {
+			fm = strings.Join(lines[1:i], "\n")
+			body = strings.Join(lines[i+1:], "\n")
+			return fm, body, true
+		}
+	}
+	// Opening fence with no close: treat as no frontmatter (a lone --- line).
+	return "", content, false
+}
+
+// ParseFrontmatter splits and decodes a doc's leading YAML frontmatter into a
+// Doc. Returns (nil, nil) when there is no frontmatter block — plain docs are
+// valid. Returns (nil, err) when a block is present but its YAML is malformed. A
+// well-formed block with no `type` decodes to a Doc with an empty Type; whether
+// that is a finding is the caller's decision, not the parser's.
+func ParseFrontmatter(content string) (*Doc, error) {
+	fm, _, has := SplitFrontmatter(content)
+	if !has {
+		return nil, nil
+	}
+	var d Doc
+	if err := yaml.Unmarshal([]byte(fm), &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
 }

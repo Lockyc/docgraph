@@ -57,3 +57,54 @@ links:
 		t.Errorf("Extra[service] = %v, want vaultwarden", d.Extra["service"])
 	}
 }
+
+func TestSplitFrontmatter(t *testing.T) {
+	fm, body, has := SplitFrontmatter("---\ntype: runbook\n---\n# Body\ntext\n")
+	if !has {
+		t.Fatal("has = false, want true")
+	}
+	if fm != "type: runbook" {
+		t.Errorf("fm = %q", fm)
+	}
+	if body != "# Body\ntext\n" {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestSplitFrontmatterNone(t *testing.T) {
+	_, _, has := SplitFrontmatter("# Just a doc\nno frontmatter\n")
+	if has {
+		t.Error("has = true, want false for a doc with no leading --- block")
+	}
+	// A --- that is not on the first line is a horizontal rule, not frontmatter.
+	if _, _, has := SplitFrontmatter("intro\n---\nnot frontmatter\n"); has {
+		t.Error("mid-file --- treated as frontmatter")
+	}
+}
+
+func TestParseFrontmatterNoneIsNilNil(t *testing.T) {
+	d, err := ParseFrontmatter("# plain\n")
+	if err != nil || d != nil {
+		t.Fatalf("got (%v, %v), want (nil, nil)", d, err)
+	}
+}
+
+func TestParseFrontmatterMalformed(t *testing.T) {
+	d, err := ParseFrontmatter("---\ntype: [unterminated\n---\n")
+	if err == nil {
+		t.Fatal("err = nil, want a YAML decode error")
+	}
+	if d != nil {
+		t.Errorf("d = %v, want nil on error", d)
+	}
+}
+
+func TestParseFrontmatterOK(t *testing.T) {
+	d, err := ParseFrontmatter("---\ntype: runbook\nlinks:\n  - rel: covers\n    to: x.sh\n---\nbody\n")
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if d == nil || d.Type != "runbook" || len(d.Links) != 1 || d.Links[0].To != "x.sh" {
+		t.Fatalf("d = %+v", d)
+	}
+}
