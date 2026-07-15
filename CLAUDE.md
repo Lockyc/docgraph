@@ -1,13 +1,18 @@
 # docaudit — notes for the next agent
 
 A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
-`git`) with three independent modes, each with its own trigger:
+`git`) with three independent audit modes, each with its own trigger, plus a
+read-only `schema` subcommand:
 
-- **`docaudit .`** — four **whole-state** checks against the current tree:
+- **`docaudit .`** — six **whole-state** checks against the current tree:
   orphans (tracked `.md` unreachable from the roots), broken internal `.md`
-  links, untracked `.md`, and a `leaks` content scan. All four are **enforced by
-  default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
-  nothing). A finding exits non-zero — that's the pre-push gate.
+  links, untracked `.md`, a `leaks` content scan, `frontmatter` (a doc's
+  leading YAML frontmatter block, if present, must parse and carry a `type`),
+  and `edges` (a frontmatter `links:` list's internal targets must exist, and
+  `part-of`/`supersedes` edges must not cycle — see "Frontmatter model"
+  below). All six are **enforced by default**; exclude one with `--skip` (no
+  opt-in — an opt-in check enforces nothing). A finding exits non-zero —
+  that's the pre-push gate.
 - **`docaudit footgun-drift`** — a **diff-scoped, advisory** pre-push subcommand:
   flags *every* footgun declaration added in the pushed range (no rationale
   judgment, never re-scans the existing corpus) and **exits 0** — a nag to
@@ -18,17 +23,24 @@ A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
   definition was removed but a tracked doc still names it) and **anchored value
   drift** (a constant whose numeric value changed while a doc still names the
   symbol and shows the old literal) — and **exits 2** to block the Stop.
+- **`docaudit schema`** — read-only, no repo state read at all: emits the JSON
+  Schema (draft 2020-12) describing the frontmatter vocabulary that
+  `frontmatter`/`edges` enforce, so another consumer (an editor, a catalog
+  builder) conforms to it instead of re-encoding it. Never part of the gate.
 
-`footgun-drift` and `doc-drift` are **not** `checkNames` — each is its own
-subcommand with its own trigger (a git range / a Stop invocation), not a
-`docaudit .` check. There's also an **opt-in usage log** (see the logging
-footgun). Human-facing usage lives in `README.md`; this file carries the
-invariants and footguns.
+`frontmatter` and `edges` are ordinary `checkNames` entries — whole-state,
+`--skip`-able exactly like orphans/broken/untracked/leaks. `footgun-drift` and
+`doc-drift` are **not** `checkNames` — each is its own subcommand with its own
+trigger (a git range / a Stop invocation), not a `docaudit .` check. `schema`
+is a third kind again: not a check and not diff-scoped, just a vocabulary
+emitter with no trigger of its own. There's also an **opt-in usage log** (see
+the logging footgun). Human-facing usage lives in `README.md`; this file
+carries the invariants and footguns.
 
 ## Intended use
 
 docaudit is built to run as a **pre-push documentation gate** (and in CI): the
-four whole-state checks exit non-zero on a finding so a broken doc-graph blocks
+six whole-state checks exit non-zero on a finding so a broken doc-graph blocks
 the push without a wrapper. `docaudit install-hook` writes a tracked
 `.githooks/pre-push` for that; the generated hook also runs `footgun-drift` as an
 **advisory** rider (it prints its nag but never blocks — see its footgun below).
@@ -42,17 +54,55 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
 
 - **Agent-facing, not human-facing.** It measures the graph an agent traverses
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
-- **Reads doc-graph structure and, for `leaks`, file content — both as
-  whole-state.** The three doc-graph checks (orphans/broken/untracked) traverse
-  only the link graph; `leaks` additionally scans tracked file *content* (code
-  included) for configured leak patterns. Both read the current tree, never git
-  history.
+- **Reads doc-graph structure, frontmatter, and, for `leaks`, arbitrary file
+  content — all as whole-state.** `orphans`/`broken`/`untracked`/`edges`
+  traverse the link graph (`edges` additionally checks internal-target
+  existence and `part-of`/`supersedes` cycles among frontmatter edges);
+  `frontmatter` parses each doc's leading YAML block for well-formedness;
+  `leaks` scans tracked file *content* (code included) for configured leak
+  patterns. All read the current tree, never git history.
 - **`footgun-drift` and `doc-drift` read a *diff*, not repo state.**
   `footgun-drift` scans added markdown lines (like `leaks`, but diff-scoped);
   `doc-drift` diffs tracked **code** (removed definitions, changed constants) and
   greps the *docs* for stale references to what changed — the one check that
-  compares two different file types. The four `docaudit .` checks have no range
+  compares two different file types. The six `docaudit .` checks have no range
   concept; the intro maps each mode's trigger and range.
+
+## Frontmatter model
+
+A doc's optional leading YAML block (`SplitFrontmatter`: present only when the
+file's first line is exactly `---`, ending at the next line that's exactly
+`---`) is the agent-facing metadata layer `frontmatter`/`edges` and `docaudit
+schema` all key off:
+
+- **`type`** — required whenever a block is present (missing it is a
+  `frontmatter` finding; malformed YAML is a separate `frontmatter` finding
+  regardless of `type`). Core vocabulary (`CoreTypes` in
+  `internal/audit/frontmatter.go`): `runbook`, `architecture`, `reference`,
+  `decision`, `guide`, `index` — advisory, not enforced; a custom value is
+  accepted (tolerate-unknown), never rejected.
+- **`verified`/`review`** — freshness metadata: `verified` is the date the doc
+  was last checked against reality, `review` is a per-doc staleness-cadence
+  override (e.g. `90d`). Vocabulary only today — no check reads either field
+  yet.
+- **`links`** — typed edges (`Edge{Rel, To, Note}`, the "label the link"
+  model). `rel` core vocabulary (`CoreRels`): `covers`, `part-of`,
+  `supersedes`, `depends-on`, `runbook-for`, `see-also`, `source` — advisory,
+  custom allowed. `to` is **repo-root-relative** (`ResolveEdgeTarget` resolves
+  against the repo root, not the source doc's directory — unlike a markdown
+  link) with its kind inferred (`ClassifyTarget`), never declared: an internal
+  `.md` path is a doc edge (existence-checked, feeds reachability — see the
+  reachability footgun below), another internal path is a code edge
+  (existence-checked only), a URL/`mailto:` is external (unverifiable, never
+  checked), and an `owner/repo:path` form is cross-repo (deferred to
+  Mycelium — docaudit sees only one repo — and never a finding here).
+- **Cycles**: only `part-of`/`supersedes` edges between tracked docs form the
+  acyclic-checked graph (`detectCycles`/`cycleRels`); every other `rel` is a
+  cross-reference, not hierarchy/lineage, and is exempt from cycle detection.
+
+`CoreTypes`/`CoreRels` are single-sourced in `internal/audit/frontmatter.go`;
+`docaudit schema` reads them into the emitted JSON Schema rather than
+restating the vocabulary, so the schema and the checks can't drift apart.
 
 ## Footguns
 
@@ -146,10 +196,15 @@ control back — see [`doc-drift`](README.md#docaudit-doc-drift) in `README.md`.
   read inline-code path mentions — that's how an agent follows a bare
   `` `docs/x.md` `` reference. Link-extraction and reachability answer different
   questions; don't unify them.
-- **Reachability = markdown links OR path mentions — don't narrow to links.**
-  Model-C repos (design docs referenced by path, not clickable link) would show
-  a flood of false orphans under link-only reachability. Removing `mentionsPath`
-  reintroduces the flood.
+- **Reachability = markdown links, path mentions, OR frontmatter doc-edges —
+  don't narrow to any one.** Model-C repos (design docs referenced by path,
+  not clickable link) would show a flood of false orphans under link-only
+  reachability; removing `mentionsPath` reintroduces it. A frontmatter
+  `links:` edge to a tracked doc (`rel` doesn't matter — `part-of`,
+  `see-also`, anything) is the **third** reachability source: a doc reached
+  only via a typed edge is not an orphan. Only `EdgeDoc`-classified targets
+  (internal `.md`) count as reachability edges — code/external/cross-repo
+  edges never make a doc reachable.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
   and `.agents/**` agent skill/config files, which aren't documentation, and

@@ -36,14 +36,16 @@ via `.docauditignore`. The `leaks` check is broader: it scans *all* tracked file
 
 ## Checks
 
-All four run by default when you run `docaudit [path]`. Exclude one with
+All six run by default when you run `docaudit [path]`. Exclude one with
 `--skip <check[,check]>` (e.g. a nav-driven MkDocs repo runs `--skip orphans`).
 A newly-added check is enforced everywhere automatically — there is no
 run-list to update.
 
 1. **Orphans** — a tracked doc not reachable from the entry points.
-   Reachability follows both markdown links *and* bare/inline-code path mentions
-   (`` `docs/x.md` ``), because an agent follows either. Every real `.md` is
+   Reachability follows markdown links, bare/inline-code path mentions
+   (`` `docs/x.md` ``), *and* frontmatter typed edges (see `edges` below) —
+   because an agent follows any of the three. A doc reached only via a typed
+   edge (e.g. a `part-of` pointing at it) is not an orphan. Every real `.md` is
    audited — including docs outside `docs/` (e.g. a config-dir README); only
    agent tooling under `.claude/` and `.agents/` plus untracked scratch are excluded, as
    those aren't documentation.
@@ -53,6 +55,33 @@ run-list to update.
    absent from clones, the built site, and any mirror.
 4. **Leaks** — tracked file *content* matching a configured leak pattern (see
    below). Scans file content rather than the doc graph.
+5. **Frontmatter** — a doc's leading YAML frontmatter block (first line
+   exactly `---` to the next `---`), if present, must be well-formed YAML and
+   carry a `type` field; a doc with no frontmatter block at all is fine.
+   Malformed YAML and a block missing `type` are each a finding. `type` is an
+   advisory vocabulary, not a closed enum — see
+   [`docaudit schema`](#docaudit-schema--the-frontmatter-vocabulary) below.
+6. **Edges** — a frontmatter `links:` list of typed edges (`rel`/`to`/`note`).
+   Every internal `to` target — a repo-root-relative `.md` doc or code path —
+   must exist on disk, and `part-of`/`supersedes` edges between tracked docs
+   must not form a cycle. External URLs and `owner/repo:...` cross-repo
+   targets are never checked (unverifiable and deferred, respectively).
+
+### `docaudit schema` — the frontmatter vocabulary
+
+```bash
+docaudit schema    # prints the JSON Schema to stdout
+```
+
+Emits the [JSON Schema](https://json-schema.org/) (draft 2020-12) describing
+valid doc frontmatter — the `type`/`verified`/`review`/`links` shape the
+`frontmatter` and `edges` checks enforce, plus the advisory `type`/`rel`
+vocabularies (as `x-docgraph-core-types`/`x-docgraph-core-rels`), so another
+tool (an editor, a linter, a catalog builder) can validate or generate
+frontmatter against the same rules docaudit uses, instead of re-encoding the
+vocabulary by hand. It's **read-only** — it never reads the repo it's run in
+and is never part of the gate (not in `checkNames`, not `--skip`-able,
+nothing to enable or disable).
 
 ### `leaks` — the content scan
 
@@ -150,7 +179,7 @@ rewrite is broader than the audit's scope. Review the result.
 
 ### `footgun-drift` — the diff-scoped pre-push check
 
-Unlike the four checks above, `footgun-drift` never scans the whole repo — only
+Unlike the six checks above, `footgun-drift` never scans the whole repo — only
 what a push *adds* — and it is **advisory**: it prints a nag but exits 0 and
 never blocks the push. It flags a footgun **declaration** (a line-leading
 `Footgun:` marker or a bolded mid-line footgun lead — introducing one, not just
@@ -292,12 +321,15 @@ docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
 docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
 docaudit --skip orphans             # exclude a check (comma-separated; e.g. nav-driven MkDocs)
 docaudit --skip leaks               # exclude the content leak scan
+docaudit --skip frontmatter         # exclude the frontmatter well-formedness check
+docaudit --skip edges               # exclude the typed-edge integrity check
 docaudit --leaks-config <path>      # override the global leak rules file
 docaudit --config <path>            # override the global config.toml (usage logging)
 docaudit footgun-drift              # diff-scoped: reads pre-push ref lines from stdin
 docaudit footgun-drift --range base..head  # diff-scoped: explicit range
 docaudit doc-drift                  # Stop-hook: working-tree-inclusive diff, once-per-HEAD loop-guard
 docaudit doc-drift --range base..head  # Stop-hook: explicit range, bypasses the loop-guard
+docaudit schema                     # print the JSON Schema for the frontmatter vocabulary (read-only)
 docaudit version                    # print version (also --version, -v)
 ```
 
