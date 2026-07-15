@@ -783,6 +783,40 @@ func TestRunSchema(t *testing.T) {
 	}
 }
 
+// chdir switches the process cwd to dir and returns a func restoring the prior
+// cwd. Needed because runCovers resolves the repo from "." (like the other
+// subcommand entry points that default path to "."), so exercising it requires
+// running with the target repo as cwd.
+func chdir(t *testing.T, dir string) func() {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	return func() { _ = os.Chdir(old) }
+}
+
+func TestRunCovers(t *testing.T) {
+	dir := setupRepoMain(t, map[string]string{
+		"CLAUDE.md": "[a](docs/a.md)\n",
+		"docs/a.md": "---\ntype: reference\nlinks: [{rel: covers, to: src/x.go}]\n---\n",
+		"src/x.go":  "package x\n",
+	})
+	var out, errb bytes.Buffer
+	// runCovers resolves the repo from ".", so run it with the repo as cwd.
+	restore := chdir(t, dir)
+	defer restore()
+	if code := runCovers([]string{"src/x.go"}, &out, &errb); code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, errb.String())
+	}
+	if got := out.String(); got != "docs/a.md\n" {
+		t.Errorf("covers output = %q, want docs/a.md", got)
+	}
+}
+
 func TestPrintReportEdgesHeaderCountsCycles(t *testing.T) {
 	var buf bytes.Buffer
 	rep := audit.Report{EdgeCycles: [][]string{{"a.md", "b.md"}}}

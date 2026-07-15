@@ -37,6 +37,8 @@ func main() {
 			os.Exit(runDocDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "schema":
 			os.Exit(runSchema(os.Stdout))
+		case "covers":
+			os.Exit(runCovers(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -834,5 +836,36 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 // never part of the pre-push gate.
 func runSchema(stdout io.Writer) int {
 	stdout.Write(audit.SchemaJSON(version))
+	return 0
+}
+
+// runCovers prints the docs that document the given repo-root-relative path (via
+// a frontmatter `covers` edge, directly or by covering a parent directory). A
+// read-only view — never part of the gate.
+func runCovers(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("docaudit covers", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var ignores multiFlag
+	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() < 1 {
+		fmt.Fprintln(stderr, "docaudit: usage: docaudit covers <repo-relative-path>")
+		return 2
+	}
+	root, err := audit.GitRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		return 2
+	}
+	docs, err := audit.RepoDocs(root, ignores)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	for _, src := range audit.CoversOf(docs, fs.Arg(0)) {
+		fmt.Fprintln(stdout, src)
+	}
 	return 0
 }
