@@ -108,3 +108,31 @@ func TestParseFrontmatterOK(t *testing.T) {
 		t.Fatalf("d = %+v", d)
 	}
 }
+
+func TestSplitFrontmatterNoClose(t *testing.T) {
+	// Opening --- with no closing --- is NOT frontmatter (a lone fence line).
+	fm, body, has := SplitFrontmatter("---\ntype: runbook\nno close here\n")
+	if has {
+		t.Errorf("has = true for an unterminated block; want false")
+	}
+	if fm != "" {
+		t.Errorf("fm = %q, want empty", fm)
+	}
+	if body != "---\ntype: runbook\nno close here\n" {
+		t.Errorf("body = %q, want the original content", body)
+	}
+}
+
+func TestParseFrontmatterEmptyBlock(t *testing.T) {
+	// A well-formed but empty block yields a non-nil, zero-value Doc, no error.
+	d, err := ParseFrontmatter("---\n---\nbody\n")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if d == nil {
+		t.Fatal("d = nil, want a non-nil zero-value Doc")
+	}
+	if d.Type != "" {
+		t.Errorf("d.Type = %q, want empty", d.Type)
+	}
+}
