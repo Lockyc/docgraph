@@ -75,3 +75,21 @@ func TestSchemaJSONEdgeShape(t *testing.T) {
 		t.Errorf("edge.additionalProperties = %v, want false", edge["additionalProperties"])
 	}
 }
+
+func TestSchemaJSONNoEnumRestriction(t *testing.T) {
+	var m map[string]any
+	if err := json.Unmarshal(SchemaJSON("x"), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	props := m["properties"].(map[string]any)
+	typ := props["type"].(map[string]any)
+	if _, ok := typ["enum"]; ok {
+		t.Error("type must not be enum-restricted (custom types are allowed)")
+	}
+	defs := m["$defs"].(map[string]any)
+	edge := defs["edge"].(map[string]any)
+	rel := edge["properties"].(map[string]any)["rel"].(map[string]any)
+	if _, ok := rel["enum"]; ok {
+		t.Error("rel must not be enum-restricted (custom rels are allowed)")
+	}
+}
