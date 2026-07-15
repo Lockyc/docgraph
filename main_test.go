@@ -782,3 +782,14 @@ func TestRunSchema(t *testing.T) {
 		t.Errorf("title = %v", m["title"])
 	}
 }
+
+func TestPrintReportEdgesHeaderCountsCycles(t *testing.T) {
+	var buf bytes.Buffer
+	rep := audit.Report{EdgeCycles: [][]string{{"a.md", "b.md"}}}
+	if !printReport(&buf, rep, nil, map[string]bool{"edges": true}) {
+		t.Fatal("printReport returned false, want true (a cycle is a finding)")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("EDGES (1)")) {
+		t.Errorf("cycle-only report should show EDGES (1), got:\n%s", buf.String())
+	}
+}

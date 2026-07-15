@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -65,6 +66,12 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 	if sel["leaks"] {
 		counts["leaks"] = len(leaks)
 	}
+	if sel["frontmatter"] {
+		counts["frontmatter"] = len(rep.FrontmatterFindings)
+	}
+	if sel["edges"] {
+		counts["edges"] = len(rep.BrokenEdges) + len(rep.EdgeCycles)
+	}
 
 	rec := UsageRecord{
 		TS:      now.Format(time.RFC3339),
@@ -98,6 +105,19 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 				f["leaks"] = append(f["leaks"], fmt.Sprintf("%s:%d → %s (%s)", l.File, l.Line, l.Match, l.Pattern))
 			}
 		}
+		if sel["frontmatter"] {
+			for _, ff := range rep.FrontmatterFindings {
+				f["frontmatter"] = append(f["frontmatter"], fmt.Sprintf("%s: %s", ff.File, ff.Detail))
+			}
+		}
+		if sel["edges"] {
+			for _, e := range rep.BrokenEdges {
+				f["edges"] = append(f["edges"], fmt.Sprintf("%s [%s] → %s (%s)", e.Source, e.Rel, e.Target, e.Reason))
+			}
+			for _, cyc := range rep.EdgeCycles {
+				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
+			}
+		}
 		rec.Findings = f
 	case level == 2:
 		// Level 2 — paths only. broken/leaks carry file:line (a location), never the
@@ -117,6 +137,19 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 		if sel["leaks"] {
 			for _, l := range leaks {
 				f["leaks"] = append(f["leaks"], fmt.Sprintf("%s:%d", l.File, l.Line))
+			}
+		}
+		if sel["frontmatter"] {
+			for _, ff := range rep.FrontmatterFindings {
+				f["frontmatter"] = append(f["frontmatter"], ff.File)
+			}
+		}
+		if sel["edges"] {
+			for _, e := range rep.BrokenEdges {
+				f["edges"] = append(f["edges"], e.Source)
+			}
+			for _, cyc := range rep.EdgeCycles {
+				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
 			}
 		}
 		rec.Files = f

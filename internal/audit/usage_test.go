@@ -173,3 +173,35 @@ func TestLogRunBadPathErrsButDoesNotPanic(t *testing.T) {
 		t.Error("want an error writing under a non-dir parent, got nil")
 	}
 }
+
+func TestBuildRecordCountsNewChecks(t *testing.T) {
+	rep := Report{
+		FrontmatterFindings: []FrontmatterFinding{{File: "docs/a.md", Detail: "missing type"}},
+		BrokenEdges:         []BrokenEdge{{Source: "docs/a.md", Rel: "covers", Target: "x.sh", Reason: "target does not exist"}},
+		EdgeCycles:          [][]string{{"a.md", "b.md"}},
+	}
+	sel := map[string]bool{"frontmatter": true, "edges": true}
+	rec := BuildRecord("run", "/r", "9", 1, rep, nil, sel, 1, time.Unix(0, 0).UTC())
+	if rec.Counts["frontmatter"] != 1 {
+		t.Errorf("counts[frontmatter] = %d, want 1", rec.Counts["frontmatter"])
+	}
+	if rec.Counts["edges"] != 2 { // 1 broken + 1 cycle
+		t.Errorf("counts[edges] = %d, want 2 (broken+cycles)", rec.Counts["edges"])
+	}
+}
+
+func TestBuildRecordLevel3FindsNewChecks(t *testing.T) {
+	rep := Report{
+		FrontmatterFindings: []FrontmatterFinding{{File: "docs/a.md", Detail: "missing type"}},
+		BrokenEdges:         []BrokenEdge{{Source: "docs/a.md", Rel: "covers", Target: "x.sh", Reason: "target does not exist"}},
+		EdgeCycles:          [][]string{{"a.md", "b.md"}},
+	}
+	sel := map[string]bool{"frontmatter": true, "edges": true}
+	rec := BuildRecord("run", "/r", "9", 1, rep, nil, sel, 3, time.Unix(0, 0).UTC())
+	if len(rec.Findings["frontmatter"]) != 1 {
+		t.Errorf("findings[frontmatter] = %v", rec.Findings["frontmatter"])
+	}
+	if len(rec.Findings["edges"]) != 2 { // broken + cycle
+		t.Errorf("findings[edges] = %v, want 2 entries", rec.Findings["edges"])
+	}
+}

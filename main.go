@@ -477,7 +477,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		fmt.Fprintln(w)
 	}
 	if sel["edges"] {
-		fmt.Fprintf(w, "EDGES (%d) — frontmatter typed edges with a missing target:\n", len(r.BrokenEdges))
+		fmt.Fprintf(w, "EDGES (%d) — frontmatter typed edges with a missing target, or a part-of/supersedes cycle:\n", len(r.BrokenEdges)+len(r.EdgeCycles))
 		for _, e := range r.BrokenEdges {
 			fmt.Fprintf(w, "  %s [%s] → %s (%s)\n", e.Source, e.Rel, e.Target, e.Reason)
 		}
