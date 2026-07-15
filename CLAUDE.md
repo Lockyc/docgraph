@@ -122,7 +122,7 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   but stay **separate** subcommands, because their trigger and diff source differ:
   `doc-drift` is a Stop-hook driven by the working-tree-inclusive **code** diff,
   `footgun-drift` a pre-push subcommand driven by git's pushed-ref range diffing
-  **markdown**. Do not merge them. The four `docaudit .` checks stay whole-state:
+  **markdown**. Do not merge them. The six `docaudit .` checks stay whole-state:
   reachability, link existence, and leak content have no meaningful "diff" version
   — they're properties of the current tree, not of a range.
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
@@ -282,7 +282,7 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the four
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the six
   whole-state checks), `runFootgunDrift(args, stdout, stderr) int` (the
   diff-scoped pre-push subcommand), `runDocDrift(args, stdin, stdout, stderr)
   int` (the Stop-hook subcommand — checks `DOC_DRIFT_OFF`, resolves the diff
