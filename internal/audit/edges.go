@@ -2,6 +2,7 @@ package audit
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -42,4 +43,67 @@ func ClassifyTarget(to string) EdgeKind {
 // is a structured reference, not inline prose. Anchors/queries are stripped.
 func ResolveEdgeTarget(to string) string {
 	return filepath.ToSlash(filepath.Clean(cleanTarget(strings.TrimSpace(to))))
+}
+
+// cycleRels are the hierarchy/lineage relations whose arcs must be acyclic. Other
+// rels (see-also, depends-on, covers, …) are not part of this graph.
+var cycleRels = map[string]bool{"part-of": true, "supersedes": true}
+
+// detectCycles finds cycles in the directed graph formed by `part-of` and
+// `supersedes` edges between tracked docs. Each result is one cycle as an ordered
+// path of repo-relative doc paths (first node repeated implicitly). A DFS with a
+// recursion stack; only tracked-doc targets form arcs (external/code/cross-repo
+// and untracked targets are not nodes here).
+func detectCycles(docs map[string]*Doc, trackedSet map[string]bool) [][]string {
+	arcs := map[string][]string{}
+	var nodes []string
+	for src, d := range docs {
+		nodes = append(nodes, src)
+		for _, e := range d.Links {
+			if !cycleRels[e.Rel] || ClassifyTarget(e.To) != EdgeDoc {
+				continue
+			}
+			tgt := ResolveEdgeTarget(e.To)
+			if trackedSet[tgt] {
+				arcs[src] = append(arcs[src], tgt)
+			}
+		}
+	}
+	sort.Strings(nodes)
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := map[string]int{}
+	var stack []string
+	var cycles [][]string
+	var dfs func(n string)
+	dfs = func(n string) {
+		color[n] = gray
+		stack = append(stack, n)
+		for _, m := range arcs[n] {
+			switch color[m] {
+			case gray:
+				// Back edge → cycle: the slice of the stack from m to the top.
+				for i := len(stack) - 1; i >= 0; i-- {
+					if stack[i] == m {
+						cyc := append([]string{}, stack[i:]...)
+						cycles = append(cycles, cyc)
+						break
+					}
+				}
+			case white:
+				dfs(m)
+			}
+		}
+		stack = stack[:len(stack)-1]
+		color[n] = black
+	}
+	for _, n := range nodes {
+		if color[n] == white {
+			dfs(n)
+		}
+	}
+	return cycles
 }

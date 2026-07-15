@@ -481,6 +481,9 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		for _, e := range r.BrokenEdges {
 			fmt.Fprintf(w, "  %s [%s] → %s (%s)\n", e.Source, e.Rel, e.Target, e.Reason)
 		}
+		for _, cyc := range r.EdgeCycles {
+			fmt.Fprintf(w, "  cycle: %s → %s\n", strings.Join(cyc, " → "), cyc[0])
+		}
 		fmt.Fprintln(w)
 	}
 	if sel["leaks"] {
@@ -494,7 +497,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
 	frontmatter := sel["frontmatter"] && len(r.FrontmatterFindings) > 0
-	edges := sel["edges"] && len(r.BrokenEdges) > 0
+	edges := sel["edges"] && (len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0)
 	leaksFound := sel["leaks"] && len(leaks) > 0
 	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound {
 		fmt.Fprintln(w, "clean ✓")
@@ -515,7 +518,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		n += len(r.FrontmatterFindings)
 	}
 	if sel["edges"] {
-		n += len(r.BrokenEdges)
+		n += len(r.BrokenEdges) + len(r.EdgeCycles)
 	}
 	if sel["leaks"] {
 		n += len(leaks)
@@ -554,6 +557,7 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 	}
 	if edges {
 		fmt.Fprintln(w, "  EDGES     → fix the frontmatter `to:` target (path is repo-root-relative), or remove the edge.")
+		fmt.Fprintln(w, "              A cycle means part-of/supersedes edges form a loop — break it.")
 	}
 	if leaks {
 		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")

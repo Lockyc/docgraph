@@ -143,3 +143,18 @@ func TestBrokenEdges(t *testing.T) {
 		t.Errorf("BrokenEdges targets = %v, want scripts/missing.sh + docs/gone.md", got)
 	}
 }
+
+func TestAuditReportsCycle(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "[a](a.md) [b](b.md)\n",
+		"a.md":      "---\ntype: reference\nlinks: [{rel: part-of, to: b.md}]\n---\n",
+		"b.md":      "---\ntype: reference\nlinks: [{rel: part-of, to: a.md}]\n---\n",
+	}, []string{"CLAUDE.md", "a.md", "b.md"})
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(rep.EdgeCycles) == 0 {
+		t.Fatal("Audit found no cycle, want the a.md<->b.md part-of cycle")
+	}
+}

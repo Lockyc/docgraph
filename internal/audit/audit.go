@@ -39,11 +39,12 @@ type Report struct {
 	Untracked           []string
 	FrontmatterFindings []FrontmatterFinding
 	BrokenEdges         []BrokenEdge
+	EdgeCycles          [][]string
 }
 
 func (r Report) HasFindings() bool {
 	return len(r.Orphans) > 0 || len(r.BrokenLinks) > 0 || len(r.Untracked) > 0 ||
-		len(r.FrontmatterFindings) > 0 || len(r.BrokenEdges) > 0
+		len(r.FrontmatterFindings) > 0 || len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0
 }
 
 type Options struct {
@@ -260,6 +261,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 
 	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
 	brokenEdgeFindings := brokenEdges(repoRoot, docs)
+	edgeCycles := detectCycles(docs, trackedSet)
 
 	return Report{
 		Roots:               roots,
@@ -270,5 +272,6 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		Untracked:           untracked,
 		FrontmatterFindings: fmFindings,
 		BrokenEdges:         brokenEdgeFindings,
+		EdgeCycles:          edgeCycles,
 	}, nil
 }
