@@ -2,6 +2,7 @@ package audit
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -24,5 +25,27 @@ func TestCoversOf(t *testing.T) {
 	// Nothing covers this.
 	if got := CoversOf(docs, "src/nope.go"); len(got) != 0 {
 		t.Errorf("CoversOf(nope) = %v, want empty", got)
+	}
+}
+
+func TestIndexMarkdown(t *testing.T) {
+	docs := map[string]*Doc{
+		"docs/run.md": {Type: "runbook", Title: "Restore", Description: "recover it"},
+		"docs/a.md":   {Type: "reference", Title: "API"},
+		"docs/z.md":   {Type: "reference"}, // no title → falls back to path
+	}
+	out := IndexMarkdown(docs)
+	// runbook is earlier than reference in CoreTypes order.
+	if !strings.Contains(out, "## runbook") || !strings.Contains(out, "## reference") {
+		t.Fatalf("missing type headings:\n%s", out)
+	}
+	if strings.Index(out, "## runbook") > strings.Index(out, "## reference") {
+		t.Error("runbook heading should precede reference (CoreTypes order)")
+	}
+	if !strings.Contains(out, "[Restore](docs/run.md) — recover it") {
+		t.Errorf("runbook entry missing/incorrect:\n%s", out)
+	}
+	if !strings.Contains(out, "[docs/z.md](docs/z.md)") {
+		t.Errorf("titleless doc should fall back to its path:\n%s", out)
 	}
 }

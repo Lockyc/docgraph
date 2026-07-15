@@ -39,6 +39,8 @@ func main() {
 			os.Exit(runSchema(os.Stdout))
 		case "covers":
 			os.Exit(runCovers(args[1:], os.Stdout, os.Stderr))
+		case "index":
+			os.Exit(runIndex(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -867,5 +869,29 @@ func runCovers(args []string, stdout, stderr io.Writer) int {
 	for _, src := range audit.CoversOf(docs, fs.Arg(0)) {
 		fmt.Fprintln(stdout, src)
 	}
+	return 0
+}
+
+// runIndex prints a generated markdown index of the doc graph to stdout (redirect
+// it to an index.md). A read-only view — never part of the gate.
+func runIndex(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("docaudit index", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var ignores multiFlag
+	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root, err := audit.GitRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		return 2
+	}
+	docs, err := audit.RepoDocs(root, ignores)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	fmt.Fprint(stdout, audit.IndexMarkdown(docs))
 	return 0
 }
