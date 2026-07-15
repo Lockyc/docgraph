@@ -26,7 +26,7 @@ func TestMatchGlob(t *testing.T) {
 
 func TestLoadIgnores(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, ".docauditignore"), []byte("# c\nvendor/**\n\n"), 0644)
+	os.WriteFile(filepath.Join(dir, ".docgraphignore"), []byte("# c\nvendor/**\n\n"), 0644)
 	globs, err := loadIgnores(dir, []string{"extra/*.md"})
 	if err != nil {
 		t.Fatal(err)

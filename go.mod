@@ -1,4 +1,4 @@
-module github.com/lockyc/docaudit
+module github.com/lockyc/docgraph
 
 go 1.26.4
 

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lockyc/docaudit/internal/audit"
+	"github.com/lockyc/docgraph/internal/audit"
 )
 
 // noCfg returns a leaks-config path guaranteed not to exist, so a test that isn't
 // about leak rules stays deterministic (no rules → nothing scanned) instead of
-// picking up the dev machine's real ~/.config/docaudit/leaks.toml.
+// picking up the dev machine's real ~/.config/docgraph/leaks.toml.
 func noCfg(dir string) string { return filepath.Join(dir, "no-leaks-cfg") }
 
 // The default config home is XDG (~/.config), not os.UserConfigDir() — which on
@@ -25,13 +25,13 @@ func TestResolveLeaksConfigXDG(t *testing.T) {
 	if got, _ := resolveLeaksConfig("/explicit/x.toml"); got != "/explicit/x.toml" {
 		t.Errorf("--leaks-config should win, got %q", got)
 	}
-	t.Setenv("DOCAUDIT_LEAKS", "/env/y.toml")
+	t.Setenv("DOCGRAPH_LEAKS", "/env/y.toml")
 	if got, _ := resolveLeaksConfig(""); got != "/env/y.toml" {
-		t.Errorf("$DOCAUDIT_LEAKS should win over XDG, got %q", got)
+		t.Errorf("$DOCGRAPH_LEAKS should win over XDG, got %q", got)
 	}
-	t.Setenv("DOCAUDIT_LEAKS", "")
+	t.Setenv("DOCGRAPH_LEAKS", "")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
-	if got, want := mustResolve(t), filepath.Join("/xdg", "docaudit", "leaks.toml"); got != want {
+	if got, want := mustResolve(t), filepath.Join("/xdg", "docgraph", "leaks.toml"); got != want {
 		t.Errorf("XDG default = %q, want %q", got, want)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -39,7 +39,7 @@ func TestResolveLeaksConfigXDG(t *testing.T) {
 	if err != nil {
 		t.Skip("no home dir")
 	}
-	if got, want := mustResolve(t), filepath.Join(home, ".config", "docaudit", "leaks.toml"); got != want {
+	if got, want := mustResolve(t), filepath.Join(home, ".config", "docgraph", "leaks.toml"); got != want {
 		t.Errorf("fallback = %q, want %q (~/.config, not ~/Library/Application Support)", got, want)
 	}
 }
@@ -190,20 +190,20 @@ func TestInstallHookDefaultEnforcesAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Default hook runs a bare `docaudit .` — no check selection — so a
+	// Default hook runs a bare `docgraph .` — no check selection — so a
 	// newly-added check is enforced automatically without regenerating the hook.
 	// No longer `exec`'d: a later line (footgun-drift) must run after it.
 	if !strings.Contains(string(b), `"$bin" .`) {
-		t.Errorf("default hook should run bare `docaudit .`:\n%s", b)
+		t.Errorf("default hook should run bare `docgraph .`:\n%s", b)
 	}
 	if strings.Contains(string(b), "--checks") || strings.Contains(string(b), "--skip") {
 		t.Errorf("default hook should carry no check flags:\n%s", b)
 	}
-	// The hook must resolve docaudit even under a minimal PATH (git runs hooks
+	// The hook must resolve docgraph even under a minimal PATH (git runs hooks
 	// with the caller's PATH; GUI clients / agent harnesses often lack ~/go/bin).
 	// Guard the Go-bin fallback so it can't regress to `command -v` only.
-	if !strings.Contains(string(b), "$HOME/go/bin") || !strings.Contains(string(b), "docaudit_bin") {
-		t.Errorf("hook lost its minimal-PATH fallback (would fail-closed when docaudit isn't on PATH):\n%s", b)
+	if !strings.Contains(string(b), "$HOME/go/bin") || !strings.Contains(string(b), "docgraph_bin") {
+		t.Errorf("hook lost its minimal-PATH fallback (would fail-closed when docgraph isn't on PATH):\n%s", b)
 	}
 	if fi, _ := os.Stat(hook); fi.Mode()&0o100 == 0 {
 		t.Error("hook not executable")
@@ -462,14 +462,14 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 // ~/.config and ~/.local/state, so a test can never read the owner's config.toml
 // or append junk to the real usage.jsonl if logging is enabled on this machine.
 func TestMain(m *testing.M) {
-	cfg, _ := os.MkdirTemp("", "docaudit-cfg")
-	state, _ := os.MkdirTemp("", "docaudit-state")
+	cfg, _ := os.MkdirTemp("", "docgraph-cfg")
+	state, _ := os.MkdirTemp("", "docgraph-state")
 	os.Setenv("XDG_CONFIG_HOME", cfg)
 	os.Setenv("XDG_STATE_HOME", state)
-	os.Unsetenv("DOCAUDIT_CONFIG")
-	os.Unsetenv("DOCAUDIT_LOG")
-	os.Unsetenv("DOCAUDIT_NO_LOG")
-	os.Unsetenv("DOCAUDIT_LEAKS")
+	os.Unsetenv("DOCGRAPH_CONFIG")
+	os.Unsetenv("DOCGRAPH_LOG")
+	os.Unsetenv("DOCGRAPH_NO_LOG")
+	os.Unsetenv("DOCGRAPH_LEAKS")
 	code := m.Run()
 	os.RemoveAll(cfg)
 	os.RemoveAll(state)
@@ -480,15 +480,15 @@ func TestResolveConfigXDG(t *testing.T) {
 	if got, _ := resolveConfig("/explicit/c.toml"); got != "/explicit/c.toml" {
 		t.Errorf("--config should win, got %q", got)
 	}
-	t.Setenv("DOCAUDIT_CONFIG", "/env/c.toml")
+	t.Setenv("DOCGRAPH_CONFIG", "/env/c.toml")
 	if got, _ := resolveConfig(""); got != "/env/c.toml" {
-		t.Errorf("$DOCAUDIT_CONFIG should win over XDG, got %q", got)
+		t.Errorf("$DOCGRAPH_CONFIG should win over XDG, got %q", got)
 	}
-	t.Setenv("DOCAUDIT_CONFIG", "")
+	t.Setenv("DOCGRAPH_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	got, err := resolveConfig("")
-	if err != nil || got != filepath.Join("/xdg", "docaudit", "config.toml") {
-		t.Errorf("XDG default = %q (%v), want /xdg/docaudit/config.toml", got, err)
+	if err != nil || got != filepath.Join("/xdg", "docgraph", "config.toml") {
+		t.Errorf("XDG default = %q (%v), want /xdg/docgraph/config.toml", got, err)
 	}
 }
 
@@ -522,7 +522,7 @@ func TestRunLogsWhenEnabled(t *testing.T) {
 func TestRunNoLogWhenConfigAbsent(t *testing.T) {
 	dir := mkRepo(t)
 	logf := filepath.Join(t.TempDir(), "usage.jsonl")
-	t.Setenv("DOCAUDIT_LOG", logf)
+	t.Setenv("DOCGRAPH_LOG", logf)
 	var out, errb bytes.Buffer
 	run([]string{"--config", noCfg(dir), "--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if _, err := os.Stat(logf); !os.IsNotExist(err) {
@@ -538,7 +538,7 @@ func TestRunMalformedConfigNonFatal(t *testing.T) {
 	logf := filepath.Join(t.TempDir(), "usage.jsonl")
 	cfg := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(cfg, []byte("[log]\nenabled = this is not valid toml\n"), 0o644)
-	t.Setenv("DOCAUDIT_LOG", logf)
+	t.Setenv("DOCGRAPH_LOG", logf)
 
 	var out, errb bytes.Buffer
 	code := run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
@@ -553,18 +553,18 @@ func TestRunMalformedConfigNonFatal(t *testing.T) {
 	}
 }
 
-// DOCAUDIT_NO_LOG=1 disables logging even when the config enables it.
+// DOCGRAPH_NO_LOG=1 disables logging even when the config enables it.
 func TestRunNoLogEnvDisables(t *testing.T) {
 	dir := mkRepo(t)
 	logf := filepath.Join(t.TempDir(), "usage.jsonl")
 	cfg := filepath.Join(t.TempDir(), "config.toml")
 	os.WriteFile(cfg, []byte("[log]\nenabled = true\nlevel = 1\npath = "+strconv.Quote(logf)+"\n"), 0o644)
-	t.Setenv("DOCAUDIT_NO_LOG", "1")
+	t.Setenv("DOCGRAPH_NO_LOG", "1")
 
 	var out, errb bytes.Buffer
 	run([]string{"--config", cfg, "--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if _, err := os.Stat(logf); !os.IsNotExist(err) {
-		t.Errorf("DOCAUDIT_NO_LOG=1 should suppress logging, but the file exists")
+		t.Errorf("DOCGRAPH_NO_LOG=1 should suppress logging, but the file exists")
 	}
 }
 
@@ -647,11 +647,11 @@ func TestFootgunDriftSubcommandSilentWhenNoDeclaration(t *testing.T) {
 }
 
 func TestFootgunDriftOffEnv(t *testing.T) {
-	t.Setenv("DOCAUDIT_FOOTGUN_OFF", "1")
+	t.Setenv("DOCGRAPH_FOOTGUN_OFF", "1")
 	var out, errb bytes.Buffer
 	code := runFootgunDrift([]string{"--range", "x..y", "."}, &out, &errb)
 	if code != 0 {
-		t.Fatalf("DOCAUDIT_FOOTGUN_OFF must short-circuit to 0, got %d", code)
+		t.Fatalf("DOCGRAPH_FOOTGUN_OFF must short-circuit to 0, got %d", code)
 	}
 }
 

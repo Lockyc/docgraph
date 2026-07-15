@@ -22,7 +22,7 @@ func TestReplaceTextRulesRegexDefaultGetsCaseInsensitivePrefix(t *testing.T) {
 }
 
 func TestReplaceTextRulesRegexOptOutKeepsCaseSensitive(t *testing.T) {
-	// A leading (?-i) is docaudit's documented case-sensitive opt-out, but
+	// A leading (?-i) is docgraph's documented case-sensitive opt-out, but
 	// git-filter-repo compiles regex: lines with Python re, which rejects a bare
 	// (?-i) flag-clear. The flag must be stripped rather than emitted verbatim,
 	// leaving a plain case-sensitive pattern.

@@ -34,7 +34,7 @@ func isFootgunDeclaration(line string) bool {
 }
 
 // scanDeclarations reports EVERY footgun declaration in content — one finding per
-// declaration line. It does not read rationale: docaudit can't judge whether a
+// declaration line. It does not read rationale: docgraph can't judge whether a
 // stated "why" is real, so it nags on the declaration itself and leaves that
 // judgement to the pusher (the finding prints the two-question test). Passing
 // mentions — cross-references and bare container headings — are not declarations

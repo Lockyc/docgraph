@@ -107,24 +107,24 @@ func TestBuildRecordLevel3FindingsIncludeMatchText(t *testing.T) {
 }
 
 func TestLogPathPrecedence(t *testing.T) {
-	// env DOCAUDIT_LOG wins over the config path.
-	t.Setenv("DOCAUDIT_LOG", "/env/usage.jsonl")
+	// env DOCGRAPH_LOG wins over the config path.
+	t.Setenv("DOCGRAPH_LOG", "/env/usage.jsonl")
 	got, err := LogPath("/cfg/usage.jsonl")
 	if err != nil || got != "/env/usage.jsonl" {
 		t.Fatalf("env should win: got %q, %v", got, err)
 	}
 
 	// With no env, the config path wins over the default.
-	t.Setenv("DOCAUDIT_LOG", "")
+	t.Setenv("DOCGRAPH_LOG", "")
 	got, err = LogPath("/cfg/usage.jsonl")
 	if err != nil || got != "/cfg/usage.jsonl" {
 		t.Fatalf("config path should win over default: got %q, %v", got, err)
 	}
 
-	// With neither, default to $XDG_STATE_HOME/docaudit/usage.jsonl.
+	// With neither, default to $XDG_STATE_HOME/docgraph/usage.jsonl.
 	t.Setenv("XDG_STATE_HOME", "/state")
 	got, err = LogPath("")
-	if err != nil || got != filepath.FromSlash("/state/docaudit/usage.jsonl") {
+	if err != nil || got != filepath.FromSlash("/state/docgraph/usage.jsonl") {
 		t.Fatalf("XDG_STATE default wrong: got %q, %v", got, err)
 	}
 }

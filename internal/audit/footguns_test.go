@@ -15,7 +15,7 @@ func TestDeclBareBulletIsFinding(t *testing.T) {
 }
 
 // Every footgun declaration flags — a rationale word in the same line does NOT
-// suppress it. docaudit can't judge whether a stated "why" is real, so it nags
+// suppress it. docgraph can't judge whether a stated "why" is real, so it nags
 // on the declaration regardless and leaves the judgement to the pusher.
 func TestDeclRationaleDoesNotSuppress(t *testing.T) {
 	got := decls(t, "- **Footgun:** don't touch the cache, because writes race the flush.\n")
@@ -25,7 +25,7 @@ func TestDeclRationaleDoesNotSuppress(t *testing.T) {
 }
 
 // No in-file marker suppresses a declaration — there is no rationale escape and
-// no annotation escape. Suppression is only DOCAUDIT_FOOTGUN_OFF / --no-footgun-drift.
+// no annotation escape. Suppression is only DOCGRAPH_FOOTGUN_OFF / --no-footgun-drift.
 func TestDeclInlineMarkerIsIgnored(t *testing.T) {
 	got := decls(t, "- **Footgun:** terse. <!-- footgun-ok: hit in prod -->\n")
 	if len(got) != 1 || got[0].Line != 1 {

@@ -18,15 +18,15 @@ import (
 type LogConfig struct {
 	Enabled bool   `toml:"enabled"`
 	Level   int    `toml:"level"` // 1 counts / 2 +paths / 3 +findings(incl leak match text)
-	Path    string `toml:"path"`  // optional override; default $XDG_STATE_HOME/docaudit/usage.jsonl
+	Path    string `toml:"path"`  // optional override; default $XDG_STATE_HOME/docgraph/usage.jsonl
 }
 
 // Active reports whether a run should be logged: enabled with a valid level.
 func (c LogConfig) Active() bool { return c.Enabled && c.Level >= 1 && c.Level <= 3 }
 
-// UsageRecord is one JSONL line per docaudit run. Level gates the optional detail:
+// UsageRecord is one JSONL line per docgraph run. Level gates the optional detail:
 // Files (paths, level ≥2) and Findings (paths + broken targets + leak MATCH TEXT,
-// level 3) are the escalating tiers. Cmd is the seam for a future `docaudit drift`
+// level 3) are the escalating tiers. Cmd is the seam for a future `docgraph drift`
 // run to log through the same file with the same shape.
 type UsageRecord struct {
 	TS       string              `json:"ts"`
@@ -158,11 +158,11 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 	return rec
 }
 
-// LogPath resolves the usage-log file: DOCAUDIT_LOG env > cfgPath (config [log].path)
-// > $XDG_STATE_HOME/docaudit/usage.jsonl (default ~/.local/state/... — XDG *state*,
+// LogPath resolves the usage-log file: DOCGRAPH_LOG env > cfgPath (config [log].path)
+// > $XDG_STATE_HOME/docgraph/usage.jsonl (default ~/.local/state/... — XDG *state*,
 // not config, matching the machine's ~/.local/state ledger convention).
 func LogPath(cfgPath string) (string, error) {
-	if env := os.Getenv("DOCAUDIT_LOG"); env != "" {
+	if env := os.Getenv("DOCGRAPH_LOG"); env != "" {
 		return env, nil
 	}
 	if cfgPath != "" {
@@ -176,7 +176,7 @@ func LogPath(cfgPath string) (string, error) {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "docaudit", "usage.jsonl"), nil
+	return filepath.Join(dir, "docgraph", "usage.jsonl"), nil
 }
 
 // LogRun appends rec as one newline-terminated JSON line to path, creating parent

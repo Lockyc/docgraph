@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/lockyc/docaudit/internal/audit"
+	"github.com/lockyc/docgraph/internal/audit"
 )
 
 type multiFlag []string
@@ -44,7 +44,7 @@ func main() {
 		case "stale":
 			os.Exit(runStale(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
-			fmt.Println("docaudit " + version)
+			fmt.Println("docgraph " + version)
 			os.Exit(0)
 		}
 	}
@@ -52,7 +52,7 @@ func main() {
 }
 
 // checksFlagRemoved reports (with a migration message) whether args still use the
-// removed --checks flag. docaudit enforces every check by default now — an
+// removed --checks flag. docgraph enforces every check by default now — an
 // allow-list of checks to *run* can't enforce, because a newly-added check is
 // silently absent from every existing --checks list. Excluding a check is the
 // explicit exception (--skip). Old hooks bake in `--checks …`, so a clear message
@@ -61,24 +61,24 @@ func checksFlagRemoved(args []string, stderr io.Writer) bool {
 	for _, a := range args {
 		if a == "--checks" || a == "-checks" ||
 			strings.HasPrefix(a, "--checks=") || strings.HasPrefix(a, "-checks=") {
-			fmt.Fprintln(stderr, "docaudit: --checks was removed in v2 — all checks are enforced by default.")
+			fmt.Fprintln(stderr, "docgraph: --checks was removed in v2 — all checks are enforced by default.")
 			fmt.Fprintln(stderr, "  exclude one with --skip <check[,check]>, and regenerate any installed hook:")
-			fmt.Fprintln(stderr, "  docaudit install-hook --force")
+			fmt.Fprintln(stderr, "  docgraph install-hook --force")
 			return true
 		}
 	}
 	return false
 }
 
-// runInstallHook writes a tracked .githooks/pre-push that runs docaudit, and
+// runInstallHook writes a tracked .githooks/pre-push that runs docgraph, and
 // points core.hooksPath at .githooks (activated for this clone). The hook fails
-// closed: if docaudit isn't installed the push is blocked, because a gate that
+// closed: if docgraph isn't installed the push is blocked, because a gate that
 // silently skips when its tool is missing is a false green, not a gate.
 func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
 		return 2
 	}
-	fs := flag.NewFlagSet("docaudit install-hook", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph install-hook", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	skip := fs.String("skip", "", "checks to EXCLUDE from the gate, comma-separated (default: none — all enforced)")
 	var ignores multiFlag
@@ -89,7 +89,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if _, err := parseSkip(*skip); err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	path := "."
@@ -98,24 +98,24 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := audit.GitRoot(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: not a git repository: %s\n", path)
+		fmt.Fprintf(stderr, "docgraph: not a git repository: %s\n", path)
 		return 2
 	}
 	hookPath := filepath.Join(root, ".githooks", "pre-push")
 	if _, err := os.Stat(hookPath); err == nil && !*force {
-		fmt.Fprintf(stderr, "docaudit: %s already exists — integrate manually or pass --force\n", filepath.Join(".githooks", "pre-push"))
+		fmt.Fprintf(stderr, "docgraph: %s already exists — integrate manually or pass --force\n", filepath.Join(".githooks", "pre-push"))
 		return 2
 	}
 	if err := os.MkdirAll(filepath.Dir(hookPath), 0o755); err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores, *noFootgun)), 0o755); err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	if err := exec.Command("git", "-C", root, "config", "core.hooksPath", ".githooks").Run(); err != nil {
-		fmt.Fprintf(stderr, "docaudit: git config core.hooksPath failed: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: git config core.hooksPath failed: %v\n", err)
 		return 2
 	}
 	if *skip == "" {
@@ -136,31 +136,31 @@ func runLeaksRules(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
 		return 2
 	}
-	fs := flag.NewFlagSet("docaudit leaks-rules", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph leaks-rules", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
+	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCGRAPH_LEAKS or $XDG_CONFIG_HOME/docgraph/leaks.toml, else ~/.config/docgraph/leaks.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	cfgPath, err := resolveLeaksConfig(*leaksConfig)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	cfg, err := loadLeakConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
 		// Absent config is NOT fatal (same stance as the scan): the global rules file
 		// is the normal machine-local-only artifact, absent in CI / fresh clones.
-		fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — nothing to export.\n", cfgPath)
+		fmt.Fprintf(stderr, "docgraph: no leak rules file at %s — nothing to export.\n", cfgPath)
 		return 0
 	} else if err != nil {
-		fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+		fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
 		return 2
 	}
 	// Malformed regex / non-absolute [[dir]] path aren't caught by TOML decode —
 	// validate via the same compile the scan runs. Fatal, like the scan.
 	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+		fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
 		return 2
 	}
 	lines, dropped := audit.ReplaceTextRules(cfg)
@@ -168,42 +168,42 @@ func runLeaksRules(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, l)
 	}
 	if dropped.Allows > 0 || dropped.Dirs > 0 {
-		fmt.Fprintf(stderr, "docaudit: leaks-rules ignores %d allow/allow_regex and %d [[dir]] rule(s) — filter-repo\n", dropped.Allows, dropped.Dirs)
+		fmt.Fprintf(stderr, "docgraph: leaks-rules ignores %d allow/allow_regex and %d [[dir]] rule(s) — filter-repo\n", dropped.Allows, dropped.Dirs)
 		fmt.Fprintln(stderr, "  rewrites by content across all paths/history, so exceptions and dir-scoping do not")
 		fmt.Fprintln(stderr, "  apply. Review the rewrite result.")
 	}
 	return 0
 }
 
-// docauditBinFunc returns the docaudit_bin() shell function the generated hook
-// uses to resolve docaudit even under a minimal hook PATH. Git runs hooks with
+// docgraphBinFunc returns the docgraph_bin() shell function the generated hook
+// uses to resolve docgraph even under a minimal hook PATH. Git runs hooks with
 // whatever PATH the caller had; GUI clients and some agent harnesses push with a
-// bare PATH that omits ~/go/bin, so 'command -v docaudit' alone is unreliable and
+// bare PATH that omits ~/go/bin, so 'command -v docgraph' alone is unreliable and
 // would make the gate fail-closed (blocked) purely because it couldn't see an
 // installed binary. Fall back to the Go install dirs before giving up. Both the
 // whole-state check and footgun-drift share this one resolution — do not retype
 // it inline a second time.
-func docauditBinFunc() string {
-	return `docaudit_bin() {
-  if command -v docaudit >/dev/null 2>&1; then command -v docaudit; return; fi
+func docgraphBinFunc() string {
+	return `docgraph_bin() {
+  if command -v docgraph >/dev/null 2>&1; then command -v docgraph; return; fi
   local d
   for d in "${GOBIN:-}" "${GOPATH:+${GOPATH%%:*}/bin}" "$HOME/go/bin"; do
-    [ -n "$d" ] && [ -x "$d/docaudit" ] && { printf '%s\n' "$d/docaudit"; return; }
+    [ -n "$d" ] && [ -x "$d/docgraph" ] && { printf '%s\n' "$d/docgraph"; return; }
   done
   if command -v go >/dev/null 2>&1; then
     d="$(go env GOBIN 2>/dev/null)"; [ -z "$d" ] && d="$(go env GOPATH 2>/dev/null)/bin"
-    [ -x "$d/docaudit" ] && { printf '%s\n' "$d/docaudit"; return; }
+    [ -x "$d/docgraph" ] && { printf '%s\n' "$d/docgraph"; return; }
   fi
   return 1
 }`
 }
 
 // hookScript generates the tracked .githooks/pre-push gate. It runs the
-// whole-state check (`docaudit .`) and, unless noFootgun, the diff-scoped
-// `docaudit footgun-drift` fed git's pre-push stdin (ref lines: local/remote
+// whole-state check (`docgraph .`) and, unless noFootgun, the diff-scoped
+// `docgraph footgun-drift` fed git's pre-push stdin (ref lines: local/remote
 // SHA pairs for what's being pushed) so footgun-drift can scope itself to the
 // pushed commit range. The whole-state line is a plain command, not `exec` —
-// `exec` would replace the shell process, so a failing `docaudit .` would never
+// `exec` would replace the shell process, so a failing `docgraph .` would never
 // reach the footgun-drift line below it. Under `set -e` a non-zero exit from the
 // whole-state command aborts the script (and the push) immediately, so its
 // fail-closed behavior is unchanged. The footgun-drift line is ADVISORY (`|| true`,
@@ -226,17 +226,17 @@ func hookScript(skip string, ignores []string, noFootgun bool) string {
 printf '%s' "$refs" | "$bin" footgun-drift . || true`
 	}
 	return `#!/usr/bin/env bash
-# docaudit pre-push gate — installed by 'docaudit install-hook'. Activated per
-# clone via core.hooksPath -> .githooks. Fails closed: if docaudit can't be found
-# the push is blocked (install: go install github.com/lockyc/docaudit@latest).
+# docgraph pre-push gate — installed by 'docgraph install-hook'. Activated per
+# clone via core.hooksPath -> .githooks. Fails closed: if docgraph can't be found
+# the push is blocked (install: go install github.com/lockyc/docgraph@latest).
 set -euo pipefail
 refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running anything
 
-` + docauditBinFunc() + `
+` + docgraphBinFunc() + `
 
-if ! bin="$(docaudit_bin)"; then
-  echo "docaudit: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
-  echo "  install it: go install github.com/lockyc/docaudit@latest" >&2
+if ! bin="$(docgraph_bin)"; then
+  echo "docgraph: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
+  echo "  install it: go install github.com/lockyc/docgraph@latest" >&2
   exit 1
 fi
 ` + stateLine + footgun + `
@@ -249,24 +249,24 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
 		return 2
 	}
-	fs := flag.NewFlagSet("docaudit", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
 	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,frontmatter,edges)")
-	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCAUDIT_LEAKS or $XDG_CONFIG_HOME/docaudit/leaks.toml, else ~/.config/docaudit/leaks.toml)")
-	config := fs.String("config", "", "path to the global config.toml, holding [log] (default: $DOCAUDIT_CONFIG or $XDG_CONFIG_HOME/docaudit/config.toml)")
+	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCGRAPH_LEAKS or $XDG_CONFIG_HOME/docgraph/leaks.toml, else ~/.config/docgraph/leaks.toml)")
+	config := fs.String("config", "", "path to the global config.toml, holding [log] (default: $DOCGRAPH_CONFIG or $XDG_CONFIG_HOME/docgraph/config.toml)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	selected, err := parseSkip(*skip)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	if len(selected) == 0 {
-		fmt.Fprintln(stderr, "docaudit: every check skipped — nothing is being enforced")
+		fmt.Fprintln(stderr, "docgraph: every check skipped — nothing is being enforced")
 	}
 	path := "."
 	if fs.NArg() > 0 {
@@ -274,19 +274,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := audit.GitRoot(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: not a git repository: %s\n", path)
+		fmt.Fprintf(stderr, "docgraph: not a git repository: %s\n", path)
 		return 2
 	}
 	rep, err := audit.Audit(root, audit.Options{ExtraRoots: roots, Ignores: ignores})
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	var leaks []audit.LeakFinding
 	if selected["leaks"] {
 		cfgPath, err := resolveLeaksConfig(*leaksConfig)
 		if err != nil {
-			fmt.Fprintf(stderr, "docaudit: %v\n", err)
+			fmt.Fprintf(stderr, "docgraph: %v\n", err)
 			return 2
 		}
 		cfg, err := loadLeakConfig(cfgPath)
@@ -295,18 +295,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 			// no machine-local config), so a hard-fail would brick every push there.
 			// The config is the sole source of rules — with none, the scan is a no-op,
 			// and the warning nudges the owner to define their footprint file.
-			fmt.Fprintf(stderr, "docaudit: no leak rules file at %s — the leaks check has no rules, so nothing is scanned;\n", cfgPath)
+			fmt.Fprintf(stderr, "docgraph: no leak rules file at %s — the leaks check has no rules, so nothing is scanned;\n", cfgPath)
 			fmt.Fprintln(stderr, "  add one (or pass --leaks-config) to define your leak patterns.")
 			cfg = audit.LeakConfig{}
 		} else if err != nil {
 			// Present-but-malformed TOML IS fatal: a real config bug, not "not set up yet".
-			fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+			fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
 			return 2
 		}
 		leaks, err = audit.LeakScan(root, cfg, ignores)
 		if err != nil {
 			// A bad regexp in an otherwise-valid config surfaces here — also fatal.
-			fmt.Fprintf(stderr, "docaudit: leaks config %s: %v\n", cfgPath, err)
+			fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
 			return 2
 		}
 	}
@@ -321,11 +321,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // maybeLog appends one usage record for this run when logging is opted in. It is
 // best-effort and side-channel: it never changes the exit code and never returns an
-// error. DOCAUDIT_NO_LOG short-circuits it. A malformed config.toml is warned about
+// error. DOCGRAPH_NO_LOG short-circuits it. A malformed config.toml is warned about
 // and disables logging — NOT fatal, unlike a malformed leaks.toml: logging is
 // auxiliary, so a log-config typo must not block a push.
 func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []audit.LeakFinding, sel map[string]bool, stderr io.Writer) {
-	if os.Getenv("DOCAUDIT_NO_LOG") != "" {
+	if os.Getenv("DOCGRAPH_NO_LOG") != "" {
 		return
 	}
 	cfgPath, err := resolveConfig(configFlag)
@@ -336,7 +336,7 @@ func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []
 	if errors.Is(err, os.ErrNotExist) {
 		return // absent config → logging silently off (the normal CI/clone state).
 	} else if err != nil {
-		fmt.Fprintf(stderr, "docaudit: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
+		fmt.Fprintf(stderr, "docgraph: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
 		return
 	}
 	if !logCfg.Active() {
@@ -350,14 +350,14 @@ func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []
 	_ = audit.LogRun(logPath, rec) // best-effort: a gate never fails because the log is unwritable.
 }
 
-// resolveConfig resolves the global config.toml: --config > $DOCAUDIT_CONFIG >
-// $XDG_CONFIG_HOME/docaudit/config.toml (else ~/.config/...). Same XDG discipline
+// resolveConfig resolves the global config.toml: --config > $DOCGRAPH_CONFIG >
+// $XDG_CONFIG_HOME/docgraph/config.toml (else ~/.config/...). Same XDG discipline
 // as resolveLeaksConfig — never os.UserConfigDir() (wrong on macOS for a CLI tool).
 func resolveConfig(flagVal string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
 	}
-	if env := os.Getenv("DOCAUDIT_CONFIG"); env != "" {
+	if env := os.Getenv("DOCGRAPH_CONFIG"); env != "" {
 		return env, nil
 	}
 	dir := os.Getenv("XDG_CONFIG_HOME")
@@ -368,7 +368,7 @@ func resolveConfig(flagVal string) (string, error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "docaudit", "config.toml"), nil
+	return filepath.Join(dir, "docgraph", "config.toml"), nil
 }
 
 // loadLogConfig decodes the [log] table of config.toml. An absent file returns
@@ -418,10 +418,10 @@ func resolveLeaksConfig(flagVal string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
 	}
-	if env := os.Getenv("DOCAUDIT_LEAKS"); env != "" {
+	if env := os.Getenv("DOCGRAPH_LEAKS"); env != "" {
 		return env, nil
 	}
-	// XDG, not os.UserConfigDir(): docaudit is a CLI tool, and os.UserConfigDir()
+	// XDG, not os.UserConfigDir(): docgraph is a CLI tool, and os.UserConfigDir()
 	// returns ~/Library/Application Support on macOS (Apple's GUI-app convention),
 	// which is the wrong home for a dev tool. Honor $XDG_CONFIG_HOME, else ~/.config.
 	dir := os.Getenv("XDG_CONFIG_HOME")
@@ -432,7 +432,7 @@ func resolveLeaksConfig(flagVal string) (string, error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "docaudit", "leaks.toml"), nil
+	return filepath.Join(dir, "docgraph", "leaks.toml"), nil
 }
 
 func loadLeakConfig(path string) (audit.LeakConfig, error) {
@@ -444,11 +444,11 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // printReport prints the sections for the checks being run and reports whether any
 // has findings. The output is written to be self-describing: a reader (often a
 // fresh agent seeing only a failed `git push`) should learn from the text alone
-// what docaudit is, what a finding means, why a non-zero exit aborts a push, and
+// what docgraph is, what a finding means, why a non-zero exit aborts a push, and
 // how to remediate. The banner prints always; the explain-and-remediate footer
 // only on findings, so green/CI runs stay terse.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
-	fmt.Fprintln(w, "docaudit — enforces agent-facing repo hygiene: doc-graph reachability")
+	fmt.Fprintln(w, "docgraph — enforces agent-facing repo hygiene: doc-graph reachability")
 	fmt.Fprintln(w, "(orphans/broken/untracked .md), frontmatter well-formedness, broken typed-edge")
 	fmt.Fprintln(w, "targets, plus a content scan for configured leak patterns.")
 	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
@@ -533,14 +533,14 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	return true
 }
 
-// printFailureFooter explains, in plain text, why docaudit is exiting non-zero
+// printFailureFooter explains, in plain text, why docgraph is exiting non-zero
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
 func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmatter, edges, leaks bool) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintln(w, bar)
-	fmt.Fprintf(w, "docaudit: %d finding(s) in gated checks → exiting non-zero.\n", n)
+	fmt.Fprintf(w, "docgraph: %d finding(s) in gated checks → exiting non-zero.\n", n)
 	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
 	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
 	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, malformed/incomplete frontmatter, a")
@@ -550,7 +550,7 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 	fmt.Fprintln(w, "Fix the findings listed above:")
 	if orphans {
 		fmt.Fprintln(w, "  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a")
-		fmt.Fprintln(w, "              .docauditignore entry) if it is intentionally standalone; or delete it.")
+		fmt.Fprintln(w, "              .docgraphignore entry) if it is intentionally standalone; or delete it.")
 	}
 	if broken {
 		fmt.Fprintln(w, "  BROKEN    → repair or remove the dead .md link at the shown file:line.")
@@ -577,10 +577,10 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 // (`<localref> <localsha> <remoteref> <remotesha>`), deriving remotesha..localsha
 // per ref (a new branch — zero remotesha — falls back to the closest base).
 func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
-	if os.Getenv("DOCAUDIT_FOOTGUN_OFF") != "" {
+	if os.Getenv("DOCGRAPH_FOOTGUN_OFF") != "" {
 		return 0
 	}
-	fs := flag.NewFlagSet("docaudit footgun-drift", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph footgun-drift", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rangeFlag := fs.String("range", "", "explicit base..head to check (else read pre-push stdin)")
 	if err := fs.Parse(args); err != nil {
@@ -592,14 +592,14 @@ func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := audit.GitRoot(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: not a git repository: %s\n", path)
+		fmt.Fprintf(stderr, "docgraph: not a git repository: %s\n", path)
 		return 2
 	}
 	var ranges []audit.RevRange
 	if *rangeFlag != "" {
 		b, h, ok := splitRange(*rangeFlag)
 		if !ok {
-			fmt.Fprintf(stderr, "docaudit: bad --range %q (want base..head)\n", *rangeFlag)
+			fmt.Fprintf(stderr, "docgraph: bad --range %q (want base..head)\n", *rangeFlag)
 			return 2
 		}
 		ranges = []audit.RevRange{{Base: b, Head: h}}
@@ -611,7 +611,7 @@ func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
 	}
 	findings, err := audit.FootgunDrift(root, ranges)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	if len(findings) == 0 {
@@ -619,7 +619,7 @@ func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
 	}
 	printFootgunDrift(stdout, findings)
 	// Advisory, NOT a gate: exit 0 so a footgun declaration never aborts the push.
-	// docaudit can't judge whether an added declaration is a real footgun, so it
+	// docgraph can't judge whether an added declaration is a real footgun, so it
 	// nags (the two-question test) and trusts the pusher to double-check — rather
 	// than blocking on something it can't evaluate and training a --no-verify habit.
 	return 0
@@ -682,7 +682,7 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	fmt.Fprintln(w, "  (2) Is it at the right level? — invariant/footgun → CLAUDE.md; deep rationale →")
 	fmt.Fprintln(w, "      docs/; human-facing prose → README.")
 	fmt.Fprintln(w, "If any is just a note-just-in-case, reword it as a plain note or remove it (a")
-	fmt.Fprintln(w, "follow-up commit is fine — docaudit did not hold the push).")
+	fmt.Fprintln(w, "follow-up commit is fine — docgraph did not hold the push).")
 	fmt.Fprintln(w, bar)
 }
 
@@ -696,7 +696,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOC_DRIFT_OFF") != "" {
 		return 0
 	}
-	fs := flag.NewFlagSet("docaudit doc-drift", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph doc-drift", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	rangeFlag := fs.String("range", "", "explicit git-diff spec (base, base..head) — bypasses the loop-guard")
 	if err := fs.Parse(args); err != nil {
@@ -732,7 +732,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	findings, err := audit.DocDrift(root, spec)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	if len(findings) == 0 {
@@ -784,7 +784,7 @@ func docDriftGuardOK(root string) bool {
 	return true
 }
 
-// docDriftStateDir resolves $XDG_STATE_HOME/docaudit/doc-drift (default
+// docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
 // ~/.local/state/...), matching the usage-log XDG-state convention.
 func docDriftStateDir() string {
 	dir := os.Getenv("XDG_STATE_HOME")
@@ -795,7 +795,7 @@ func docDriftStateDir() string {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "docaudit", "doc-drift")
+	return filepath.Join(dir, "docgraph", "doc-drift")
 }
 
 // printDocDrift renders findings grouped by kind, with the reconcile guidance.
@@ -847,7 +847,7 @@ func runSchema(stdout io.Writer) int {
 // a frontmatter `covers` edge, directly or by covering a parent directory). A
 // read-only view — never part of the gate.
 func runCovers(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("docaudit covers", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph covers", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
@@ -855,17 +855,17 @@ func runCovers(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(stderr, "docaudit: usage: docaudit covers <repo-relative-path>")
+		fmt.Fprintln(stderr, "docgraph: usage: docgraph covers <repo-relative-path>")
 		return 2
 	}
 	root, err := audit.GitRoot(".")
 	if err != nil {
-		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		fmt.Fprintln(stderr, "docgraph: not a git repository")
 		return 2
 	}
 	docs, err := audit.RepoDocs(root, ignores)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	for _, src := range audit.CoversOf(docs, fs.Arg(0)) {
@@ -877,7 +877,7 @@ func runCovers(args []string, stdout, stderr io.Writer) int {
 // runIndex prints a generated markdown index of the doc graph to stdout (redirect
 // it to an index.md). A read-only view — never part of the gate.
 func runIndex(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("docaudit index", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph index", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
@@ -886,12 +886,12 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := audit.GitRoot(".")
 	if err != nil {
-		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		fmt.Fprintln(stderr, "docgraph: not a git repository")
 		return 2
 	}
 	docs, err := audit.RepoDocs(root, ignores)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	fmt.Fprint(stdout, audit.IndexMarkdown(docs))
@@ -902,7 +902,7 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 // threshold (per-doc `review:` cadence, else --older-than). A read-only view —
 // never part of the gate.
 func runStale(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("docaudit stale", flag.ContinueOnError)
+	fs := flag.NewFlagSet("docgraph stale", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
@@ -912,12 +912,12 @@ func runStale(args []string, stdout, stderr io.Writer) int {
 	}
 	root, err := audit.GitRoot(".")
 	if err != nil {
-		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		fmt.Fprintln(stderr, "docgraph: not a git repository")
 		return 2
 	}
 	docs, err := audit.RepoDocs(root, ignores)
 	if err != nil {
-		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
 	for _, s := range audit.StaleDocs(docs, time.Now(), *olderThan) {

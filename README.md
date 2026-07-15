@@ -1,42 +1,42 @@
-# docaudit
+# docgraph
 
-[![Release](https://img.shields.io/github/v/release/Lockyc/docaudit?sort=semver&label=release)](https://github.com/Lockyc/docaudit/releases/latest)
-[![CI](https://github.com/Lockyc/docaudit/actions/workflows/ci.yml/badge.svg)](https://github.com/Lockyc/docaudit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Lockyc/docgraph?sort=semver&label=release)](https://github.com/lockyc/docgraph/releases/latest)
+[![CI](https://github.com/lockyc/docgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/lockyc/docgraph/actions/workflows/ci.yml)
 ![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
-[![License](https://img.shields.io/github/license/Lockyc/docaudit)](LICENSE)
+[![License](https://img.shields.io/github/license/Lockyc/docgraph)](LICENSE)
 
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep + following `[x](y.md)` links, not the rendered site a human
 browses — **and** scans tracked file content for leaked owner-specific/secret
-strings. `docaudit [path]` **enforces every one of these checks by default**
+strings. `docgraph [path]` **enforces every one of these checks by default**
 and exits non-zero on any finding, so it drops into a pre-push hook or CI
 without a wrapper. You *exclude* a check explicitly (`--skip`); nothing is
 opt-in, because an opt-in check enforces nothing.
 
-Separately, `docaudit footgun-drift` is a **diff-scoped, advisory** subcommand:
+Separately, `docgraph footgun-drift` is a **diff-scoped, advisory** subcommand:
 at pre-push it flags every new "footgun" declaration a push *adds* to tracked
 markdown — never the existing corpus — and prints a nag to go verify each is a
 real footgun, but **exits 0 and never blocks the push**. It isn't one of the
 checks below and isn't exclude-able with `--skip`; see
 [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check).
 
-`docaudit doc-drift` is a third mode: a **diff-scoped, blocking** subcommand
+`docgraph doc-drift` is a third mode: a **diff-scoped, blocking** subcommand
 meant to run as a **Stop hook** (invoked directly, no wrapper) at the end of an
 agent turn. It scans the branch's working-tree-inclusive diff for code that
 drifted away from what a tracked doc still says, and **exits 2** (findings on
 stderr) to block the turn from ending on stale docs; see
-[`doc-drift`](#docaudit-doc-drift).
+[`doc-drift`](#docgraph-doc-drift).
 
 **Scope: project *documents*, not project *content*** (for the doc-graph
 checks). Those checks audit the docs that explain the project (`docs/`,
 `CLAUDE.md`, config-dir READMEs), not content a site framework routes and renders
 (an Astro/MkDocs content collection, a seed-data corpus) — exclude those per-repo
-via `.docauditignore`. The `leaks` check is broader: it scans *all* tracked files
+via `.docgraphignore`. The `leaks` check is broader: it scans *all* tracked files
 (see below).
 
 ## Checks
 
-All six run by default when you run `docaudit [path]`. Exclude one with
+All six run by default when you run `docgraph [path]`. Exclude one with
 `--skip <check[,check]>` (e.g. a nav-driven MkDocs repo runs `--skip orphans`).
 A newly-added check is enforced everywhere automatically — there is no
 run-list to update.
@@ -60,17 +60,17 @@ run-list to update.
    carry a `type` field; a doc with no frontmatter block at all is fine.
    Malformed YAML and a block missing `type` are each a finding. `type` is an
    advisory vocabulary, not a closed enum — see
-   [`docaudit schema`](#docaudit-schema--the-frontmatter-vocabulary) below.
+   [`docgraph schema`](#docgraph-schema--the-frontmatter-vocabulary) below.
 6. **Edges** — a frontmatter `links:` list of typed edges (`rel`/`to`/`note`).
    Every internal `to` target — a repo-root-relative `.md` doc or code path —
    must exist on disk, and `part-of`/`supersedes` edges between tracked docs
    must not form a cycle. External URLs and `owner/repo:...` cross-repo
    targets are never checked (unverifiable and deferred, respectively).
 
-### `docaudit schema` — the frontmatter vocabulary
+### `docgraph schema` — the frontmatter vocabulary
 
 ```bash
-docaudit schema    # prints the JSON Schema to stdout
+docgraph schema    # prints the JSON Schema to stdout
 ```
 
 Emits the [JSON Schema](https://json-schema.org/) (draft 2020-12) describing
@@ -78,7 +78,7 @@ valid doc frontmatter — the `type`/`verified`/`review`/`links` shape the
 `frontmatter` and `edges` checks enforce, plus the advisory `type`/`rel`
 vocabularies (as `x-docgraph-core-types`/`x-docgraph-core-rels`), so another
 tool (an editor, a linter, a catalog builder) can validate or generate
-frontmatter against the same rules docaudit uses, instead of re-encoding the
+frontmatter against the same rules docgraph uses, instead of re-encoding the
 vocabulary by hand. It's **read-only** — it never reads the repo it's run in
 and is never part of the gate (not in `checkNames`, not `--skip`-able,
 nothing to enable or disable).
@@ -91,15 +91,15 @@ by default like the other checks; `--skip leaks` turns it off.
 
 Scope is governed by **git tracking**, not the doc-graph ignore layers: every
 `git ls-files` entry is scanned (so `.gitignore` governs what's excluded), and
-the `defaultIgnores`/`.docauditignore` used by the orphans/broken/untracked
+the `defaultIgnores`/`.docgraphignore` used by the orphans/broken/untracked
 checks do **not** narrow the leak pass — only an explicit `--ignore` glob does.
 A tracked `.claude/` config still ships in a public clone, so it stays in
 scope even though it's excluded from the doc-graph checks.
 
 Patterns come from a **global TOML file** — never committed to a repo, because a
 per-repo deny (or allow) list would itself enumerate your sensitive terms.
-Resolution order: `--leaks-config <path>` → `$DOCAUDIT_LEAKS` →
-`$XDG_CONFIG_HOME/docaudit/leaks.toml` (default `~/.config/docaudit/leaks.toml`).
+Resolution order: `--leaks-config <path>` → `$DOCGRAPH_LEAKS` →
+`$XDG_CONFIG_HOME/docgraph/leaks.toml` (default `~/.config/docgraph/leaks.toml`).
 
 Top-level `terms` match literally and case-insensitively; `regex`/`allow_regex`
 are Go regexps, **also case-insensitive by default** (a leak must be caught in any
@@ -147,10 +147,10 @@ no rules and the scan is a no-op there (it stays a local pre-push gate).
 
 **Known gaps:** no git-history *detection* (finding leaks already committed to
 history is the owner's call — use the manual leak-audit skill); *scrubbing* a known
-leak from history is supported via `docaudit leaks-rules` below. No per-rule
+leak from history is supported via `docgraph leaks-rules` below. No per-rule
 messages.
 
-### `docaudit leaks-rules` — export rules for history scrubbing
+### `docgraph leaks-rules` — export rules for history scrubbing
 
 The `leaks` check scans the current tracked tree. To scrub a leak that already
 landed in **git history**, export the leak vocabulary as a
@@ -158,7 +158,7 @@ landed in **git history**, export the leak vocabulary as a
 rewrite separately:
 
 ```sh
-docaudit leaks-rules > rules.txt          # non-destructive: reads only the config
+docgraph leaks-rules > rules.txt          # non-destructive: reads only the config
 git filter-repo --replace-text rules.txt  # destructive: rewrites history
 ```
 
@@ -175,7 +175,7 @@ by content across all paths and history, so those exceptions cannot apply and th
 rewrite is broader than the audit's scope. Review the result.
 
 > The rewrite changes commit SHAs: force-push and have every collaborator re-clone.
-> docaudit itself never reads or rewrites history — it only exports the rules.
+> docgraph itself never reads or rewrites history — it only exports the rules.
 
 ### `footgun-drift` — the diff-scoped pre-push check
 
@@ -189,8 +189,8 @@ and has no in-file escape: every added declaration is reported, and you go
 double-check it yourself.
 
 ```bash
-docaudit footgun-drift                       # reads git's pre-push ref lines from stdin
-docaudit footgun-drift --range base..head    # explicit range, for manual use
+docgraph footgun-drift                       # reads git's pre-push ref lines from stdin
+docgraph footgun-drift --range base..head    # explicit range, for manual use
 ```
 
 With no `--range`, it reads the ref lines git feeds a `pre-push` hook on stdin
@@ -206,13 +206,13 @@ footgun there is just as undocumented.
 
 Because it's advisory, its exit code is always `0` on findings (only `2` on a
 git/usage error), so it can ride in the pre-push hook without ever aborting a
-push. `DOCAUDIT_FOOTGUN_OFF=1` silences it outright (for a repo that doesn't use
-the `Footgun:` note convention); `docaudit install-hook --no-footgun-drift`
+push. `DOCGRAPH_FOOTGUN_OFF=1` silences it outright (for a repo that doesn't use
+the `Footgun:` note convention); `docgraph install-hook --no-footgun-drift`
 generates a hook that never invokes it.
 
 It is a **nag, not a judge**: it reports every added declaration precisely
 because it *cannot* rank whether a stated "why" is actually good — that's a
-judgment call docaudit, being deterministic, doesn't make, so it doesn't pretend
+judgment call docgraph, being deterministic, doesn't make, so it doesn't pretend
 to. On a finding, the printed message asks two questions: (1) is this a real
 footgun — a trap you hit, a tempting-but-wrong approach, a re-litigated
 decision? (2) is it at the right doc level — an invariant belongs in
@@ -222,10 +222,10 @@ note-just-in-case, reword it as a plain note or remove it — a follow-up commit
 fine, since nothing was blocked. (There is no suppression marker — see "No
 inline markers" below.)
 
-### `docaudit doc-drift`
+### `docgraph doc-drift`
 
 A **Stop-hook** doc-staleness gate: wire it into your agent harness's `Stop`
-hook (invoked directly — `docaudit doc-drift`, no wrapper script) so it runs at
+hook (invoked directly — `docgraph doc-drift`, no wrapper script) so it runs at
 the end of every turn and **blocks** the turn from ending while a tracked doc
 still describes code that just changed underneath it.
 
@@ -264,8 +264,8 @@ Scope and known limits:
   manual convenience.
 
 ```bash
-docaudit doc-drift                        # bare: resolves the diff base itself, applies the loop-guard
-docaudit doc-drift --range base..head     # explicit range, for manual use — bypasses the loop-guard
+docgraph doc-drift                        # bare: resolves the diff base itself, applies the loop-guard
+docgraph doc-drift --range base..head     # explicit range, for manual use — bypasses the loop-guard
 ```
 
 Bare invocation applies a **once-per-HEAD loop-guard**: after it nags for a
@@ -282,7 +282,7 @@ anchored-symbol-and-value convention it relies on (a doc naming a code symbol,
 and for value drift, also showing the literal it's currently set to).
 
 It has **no suppression surface** beyond that whole-check kill switch: no
-`.docauditignore`, no per-finding CLI flag, no inline marker. A flagged
+`.docgraphignore`, no per-finding CLI flag, no inline marker. A flagged
 reference is a situation-based judgment call — reconcile the doc, or confirm
 it's intentional framed history and move on.
 
@@ -299,10 +299,10 @@ not `--skip`-able, not run by the generated pre-push hook), and always exit
 `0` on success regardless of findings — `2` only on a usage or git error.
 
 ```bash
-docaudit covers <path>               # docs that cover <path> (repo-root-relative)
-docaudit index                       # generated markdown index of the doc graph
-docaudit stale                       # docs whose verified date is past its threshold
-docaudit stale --older-than 90       # override the default 180-day threshold
+docgraph covers <path>               # docs that cover <path> (repo-root-relative)
+docgraph index                       # generated markdown index of the doc graph
+docgraph stale                       # docs whose verified date is past its threshold
+docgraph stale --older-than 90       # override the default 180-day threshold
 ```
 
 - **`covers <path>`** — prints, one per line, every tracked doc that documents
@@ -316,7 +316,7 @@ docaudit stale --older-than 90       # override the default 180-day threshold
   stdout: every doc that carries frontmatter, grouped by `type` (core types in
   their canonical order, then custom types alphabetically), each listed as
   `- [title](path) — description` (the ` — description` tail is omitted when a doc has no `description` field). It's a view, not a hand-maintained page —
-  redirect it into a tracked file (`docaudit index > docs/index.md`) rather
+  redirect it into a tracked file (`docgraph index > docs/index.md`) rather
   than editing the output by hand, and regenerate after the doc graph changes.
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
   older than its staleness threshold, one per line:
@@ -329,52 +329,52 @@ docaudit stale --older-than 90       # override the default 180-day threshold
 
 ## Install
 
-**Guided (Claude Code):** run `/docaudit:install` — it installs the binary, offers to wire
+**Guided (Claude Code):** run `/docgraph:install` — it installs the binary, offers to wire
 the `doc-drift` Stop hook into `~/.claude/settings.json`, offers this repo's pre-push gate,
 and seeds the leaks config.
 
 **Manual:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lockyc/docaudit/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lockyc/docgraph/main/install.sh | bash
 ```
 
 This runs `go install` (from the current checkout if you're in one, else `@latest`), seeds
-`~/.config/docaudit/`, and prints where the binary landed. Or install directly:
+`~/.config/docgraph/`, and prints where the binary landed. Or install directly:
 
 ```bash
-go install github.com/lockyc/docaudit@latest   # or, from a checkout: just install
+go install github.com/lockyc/docgraph@latest   # or, from a checkout: just install
 ```
 
-Needs **Go** (the install is `go install`) and **git** on PATH (docaudit shells out to it at
+Needs **Go** (the install is `go install`) and **git** on PATH (docgraph shells out to it at
 runtime). The only module dependency is `github.com/BurntSushi/toml` (config decode); the rest
 is the Go stdlib.
 
 ## Usage
 
 ```bash
-docaudit [path]                     # path defaults to the current directory; enforces all checks
-docaudit --root wiki/Home.md        # add an extra entry point (repeatable)
-docaudit --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
-docaudit --skip orphans             # exclude a check (comma-separated; e.g. nav-driven MkDocs)
-docaudit --skip leaks               # exclude the content leak scan
-docaudit --skip frontmatter         # exclude the frontmatter well-formedness check
-docaudit --skip edges               # exclude the typed-edge integrity check
-docaudit --leaks-config <path>      # override the global leak rules file
-docaudit --config <path>            # override the global config.toml (usage logging)
-docaudit footgun-drift              # diff-scoped: reads pre-push ref lines from stdin
-docaudit footgun-drift --range base..head  # diff-scoped: explicit range
-docaudit doc-drift                  # Stop-hook: working-tree-inclusive diff, once-per-HEAD loop-guard
-docaudit doc-drift --range base..head  # Stop-hook: explicit range, bypasses the loop-guard
-docaudit schema                     # print the JSON Schema for the frontmatter vocabulary (read-only)
-docaudit covers <path>              # read-only: docs that cover <path> (repo-root-relative)
-docaudit index                      # read-only: generated markdown index of the doc graph
-docaudit stale                      # read-only: docs whose verified date is past its threshold
-docaudit stale --older-than 90      # read-only: override the default 180-day threshold
-docaudit version                    # print version (also --version, -v)
+docgraph [path]                     # path defaults to the current directory; enforces all checks
+docgraph --root wiki/Home.md        # add an extra entry point (repeatable)
+docgraph --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
+docgraph --skip orphans             # exclude a check (comma-separated; e.g. nav-driven MkDocs)
+docgraph --skip leaks               # exclude the content leak scan
+docgraph --skip frontmatter         # exclude the frontmatter well-formedness check
+docgraph --skip edges               # exclude the typed-edge integrity check
+docgraph --leaks-config <path>      # override the global leak rules file
+docgraph --config <path>            # override the global config.toml (usage logging)
+docgraph footgun-drift              # diff-scoped: reads pre-push ref lines from stdin
+docgraph footgun-drift --range base..head  # diff-scoped: explicit range
+docgraph doc-drift                  # Stop-hook: working-tree-inclusive diff, once-per-HEAD loop-guard
+docgraph doc-drift --range base..head  # Stop-hook: explicit range, bypasses the loop-guard
+docgraph schema                     # print the JSON Schema for the frontmatter vocabulary (read-only)
+docgraph covers <path>              # read-only: docs that cover <path> (repo-root-relative)
+docgraph index                      # read-only: generated markdown index of the doc graph
+docgraph stale                      # read-only: docs whose verified date is past its threshold
+docgraph stale --older-than 90      # read-only: override the default 180-day threshold
+docgraph version                    # print version (also --version, -v)
 ```
 
-Exit codes for `docaudit [path]`: `0` clean · `1` findings in an enforced
+Exit codes for `docgraph [path]`: `0` clean · `1` findings in an enforced
 check · `2` usage / not a git repo / malformed leak config. `footgun-drift` is
 advisory — `0` whether or not it prints findings, `2` only on a git/usage error.
 `doc-drift` **blocks**: `0` clean (or silenced by the loop-guard) · `2` on a
@@ -382,13 +382,13 @@ finding (printed to stderr) or a git/usage error. `covers`/`index`/`stale` are
 **read-only views**, not checks: `0` always on success, whatever they print —
 `2` only on a usage or git error.
 
-> **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
+> **v2 breaking change:** the `--checks` (include) flag was removed. docgraph now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any
-> installed hook with `docaudit install-hook --force`. A stray `--checks` prints a
+> installed hook with `docgraph install-hook --force`. A stray `--checks` prints a
 > migration message and exits 2.
 
 On a finding, the output is self-describing: below the findings it prints what
-docaudit is, that its non-zero exit is what aborts a pre-push, what a finding
+docgraph is, that its non-zero exit is what aborts a pre-push, what a finding
 means, and how to remediate each category. A reader who sees only a failed push —
 human or agent — should not have to reverse-engineer the gate. Clean/CI runs stay
 terse.
@@ -396,24 +396,24 @@ terse.
 ### Install as a pre-push gate
 
 ```bash
-docaudit install-hook [path]                # gate: enforce ALL checks (default)
-docaudit install-hook --skip orphans        # nav-driven repos (no orphan gate)
-docaudit install-hook --ignore '**/*_test.go'  # bake an --ignore glob into the gated hook
-docaudit install-hook --force               # regenerate an existing hook (e.g. after upgrading)
-docaudit install-hook --no-footgun-drift    # omit the diff-scoped footgun-drift check
+docgraph install-hook [path]                # gate: enforce ALL checks (default)
+docgraph install-hook --skip orphans        # nav-driven repos (no orphan gate)
+docgraph install-hook --ignore '**/*_test.go'  # bake an --ignore glob into the gated hook
+docgraph install-hook --force               # regenerate an existing hook (e.g. after upgrading)
+docgraph install-hook --no-footgun-drift    # omit the diff-scoped footgun-drift check
 ```
 
-The generated hook runs the whole-state gate `docaudit .` (a bare invocation, so
+The generated hook runs the whole-state gate `docgraph .` (a bare invocation, so
 a check added in a later version is enforced without regenerating the hook), then
-the diff-scoped `docaudit footgun-drift`, fed git's pre-push stdin so it can scope
+the diff-scoped `docgraph footgun-drift`, fed git's pre-push stdin so it can scope
 itself to only the commit range being pushed. Only the first can block a push —
 `footgun-drift` is advisory (`|| true` in the hook, and it exits 0 on findings),
 so it only ever prints its nag. Pass `--no-footgun-drift` to omit it. It writes a tracked
 `.githooks/pre-push` and sets `core.hooksPath -> .githooks` for this clone
 (other clones activate it with `git config core.hooksPath .githooks`). Refuses
 to clobber an existing `.githooks/pre-push` (pass `--force`, or integrate into
-it — e.g. call docaudit from an existing `make lint`). Fails **closed**: a
-missing `docaudit` blocks the push, because a gate that skips when its tool is
+it — e.g. call docgraph from an existing `make lint`). Fails **closed**: a
+missing `docgraph` blocks the push, because a gate that skips when its tool is
 absent is a false green, not a gate.
 
 ### Doc models and when to `--skip orphans`
@@ -428,8 +428,8 @@ their way through `docs/`). That fits most repos. Two exceptions:
   them from `CLAUDE.md`/`README`, or accept and exclude with `--skip orphans`.
 
 Repos that don't use the `Footgun:` note convention at all opt out of
-`footgun-drift` outright — it isn't a `docaudit [path]` check, so there's no
-`--skip` name for it; use `DOCAUDIT_FOOTGUN_OFF=1` or `install-hook
+`footgun-drift` outright — it isn't a `docgraph [path]` check, so there's no
+`--skip` name for it; use `DOCGRAPH_FOOTGUN_OFF=1` or `install-hook
 --no-footgun-drift` instead
 (see [`footgun-drift`](#footgun-drift--the-diff-scoped-pre-push-check)).
 
@@ -443,43 +443,43 @@ covers both a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 `**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for
 the doc-graph checks (intentionally-untracked scratch, and agent skill/config
-tooling that is never part of the doc graph). Add more via a `.docauditignore` file
+tooling that is never part of the doc graph). Add more via a `.docgraphignore` file
 (gitignore syntax, `#` comments) or repeatable `--ignore` globs. Globs support
 `**` (any number of path segments), `*`, `?`. Note the leak scan honors only
-`--ignore` (not the default/`.docauditignore` layers) — see the leaks section.
+`--ignore` (not the default/`.docgraphignore` layers) — see the leaks section.
 
 **No inline markers.** Every suppression lives in config or on the command line —
-`.docauditignore`, `--ignore`, `--skip`, and the leaks config's `allow`/`allow_regex`
-and `[[dir]]` sections. docaudit **never** reads a suppression comment or pragma inside
+`.docgraphignore`, `--ignore`, `--skip`, and the leaks config's `allow`/`allow_regex`
+and `[[dir]]` sections. docgraph **never** reads a suppression comment or pragma inside
 the audited files; such a marker would be silently ignored, not honored — so an
 unwanted doc-graph/leak finding is silenced by tuning the config/flags, never by
 annotating the file. `footgun-drift` has no in-file escape at all: it's advisory,
 flags every added declaration, and is opted out only whole-check via
-`DOCAUDIT_FOOTGUN_OFF=1` / `--no-footgun-drift`. `doc-drift` likewise has no in-file
+`DOCGRAPH_FOOTGUN_OFF=1` / `--no-footgun-drift`. `doc-drift` likewise has no in-file
 escape and no per-finding CLI flag: the sole opt-out is the whole-check
 `DOC_DRIFT_OFF=1`; a flagged reference is otherwise a situation-based judgment call,
 de-duped as a *nag* (not silenced as a finding) by its once-per-HEAD loop-guard.
 
 ## Usage logging
 
-docaudit can append one JSON line per run to a local log, so you can see usage and
+docgraph can append one JSON line per run to a local log, so you can see usage and
 finding trends over time (across all your repos). It is **opt-in** and machine-local:
 off unless a global `config.toml` enables it, so CI, fresh clones, and contributors
 never log.
 
-Enable it in `~/.config/docaudit/config.toml` (resolved `--config` →
-`$DOCAUDIT_CONFIG` → `$XDG_CONFIG_HOME/docaudit/config.toml`):
+Enable it in `~/.config/docgraph/config.toml` (resolved `--config` →
+`$DOCGRAPH_CONFIG` → `$XDG_CONFIG_HOME/docgraph/config.toml`):
 
 ```toml
 [log]
 enabled = true
 level   = 1                                   # 1 counts · 2 +paths · 3 +findings
-# path  = "~/.local/state/docaudit/usage.jsonl"   # optional; this is the default
+# path  = "~/.local/state/docgraph/usage.jsonl"   # optional; this is the default
 ```
 
-Records land in `$XDG_STATE_HOME/docaudit/usage.jsonl` (default
-`~/.local/state/docaudit/usage.jsonl`), overridable via `[log].path` or the
-`DOCAUDIT_LOG` env var. A level-1 record:
+Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
+`~/.local/state/docgraph/usage.jsonl`), overridable via `[log].path` or the
+`DOCGRAPH_LOG` env var. A level-1 record:
 
 ```json
 {"ts":"2026-07-09T21:30:00+10:00","version":"2.0.0","repo":"/abs/git/root",
@@ -502,7 +502,7 @@ Notes:
   state). A **malformed** `config.toml` prints a warning and disables logging but
   **does not fail the run** — logging is auxiliary, so a log-config typo must never
   block a push (unlike a malformed `leaks.toml`, which is fatal).
-- `DOCAUDIT_NO_LOG=1` disables logging for one run even when the config enables it.
+- `DOCGRAPH_NO_LOG=1` disables logging for one run even when the config enables it.
 - Logging is best-effort: an unwritable log file is silently skipped and never
   changes the exit code.
 
@@ -521,8 +521,8 @@ has no code-fence awareness at all — an example `Footgun:` line inside a
 
 ```bash
 just test    # go test ./...
-just build   # go build -o docaudit .
-just install # go install . -> ~/go/bin/docaudit
+just build   # go build -o docgraph .
+just install # go install . -> ~/go/bin/docgraph
 just gate    # gofmt check + vet + tests (pre-release gate)
 ```
 
@@ -534,12 +534,12 @@ and `just release` tags `v<VERSION>` and publishes the matching GitHub release. 
 consumers `go install …@latest`, a release moves everyone's pinned tool — keep `main`
 releasable.
 
-**Install with `just install`** (or `go install .`) → `~/go/bin/docaudit`. The binary
+**Install with `just install`** (or `go install .`) → `~/go/bin/docgraph`. The binary
 is not rebuilt automatically, so reinstall after changing the CLI. Consumers track
 releases via `go install …@latest`.
 
 The installed binary must be reachable when a hook fires: the pre-push hook
-`install-hook` generates resolves docaudit via PATH **and** the Go bin dir
+`install-hook` generates resolves docgraph via PATH **and** the Go bin dir
 (`$GOBIN` / `$GOPATH/bin` / `~/go/bin`), because git runs hooks with the caller's
 PATH — GUI clients and sandboxed agents often push with a bare PATH that omits
 `~/go/bin`, and a `command -v`-only hook would then fail-closed for the wrong

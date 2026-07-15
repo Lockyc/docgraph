@@ -25,7 +25,7 @@ type Dropped struct {
 // entries are skipped, matching the scan.
 //
 // allow / allow_regex / [[dir]] rules have no filter-repo equivalent, so they are
-// dropped and counted in Dropped. docaudit reads only this config — never history.
+// dropped and counted in Dropped. docgraph reads only this config — never history.
 func ReplaceTextRules(cfg LeakConfig) (lines []string, dropped Dropped) {
 	seen := map[string]bool{}
 	add := func(line string) {
@@ -46,7 +46,7 @@ func ReplaceTextRules(cfg LeakConfig) (lines []string, dropped Dropped) {
 			continue
 		}
 		if strings.HasPrefix(r, "(?-i)") {
-			// A leading (?-i) is docaudit's documented case-sensitive opt-out. But
+			// A leading (?-i) is docgraph's documented case-sensitive opt-out. But
 			// git-filter-repo compiles with Python re, which REJECTS a bare (?-i)
 			// flag-clear that Go/RE2 accepts — emitting the pattern verbatim aborts the
 			// whole rewrite. Strip the flag and emit a plain case-sensitive rule, which

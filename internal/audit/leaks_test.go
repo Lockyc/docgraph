@@ -176,8 +176,8 @@ func TestLeakScanDirAllowIsScoped(t *testing.T) {
 func TestLeakScanTrackedToolingStillScanned(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		".claude/skills/foo.md": "internal note: nucleus\n",
-		".docauditignore":       ".claude/**\n",
-	}, []string{".claude/skills/foo.md", ".docauditignore"})
+		".docgraphignore":       ".claude/**\n",
+	}, []string{".claude/skills/foo.md", ".docgraphignore"})
 
 	found, err := LeakScan(dir, LeakConfig{Terms: []string{"nucleus"}}, nil)
 	if err != nil {

@@ -42,11 +42,11 @@ func matchSegments(pat, name []string) bool {
 	return len(name) == 0
 }
 
-// loadIgnores returns the default ignore, patterns from .docauditignore (if
+// loadIgnores returns the default ignore, patterns from .docgraphignore (if
 // present), then extra patterns — order preserved.
 func loadIgnores(root string, extra []string) ([]string, error) {
 	globs := append([]string{}, defaultIgnores...)
-	f, err := os.Open(filepath.Join(root, ".docauditignore"))
+	f, err := os.Open(filepath.Join(root, ".docgraphignore"))
 	if err == nil {
 		defer f.Close()
 		sc := bufio.NewScanner(f)
