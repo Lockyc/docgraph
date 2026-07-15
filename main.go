@@ -41,6 +41,8 @@ func main() {
 			os.Exit(runCovers(args[1:], os.Stdout, os.Stderr))
 		case "index":
 			os.Exit(runIndex(args[1:], os.Stdout, os.Stderr))
+		case "stale":
+			os.Exit(runStale(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -893,5 +895,33 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	fmt.Fprint(stdout, audit.IndexMarkdown(docs))
+	return 0
+}
+
+// runStale prints docs whose `verified` date is older than their staleness
+// threshold (per-doc `review:` cadence, else --older-than). A read-only view —
+// never part of the gate.
+func runStale(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("docaudit stale", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var ignores multiFlag
+	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
+	olderThan := fs.Int("older-than", 180, "default staleness threshold in days (a per-doc `review:` cadence overrides it)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root, err := audit.GitRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, "docaudit: not a git repository")
+		return 2
+	}
+	docs, err := audit.RepoDocs(root, ignores)
+	if err != nil {
+		fmt.Fprintf(stderr, "docaudit: %v\n", err)
+		return 2
+	}
+	for _, s := range audit.StaleDocs(docs, time.Now(), *olderThan) {
+		fmt.Fprintf(stdout, "%s (verified %s — %dd old, threshold %dd)\n", s.File, s.Verified, s.AgeDays, s.Threshold)
+	}
 	return 0
 }

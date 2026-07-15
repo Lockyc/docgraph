@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCoversOf(t *testing.T) {
@@ -47,5 +48,40 @@ func TestIndexMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(out, "[docs/z.md](docs/z.md)") {
 		t.Errorf("titleless doc should fall back to its path:\n%s", out)
+	}
+}
+
+func TestParseReviewDays(t *testing.T) {
+	cases := map[string]struct {
+		days int
+		ok   bool
+	}{"90d": {90, true}, "2w": {14, true}, "": {0, false}, "90": {0, false}, "-1d": {0, false}, "xd": {0, false}}
+	for in, want := range cases {
+		days, ok := parseReviewDays(in)
+		if days != want.days || ok != want.ok {
+			t.Errorf("parseReviewDays(%q) = (%d,%v), want (%d,%v)", in, days, ok, want.days, want.ok)
+		}
+	}
+}
+
+func TestStaleDocs(t *testing.T) {
+	now := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+	docs := map[string]*Doc{
+		"fresh.md":    {Verified: "2026-07-01"},               // 14d old, under default
+		"old.md":      {Verified: "2026-01-01"},               // ~195d old, over default 180
+		"tight.md":    {Verified: "2026-06-01", Review: "7d"}, // ~44d old, over its own 7d
+		"noverify.md": {Type: "runbook"},                      // no verified → skipped
+		"baddate.md":  {Verified: "not-a-date"},               // unparseable → skipped
+	}
+	got := StaleDocs(docs, now, 180)
+	files := map[string]bool{}
+	for _, s := range got {
+		files[s.File] = true
+	}
+	if !files["old.md"] || !files["tight.md"] {
+		t.Fatalf("stale = %+v, want old.md + tight.md", got)
+	}
+	if files["fresh.md"] || files["noverify.md"] || files["baddate.md"] {
+		t.Errorf("stale wrongly includes a fresh/unverified/bad-date doc: %+v", got)
 	}
 }

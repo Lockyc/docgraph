@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // RepoDocs parses the frontmatter of every non-ignored tracked .md, returning the
@@ -102,4 +104,62 @@ func IndexMarkdown(docs map[string]*Doc) string {
 		}
 	}
 	return b.String()
+}
+
+// StaleFinding is a doc whose `verified` date is older than its staleness
+// threshold (its own `review:` cadence if set, else the caller's default).
+type StaleFinding struct {
+	File      string
+	Verified  string
+	AgeDays   int
+	Threshold int
+}
+
+// StaleDocs reports docs whose verified date is older than their threshold as of
+// now. Threshold is the doc's `review:` cadence (e.g. "90d") if set and parseable,
+// else defaultDays. Docs with no `verified`, or an unparseable verified/review,
+// are skipped — malformed metadata is the frontmatter check's concern, not a view's.
+func StaleDocs(docs map[string]*Doc, now time.Time, defaultDays int) []StaleFinding {
+	var out []StaleFinding
+	for src, d := range docs {
+		v := strings.TrimSpace(d.Verified)
+		if v == "" {
+			continue
+		}
+		vt, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			continue
+		}
+		threshold := defaultDays
+		if days, ok := parseReviewDays(d.Review); ok {
+			threshold = days
+		}
+		age := int(now.Sub(vt).Hours() / 24)
+		if age > threshold {
+			out = append(out, StaleFinding{File: src, Verified: v, AgeDays: age, Threshold: threshold})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out
+}
+
+// parseReviewDays parses a `review` cadence like "90d" or "2w" into days. Returns
+// (0,false) for empty, missing-unit, or otherwise unrecognized forms.
+func parseReviewDays(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s[:len(s)-1])
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	switch s[len(s)-1] {
+	case 'd':
+		return n, true
+	case 'w':
+		return n * 7, true
+	default:
+		return 0, false
+	}
 }
