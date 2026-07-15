@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -739,5 +740,19 @@ func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
 	second := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard)
 	if second != 0 {
 		t.Fatalf("same HEAD already nagged -> want exit 0, got %d", second)
+	}
+}
+
+func TestRunSchema(t *testing.T) {
+	var buf bytes.Buffer
+	if code := runSchema(&buf); code != 0 {
+		t.Fatalf("runSchema exit = %d, want 0", code)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("output not valid JSON: %v", err)
+	}
+	if m["title"] != "docgraph document frontmatter" {
+		t.Errorf("title = %v", m["title"])
 	}
 }

@@ -35,6 +35,8 @@ func main() {
 			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
 		case "doc-drift":
 			os.Exit(runDocDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
+		case "schema":
+			os.Exit(runSchema(os.Stdout))
 		case "version", "--version", "-v":
 			fmt.Println("docaudit " + version)
 			os.Exit(0)
@@ -790,4 +792,13 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 	fmt.Fprintln(w, "This catches only anchored/symbol cases — for paraphrased values or reversed")
 	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing. Already reconciled, or is it")
 	fmt.Fprintln(w, "framed history? Stop again — you won't be re-prompted for this HEAD.")
+}
+
+// runSchema prints the JSON Schema describing docgraph frontmatter, stamped with
+// this build's version. It is how non-owning consumers (compositor, Mycelium)
+// obtain the vocabulary they must conform to without re-encoding it. Read-only —
+// never part of the pre-push gate.
+func runSchema(stdout io.Writer) int {
+	stdout.Write(audit.SchemaJSON(version))
+	return 0
 }
