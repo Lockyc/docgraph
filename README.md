@@ -290,6 +290,43 @@ It only catches the two mechanical classes above — a paraphrased value or a
 reversed decision with no anchored symbol is out of scope; run a semantic doc
 sweep for those.
 
+### `covers`, `index`, `stale` — read-only doc-graph views
+
+Three subcommands that query the doc graph for a human or an agent tool, built
+on the same `RepoDocs` parse the six checks use. All three are **read-only**:
+they never write to the repo, are never part of the gate (not in `checkNames`,
+not `--skip`-able, not run by the generated pre-push hook), and always exit
+`0` on success regardless of findings — `2` only on a usage or git error.
+
+```bash
+docaudit covers <path>               # docs that cover <path> (repo-root-relative)
+docaudit index                       # generated markdown index of the doc graph
+docaudit stale                       # docs whose verified date is past its threshold
+docaudit stale --older-than 90       # override the default 180-day threshold
+```
+
+- **`covers <path>`** — prints, one per line, every tracked doc that documents
+  `<path>` via a frontmatter `covers` edge, either directly or by covering a
+  parent directory (`covers: src/auth/` covers `src/auth/login.go`). `<path>`
+  is **repo-root-relative** — frontmatter edges resolve against the repo root,
+  unlike an inline markdown link, which resolves relative to the doc it's
+  in. Answers "which doc governs this file" for an agent about to touch it.
+  Prints nothing (still exit `0`) if no doc covers the path.
+- **`index`** — prints a **generated** markdown index of the doc graph to
+  stdout: every doc that carries frontmatter, grouped by `type` (core types in
+  their canonical order, then custom types alphabetically), each listed as
+  `- [title](path) — description`. It's a view, not a hand-maintained page —
+  redirect it into a tracked file (`docaudit index > docs/index.md`) rather
+  than editing the output by hand, and regenerate after the doc graph changes.
+- **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
+  older than its staleness threshold, one per line:
+  `docs/old.md (verified 2026-01-01 — 195d old, threshold 180d)`. The
+  threshold is `--older-than` (default **180** days) unless the doc's own
+  `review:` cadence (e.g. `review: 90d`, `review: 2w`) overrides it. A doc with
+  no `verified` date, or an unparseable `verified`/`review` value, is silently
+  skipped — not flagged; malformed frontmatter is the `frontmatter` check's
+  concern, not this view's.
+
 ## Install
 
 **Guided (Claude Code):** run `/docaudit:install` — it installs the binary, offers to wire
@@ -330,6 +367,10 @@ docaudit footgun-drift --range base..head  # diff-scoped: explicit range
 docaudit doc-drift                  # Stop-hook: working-tree-inclusive diff, once-per-HEAD loop-guard
 docaudit doc-drift --range base..head  # Stop-hook: explicit range, bypasses the loop-guard
 docaudit schema                     # print the JSON Schema for the frontmatter vocabulary (read-only)
+docaudit covers <path>              # read-only: docs that cover <path> (repo-root-relative)
+docaudit index                      # read-only: generated markdown index of the doc graph
+docaudit stale                      # read-only: docs whose verified date is past its threshold
+docaudit stale --older-than 90      # read-only: override the default 180-day threshold
 docaudit version                    # print version (also --version, -v)
 ```
 
@@ -337,7 +378,9 @@ Exit codes for `docaudit [path]`: `0` clean · `1` findings in an enforced
 check · `2` usage / not a git repo / malformed leak config. `footgun-drift` is
 advisory — `0` whether or not it prints findings, `2` only on a git/usage error.
 `doc-drift` **blocks**: `0` clean (or silenced by the loop-guard) · `2` on a
-finding (printed to stderr) or a git/usage error.
+finding (printed to stderr) or a git/usage error. `covers`/`index`/`stale` are
+**read-only views**, not checks: `0` always on success, whatever they print —
+`2` only on a usage or git error.
 
 > **v2 breaking change:** the `--checks` (include) flag was removed. docaudit now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any

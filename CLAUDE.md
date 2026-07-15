@@ -1,8 +1,9 @@
 # docaudit — notes for the next agent
 
 A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
-`git`) with three independent audit modes, each with its own trigger, plus a
-read-only `schema` subcommand:
+`git`) with three independent audit modes, each with its own trigger, plus
+read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
+`stale`):
 
 - **`docaudit .`** — six **whole-state** checks against the current tree:
   orphans (tracked `.md` unreachable from the roots), broken internal `.md`
@@ -27,15 +28,27 @@ read-only `schema` subcommand:
   Schema (draft 2020-12) describing the frontmatter vocabulary that
   `frontmatter`/`edges` enforce, so another consumer (an editor, a catalog
   builder) conforms to it instead of re-encoding it. Never part of the gate.
+- **`docaudit covers`/`index`/`stale`** — read-only doc-graph **views**: they
+  read the graph via `audit.RepoDocs` (the same `parseDocs` path the six
+  whole-state checks use, malformed docs simply omitted) and never gate —
+  not `checkNames` entries, not `--skip`-able, never invoked by the generated
+  pre-push hook, always exit `0` on success regardless of what they print.
+  `covers <path>` answers "which doc governs this file" (a `covers`
+  frontmatter edge, direct or parent-directory); `stale` reads the
+  `verified`/`review` freshness fields the frontmatter model has carried since
+  the `schema` vocabulary but that no check has read until now; `index` is a
+  **generated** view (`IndexMarkdown`), not a hand-maintained page — redirect
+  it into a tracked file rather than editing the output.
 
 `frontmatter` and `edges` are ordinary `checkNames` entries — whole-state,
 `--skip`-able exactly like orphans/broken/untracked/leaks. `footgun-drift` and
 `doc-drift` are **not** `checkNames` — each is its own subcommand with its own
 trigger (a git range / a Stop invocation), not a `docaudit .` check. `schema`
-is a third kind again: not a check and not diff-scoped, just a vocabulary
-emitter with no trigger of its own. There's also an **opt-in usage log** (see
-the logging footgun). Human-facing usage lives in `README.md`; this file
-carries the invariants and footguns.
+and the `covers`/`index`/`stale` views are a third kind again: not a check and
+not diff-scoped, no trigger of their own — `schema` emits a fixed vocabulary,
+the views query the current tree read-only. There's also an **opt-in usage
+log** (see the logging footgun). Human-facing usage lives in `README.md`; this
+file carries the invariants and footguns.
 
 ## Intended use
 
@@ -288,8 +301,12 @@ docs/" with zero config.
   int` (the Stop-hook subcommand — checks `DOC_DRIFT_OFF`, resolves the diff
   spec via `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints
   via `printDocDrift` and returns 2, gated on bare invocation by
-  `docDriftGuardOK`'s once-per-HEAD marker under `docDriftStateDir()`), report
+  `docDriftGuardOK`'s once-per-HEAD marker under `docDriftStateDir()`),
+  `runCovers`/`runIndex`/`runStale` (the read-only views — each resolves the
+  repo root, calls `audit.RepoDocs`, and prints; always `return 0`), report
   format, `maybeLog` (opt-in usage logging side-channel).
+- `internal/audit/views.go` — `RepoDocs` (the shared parse path behind the
+  three views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
   `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` and
