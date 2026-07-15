@@ -175,6 +175,8 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		return string(b), true
 	}
 
+	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
+
 	// BFS reachability from roots, following only links to tracked .md files.
 	reachable := map[string]bool{}
 	var queue []string
@@ -207,6 +209,19 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		for f := range trackedSet {
 			if !reachable[f] && mentionsPath(content, f) {
 				enqueue(f)
+			}
+		}
+		// Frontmatter typed edges: a doc reached via a part-of/see-also/etc. edge
+		// to another tracked doc is reachable — same graph, third edge kind.
+		if d := docs[cur]; d != nil {
+			for _, e := range d.Links {
+				if ClassifyTarget(e.To) != EdgeDoc {
+					continue
+				}
+				tgt := ResolveEdgeTarget(e.To)
+				if trackedSet[tgt] {
+					enqueue(tgt)
+				}
 			}
 		}
 	}
@@ -259,7 +274,6 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		return broken[i].Line < broken[j].Line
 	})
 
-	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
 	brokenEdgeFindings := brokenEdges(repoRoot, docs)
 	edgeCycles := detectCycles(docs, trackedSet)
 

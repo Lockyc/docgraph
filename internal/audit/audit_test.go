@@ -158,3 +158,47 @@ func TestAuditReportsCycle(t *testing.T) {
 		t.Fatal("Audit found no cycle, want the a.md<->b.md part-of cycle")
 	}
 }
+
+func TestFrontmatterEdgeFeedsReachability(t *testing.T) {
+	// hub.md is a root-reachable doc; leaf.md is linked NOWHERE by markdown or
+	// path-mention — only reachable via hub.md's frontmatter see-also edge.
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md":    "[hub](docs/hub.md)\n",
+		"docs/hub.md":  "---\ntype: index\nlinks: [{rel: see-also, to: docs/leaf.md}]\n---\nhub body\n",
+		"docs/leaf.md": "---\ntype: reference\n---\nleaf body\n",
+	}, []string{"CLAUDE.md", "docs/hub.md", "docs/leaf.md"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	for _, o := range rep.Orphans {
+		if o == "docs/leaf.md" {
+			t.Fatalf("docs/leaf.md is an orphan, but a frontmatter see-also edge should reach it; orphans=%v", rep.Orphans)
+		}
+	}
+}
+
+// TestFrontmatterEdgeIsolatedFromPathMention guards against the frontmatter-edge
+// BFS block being a no-op that happens to pass only because the raw "to: <path>"
+// YAML text also satisfies the path-mention edge kind. The "./" prefix here is
+// stripped by ResolveEdgeTarget's filepath.Clean but defeats mentionsPath's
+// word-boundary check (the char before "docs/leaf2.md" is '/', a path-word byte),
+// so only the frontmatter-edge mechanism can make leaf2.md reachable.
+func TestFrontmatterEdgeIsolatedFromPathMention(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md":     "[hub](docs/hub.md)\n",
+		"docs/hub.md":   "---\ntype: index\nlinks: [{rel: see-also, to: ./docs/leaf2.md}]\n---\nhub body\n",
+		"docs/leaf2.md": "---\ntype: reference\n---\nleaf body\n",
+	}, []string{"CLAUDE.md", "docs/hub.md", "docs/leaf2.md"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	for _, o := range rep.Orphans {
+		if o == "docs/leaf2.md" {
+			t.Fatalf("docs/leaf2.md is an orphan, but a frontmatter see-also edge should reach it; orphans=%v", rep.Orphans)
+		}
+	}
+}
