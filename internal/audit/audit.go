@@ -20,6 +20,16 @@ type FrontmatterFinding struct {
 	Detail string
 }
 
+// BrokenEdge is a frontmatter typed edge whose internal target (a doc or code
+// path) does not exist. External (URL) and cross-repo targets are never broken
+// edges — they are unverifiable-here by design.
+type BrokenEdge struct {
+	Source string
+	Rel    string
+	Target string
+	Reason string
+}
+
 type Report struct {
 	Roots               []string
 	TrackedMD           int
@@ -28,11 +38,12 @@ type Report struct {
 	BrokenLinks         []BrokenLink
 	Untracked           []string
 	FrontmatterFindings []FrontmatterFinding
+	BrokenEdges         []BrokenEdge
 }
 
 func (r Report) HasFindings() bool {
 	return len(r.Orphans) > 0 || len(r.BrokenLinks) > 0 || len(r.Untracked) > 0 ||
-		len(r.FrontmatterFindings) > 0
+		len(r.FrontmatterFindings) > 0 || len(r.BrokenEdges) > 0
 }
 
 type Options struct {
@@ -102,6 +113,30 @@ func parseDocs(repoRoot string, tracked, globs []string) (map[string]*Doc, []Fro
 	}
 	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
 	return docs, findings
+}
+
+// brokenEdges reports frontmatter edges whose internal (doc/code) target is
+// absent on disk. EdgeExternal and EdgeCrossRepo targets are skipped by design.
+func brokenEdges(repoRoot string, docs map[string]*Doc) []BrokenEdge {
+	var out []BrokenEdge
+	for src, d := range docs {
+		for _, e := range d.Links {
+			switch ClassifyTarget(e.To) {
+			case EdgeDoc, EdgeCode:
+				target := ResolveEdgeTarget(e.To)
+				if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(target))); err != nil {
+					out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: target, Reason: "target does not exist"})
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source < out[j].Source
+		}
+		return out[i].Target < out[j].Target
+	})
+	return out
 }
 
 func Audit(repoRoot string, opts Options) (Report, error) {
@@ -224,7 +259,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 	})
 
 	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
-	_ = docs // consumed by later tasks (edges, cycles, reachability)
+	brokenEdgeFindings := brokenEdges(repoRoot, docs)
 
 	return Report{
 		Roots:               roots,
@@ -234,5 +269,6 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		BrokenLinks:         broken,
 		Untracked:           untracked,
 		FrontmatterFindings: fmFindings,
+		BrokenEdges:         brokenEdgeFindings,
 	}, nil
 }

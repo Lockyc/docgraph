@@ -138,6 +138,18 @@ func TestPrintReportFrontmatterSection(t *testing.T) {
 	}
 }
 
+func TestPrintReportEdgesSection(t *testing.T) {
+	var buf bytes.Buffer
+	rep := audit.Report{BrokenEdges: []audit.BrokenEdge{{Source: "docs/a.md", Rel: "covers", Target: "scripts/x.sh", Reason: "target does not exist"}}}
+	sel := map[string]bool{"edges": true}
+	if !printReport(&buf, rep, nil, sel) {
+		t.Fatal("printReport returned false, want true")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("EDGES (1)")) || !bytes.Contains(buf.Bytes(), []byte("scripts/x.sh")) {
+		t.Errorf("output missing edges section:\n%s", buf.String())
+	}
+}
+
 func TestRunSkipInvalidExit2(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"--skip", "bogus", t.TempDir()}, &out, &errb); code != 2 {

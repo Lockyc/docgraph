@@ -111,3 +111,35 @@ func TestFrontmatterFindings(t *testing.T) {
 		t.Error("missing finding for docs/broke.md (malformed)")
 	}
 }
+
+func TestBrokenEdges(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "[a](docs/a.md)\n",
+		"docs/a.md": "---\ntype: runbook\nlinks:\n" +
+			"  - {rel: covers, to: scripts/real.sh}\n" +
+			"  - {rel: covers, to: scripts/missing.sh}\n" +
+			"  - {rel: depends-on, to: docs/gone.md}\n" +
+			"  - {rel: source, to: https://example.com/x}\n" +
+			"  - {rel: depends-on, to: homelab/docs:services/y.md}\n" +
+			"---\nbody\n",
+		"scripts/real.sh": "#!/bin/sh\n",
+	}, []string{"CLAUDE.md", "docs/a.md", "scripts/real.sh"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	// Broken: scripts/missing.sh (code, absent) + docs/gone.md (doc, absent).
+	// NOT broken: scripts/real.sh (exists), the https URL (external), and the
+	// homelab/docs:... cross-repo ref (deferred).
+	if len(rep.BrokenEdges) != 2 {
+		t.Fatalf("BrokenEdges = %+v, want exactly missing.sh + gone.md", rep.BrokenEdges)
+	}
+	got := map[string]bool{}
+	for _, e := range rep.BrokenEdges {
+		got[e.Target] = true
+	}
+	if !got["scripts/missing.sh"] || !got["docs/gone.md"] {
+		t.Errorf("BrokenEdges targets = %v, want scripts/missing.sh + docs/gone.md", got)
+	}
+}
