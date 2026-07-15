@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/lockyc/docaudit/internal/audit"
 )
 
 // noCfg returns a leaks-config path guaranteed not to exist, so a test that isn't
@@ -121,6 +123,18 @@ func TestRunEnforcesOrphansByDefault(t *testing.T) {
 	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (orphan gated by default)", code)
+	}
+}
+
+func TestPrintReportFrontmatterSection(t *testing.T) {
+	var buf bytes.Buffer
+	rep := audit.Report{FrontmatterFindings: []audit.FrontmatterFinding{{File: "docs/x.md", Detail: "missing type"}}}
+	sel := map[string]bool{"frontmatter": true}
+	if !printReport(&buf, rep, nil, sel) {
+		t.Fatal("printReport returned false, want true (has a frontmatter finding)")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("FRONTMATTER (1)")) || !bytes.Contains(buf.Bytes(), []byte("docs/x.md")) {
+		t.Errorf("output missing frontmatter section:\n%s", buf.String())
 	}
 }
 

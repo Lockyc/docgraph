@@ -13,17 +13,26 @@ type BrokenLink struct {
 	Target string
 }
 
+// FrontmatterFinding is a per-doc well-formedness problem: a malformed YAML
+// frontmatter block, or a block present without the required `type` field.
+type FrontmatterFinding struct {
+	File   string
+	Detail string
+}
+
 type Report struct {
-	Roots       []string
-	TrackedMD   int
-	Reachable   int
-	Orphans     []string
-	BrokenLinks []BrokenLink
-	Untracked   []string
+	Roots               []string
+	TrackedMD           int
+	Reachable           int
+	Orphans             []string
+	BrokenLinks         []BrokenLink
+	Untracked           []string
+	FrontmatterFindings []FrontmatterFinding
 }
 
 func (r Report) HasFindings() bool {
-	return len(r.Orphans) > 0 || len(r.BrokenLinks) > 0 || len(r.Untracked) > 0
+	return len(r.Orphans) > 0 || len(r.BrokenLinks) > 0 || len(r.Untracked) > 0 ||
+		len(r.FrontmatterFindings) > 0
 }
 
 type Options struct {
@@ -60,6 +69,39 @@ func mentionsPath(content, path string) bool {
 		}
 		from = i + 1
 	}
+}
+
+// parseDocs reads and parses the frontmatter of every non-ignored tracked .md,
+// returning a cache of the successfully-parsed docs (keyed by repo-relative
+// slash path; malformed docs are omitted from the cache) plus well-formedness
+// findings: malformed YAML, or a block present with no `type`. Files with no
+// frontmatter block are valid and produce neither a cache entry nor a finding.
+func parseDocs(repoRoot string, tracked, globs []string) (map[string]*Doc, []FrontmatterFinding) {
+	docs := map[string]*Doc{}
+	var findings []FrontmatterFinding
+	for _, f := range tracked {
+		if matchesIgnore(f, globs) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(f)))
+		if err != nil {
+			continue
+		}
+		d, err := ParseFrontmatter(string(content))
+		if err != nil {
+			findings = append(findings, FrontmatterFinding{File: f, Detail: "malformed frontmatter: " + err.Error()})
+			continue
+		}
+		if d == nil {
+			continue // no frontmatter block — valid
+		}
+		if strings.TrimSpace(d.Type) == "" {
+			findings = append(findings, FrontmatterFinding{File: f, Detail: "frontmatter present but missing required field: type"})
+		}
+		docs[f] = d
+	}
+	sort.Slice(findings, func(i, j int) bool { return findings[i].File < findings[j].File })
+	return docs, findings
 }
 
 func Audit(repoRoot string, opts Options) (Report, error) {
@@ -181,12 +223,16 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		return broken[i].Line < broken[j].Line
 	})
 
+	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
+	_ = docs // consumed by later tasks (edges, cycles, reachability)
+
 	return Report{
-		Roots:       roots,
-		TrackedMD:   len(tracked),
-		Reachable:   len(reachable),
-		Orphans:     orphans,
-		BrokenLinks: broken,
-		Untracked:   untracked,
+		Roots:               roots,
+		TrackedMD:           len(tracked),
+		Reachable:           len(reachable),
+		Orphans:             orphans,
+		BrokenLinks:         broken,
+		Untracked:           untracked,
+		FrontmatterFindings: fmFindings,
 	}, nil
 }
