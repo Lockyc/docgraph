@@ -315,7 +315,7 @@ docaudit stale --older-than 90       # override the default 180-day threshold
 - **`index`** — prints a **generated** markdown index of the doc graph to
   stdout: every doc that carries frontmatter, grouped by `type` (core types in
   their canonical order, then custom types alphabetically), each listed as
-  `- [title](path) — description`. It's a view, not a hand-maintained page —
+  `- [title](path) — description` (the ` — description` tail is omitted when a doc has no `description` field). It's a view, not a hand-maintained page —
   redirect it into a tracked file (`docaudit index > docs/index.md`) rather
   than editing the output by hand, and regenerate after the doc graph changes.
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
