@@ -28,10 +28,13 @@ func ClassifyTarget(to string) EdgeKind {
 	if strings.Contains(t, "://") || strings.HasPrefix(t, "mailto:") {
 		return EdgeExternal
 	}
-	if i := strings.Index(t, ":"); i > 0 && strings.Contains(t[:i], "/") {
+	// Clean the target first to strip anchors/queries before checking for cross-repo
+	// patterns, so a doc like docs/x.md#a:b isn't misclassified by the colon in its anchor.
+	cleaned := cleanTarget(t)
+	if i := strings.Index(cleaned, ":"); i > 0 && strings.Contains(cleaned[:i], "/") {
 		return EdgeCrossRepo
 	}
-	if strings.HasSuffix(cleanTarget(t), ".md") {
+	if strings.HasSuffix(cleaned, ".md") {
 		return EdgeDoc
 	}
 	return EdgeCode

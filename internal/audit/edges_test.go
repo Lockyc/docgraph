@@ -6,6 +6,7 @@ func TestClassifyTarget(t *testing.T) {
 	cases := map[string]EdgeKind{
 		"docs/services/a.md":         EdgeDoc,
 		"a.md#section":               EdgeDoc,
+		"docs/x.md#a:b":              EdgeDoc,
 		"scripts/x.sh":               EdgeCode,
 		"internal/audit/audit.go":    EdgeCode,
 		"https://example.com/a":      EdgeExternal,
