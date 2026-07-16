@@ -830,8 +830,10 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 		}
 	}
 	fmt.Fprintln(w, "This catches only anchored/symbol cases — for paraphrased values or reversed")
-	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing. Already reconciled, or is it")
-	fmt.Fprintln(w, "framed history? Stop again — you won't be re-prompted for this HEAD.")
+	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing: `docgraph covers <path>`")
+	fmt.Fprintln(w, "names the docs that govern a file you changed, including ones no symbol drift")
+	fmt.Fprintln(w, "points at. Already reconciled, or is it framed history? Stop again — you won't")
+	fmt.Fprintln(w, "be re-prompted for this HEAD.")
 }
 
 // runSchema prints the JSON Schema describing docgraph frontmatter, stamped with

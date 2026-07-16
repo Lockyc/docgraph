@@ -335,8 +335,17 @@ docs/" with zero config.
   mechanism (`go install`, dual-mode IN_REPO/`@latest`, seeds `~/.config/docgraph/`,
   edits no global config); `/docgraph:install` is the guided layer that wires the
   `doc-drift` Stop hook into `~/.claude/settings.json`, offers the per-repo pre-push
-  gate, and seeds the leaks config. Both single-source the module path and never
-  depend on `just`.
+  gate, seeds the leaks config, and installs the skill below. Both single-source the
+  module path and never depend on `just`.
+- `.claude/skills/docgraph/SKILL.md` — **the only thing that advertises the read-only
+  views.** The gates push themselves at an agent (a hook fires whether or not it knows
+  docgraph exists); `covers`/`index`/`stale` are pull-only, so an agent that never
+  learns of them greps instead and the views may as well not exist. The skill's
+  *description* line is the advertisement — permanently in context for the cost of one
+  line, body loaded only when a doc question actually forms. The repo copy is the
+  source of truth; `/docgraph:install` installs it to `~/.claude/skills/docgraph/`.
+  Keep it honest about empty results: a repo with no `covers:` edges legitimately
+  answers nothing, and an agent must not read that as "no doc exists".
 
 ## Branching & releases
 
@@ -367,3 +376,9 @@ agents to reach for `--no-verify`. The Go-bin fallback (guarded by a test in
 
 Anchor validity, external-URL liveness, raw `<a href>`, per-section `index.md`
 implicit-nav, repo-specific conventions. Add only with a test and a README note.
+
+Those are **non-goals**. Deferred-but-wanted work is a different list:
+[`docs/FOLLOWUPS.md`](docs/FOLLOWUPS.md) — read it before designing a change to
+the `index` view, which has a known shape limit (it emits a standalone page, so
+it cannot single-source an index section *embedded* in a hand-written doc; a
+real consumer is carrying that shadow knowingly).

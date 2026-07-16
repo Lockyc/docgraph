@@ -51,6 +51,7 @@ BIN_DIR="$(go env GOBIN 2>/dev/null)"; [ -n "$BIN_DIR" ] || BIN_DIR="$(go env GO
 [ -x "$BIN_DIR/docgraph" ] && echo "binary:present $("$BIN_DIR/docgraph" version 2>/dev/null)" || echo "binary:absent"
 grep -qs 'docgraph doc-drift' ~/.claude/settings.json && echo "stop-hook:wired" || echo "stop-hook:missing"
 [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/docgraph/leaks.toml" ] && echo "leaks:present" || echo "leaks:absent"
+[ -f ~/.claude/skills/docgraph/SKILL.md ] && echo "skill:present" || echo "skill:absent"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 && echo "cwd:git-repo" || echo "cwd:not-a-repo"
 ```
 
@@ -79,6 +80,10 @@ Mark as "Recommended" those not already detected as wired in step 3. Only offer 
   `core.hooksPath` at it, so a broken doc-graph blocks the push. (Only offer when in a repo.)
 - **Leaks config** — seeds `~/.config/docgraph/` and explains how to populate `leaks.toml`.
   (Recommended if `leaks:absent`.)
+- **`docgraph` skill** — installs the skill that teaches an agent to reach for `docgraph
+  covers <path>` when it needs the doc governing a file. Without it the gates still fire,
+  but the read-only views go unused because nothing advertises them. (Recommended if
+  `skill:absent`.)
 
 ### 6. Wire the doc-drift Stop hook (if selected)
 
@@ -121,7 +126,17 @@ file by design (a per-repo deny-list would itself be the leak). Tell the user to
 `~/.config/docgraph/leaks.toml` (schema in the README's leaks section) and that `docgraph
 leaks-rules` exports the active rules for a `git filter-repo` history scrub.
 
-### 9. Self-install this command
+### 9. Install the `docgraph` skill (if selected)
+
+```bash
+mkdir -p ~/.claude/skills/docgraph
+```
+
+Read `$REPO_DIR/.claude/skills/docgraph/SKILL.md` and write it verbatim to
+`~/.claude/skills/docgraph/SKILL.md` (overwrite — the repo copy is the source of truth).
+Report whether it was newly installed or updated.
+
+### 10. Self-install this command
 
 So `/docgraph:install` is available globally in future Claude Code sessions:
 
@@ -132,7 +147,7 @@ mkdir -p ~/.claude/commands/docgraph
 Read `$REPO_DIR/.claude/commands/docgraph/install.md` and write it verbatim to
 `~/.claude/commands/docgraph/install.md`.
 
-### 10. Summary
+### 11. Summary
 
 Print three sections:
 
@@ -141,15 +156,19 @@ Print three sections:
 - Each wired item with its target and status: doc-drift Stop hook
   (`~/.claude/settings.json` — wired / already present / skipped), pre-push gate
   (`.githooks/pre-push` — installed / skipped), leaks config (`~/.config/docgraph/` —
-  seeded / skipped).
+  seeded / skipped), `docgraph` skill (`~/.claude/skills/docgraph/` — installed /
+  updated / skipped).
 
 **Reload**
-- Restart Claude Code if the Stop hook was wired — hooks take effect on the next session.
+- Restart Claude Code if the Stop hook or the skill was wired — hooks and skills take
+  effect on the next session.
 - Ensure `<BIN_DIR>` is on your `PATH` if the installer warned about it.
 
 **Next steps**
 - Run `docgraph .` in any repo to audit its doc-graph; the pre-push gate does this
   automatically on push.
+- `docgraph covers <path>` names the doc governing a file — the skill teaches agents to
+  reach for it. It answers only in repos whose docs declare `covers:` edges.
 - Update any time by re-running `/docgraph:install` (or `go install
   github.com/lockyc/docgraph@latest`) — nothing auto-updates the binary.
 - `DOC_DRIFT_OFF=1` disables the Stop hook for a repo that doesn't use the

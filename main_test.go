@@ -676,6 +676,24 @@ func TestDocDriftSubcommandBlocksOnDrift(t *testing.T) {
 	}
 }
 
+// The drift message names each drifting doc, but a symbol scan cannot see a doc
+// that governs the changed code without naming a removed symbol. Pointing at
+// `covers` is how the sweep it asks for is actionable — and the only thing that
+// advertises the view to an agent that never trips a gate.
+func TestDocDriftMessagePointsAtCovers(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n"},
+		map[string]string{"x.go": "package x\n"},
+	)
+	var out, errb bytes.Buffer
+	if code := runDocDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb); code != 2 {
+		t.Fatalf("want exit 2, got %d", code)
+	}
+	if !bytes.Contains(errb.Bytes(), []byte("docgraph covers <path>")) {
+		t.Errorf("drift message must name `docgraph covers <path>` so the sweep it asks for is actionable, got:\n%s", errb.String())
+	}
+}
+
 func TestDocDriftSubcommandSilentWhenClean(t *testing.T) {
 	dir, base, head := commitRepoMain(t,
 		map[string]string{"CLAUDE.md": "intro\n"},
