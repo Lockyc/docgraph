@@ -401,9 +401,15 @@ orphans and frontmatter. Reaching for `--skip` is the trap — skipping is
 **repo-wide**, so the corpus's conventions also disable those checks on your
 `CLAUDE.md`/`README.md`, where they're valid. Put the corpus in
 `.docgraphignore` instead: it's path-scoped, so the gate runs bare with every
-check live on the real docs. Excluding a corpus does **not** exempt it from
-`leaks` — that scan is scoped by git tracking, so published content is still
-checked for secrets.
+check live on the real docs.
+
+`.docgraphignore` does **not** exempt a corpus from `leaks` — that scan is scoped
+by git tracking, not the doc-graph ignore layers. That's a separate decision with
+a separate lever: a knowledge base legitimately full of the hosts, paths and
+identifiers your rules match isn't leaking, it's just being itself, so silence it
+in the **leaks config** with a `[[dir]]` `ignore` for that corpus. Two ignore
+layers, two questions — "is this a doc graph?" and "should this content be leak
+scanned?" — answer them independently.
 
 A repo that doesn't use the `Footgun:` convention opts out of `footgun-drift`
 outright (it's not a check, so no `--skip` name) — `DOCGRAPH_FOOTGUN_OFF=1` or

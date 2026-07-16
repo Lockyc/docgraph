@@ -290,9 +290,15 @@ Repos fall into models the orphan check treats differently:
   is path-scoped, so the gate then runs **bare** — every check live on the actual
   documentation. Real instances: cheatsheet's whole `docs/**` (a KB served as a
   site), Locus's `database/*-seed/**`, hearth's `docs/guides/` (kb-house
-  edit-staging). **Excluding a corpus never exempts it from `leaks`** — that check
-  is scoped by git tracking, not the doc-graph ignore layers, by design: a
-  compendium of commands is exactly where a secret gets pasted.
+  edit-staging). **`.docgraphignore` never exempts a corpus from `leaks`** — that
+  check is scoped by git tracking, not the doc-graph ignore layers. That's the
+  *separate* question, with its own lever: a KB is legitimately full of the hosts,
+  paths and identifiers the rules match, and that isn't a leak — silence it with a
+  `[[dir]]` `ignore` in the **leaks config** (the single control surface; not a
+  per-repo `--skip`/`--ignore`, per the dir-scoped-exclusions footgun above). Two
+  ignore layers answering two different questions; don't conflate them.
+  **Scope caveat — a corpus that is git-*untracked* (hearth's `docs/guides/`) is
+  already outside `leaks` entirely**, since `LeakScan` walks `git ls-files`.
 
 A repo that doesn't use the `Footgun:` note convention at all opts out of
 `footgun-drift` entirely rather than passing `--skip` (it isn't a `docgraph .`
