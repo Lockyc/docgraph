@@ -277,6 +277,22 @@ Repos fall into models the orphan check treats differently:
   Run with `--skip orphans`.
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
+- **D — a knowledge base / content corpus**: tracked `.md` the repo *publishes* or
+  *feeds to something* rather than documents itself with — a personal cheatsheet
+  site, a household wiki's pages, a seed corpus, verbatim third-party clippings.
+  **Exclude it (`.docgraphignore`), do NOT `--skip` the checks it trips.** Its
+  frontmatter is often a foreign vocabulary (an Obsidian clipping's
+  `created`/`source`/`author`, a static-site generator's) that is correct but
+  isn't docgraph's, and a nav-driven corpus prose-links nothing, so it floods
+  orphans *and* frontmatter. The trap is reaching for `--skip`: skipping is
+  **repo-wide**, so a corpus's conventions silently disable those checks on
+  `CLAUDE.md`/`README.md` too, where they're valid and wanted. `.docgraphignore`
+  is path-scoped, so the gate then runs **bare** — every check live on the actual
+  documentation. Real instances: cheatsheet's whole `docs/**` (a KB served as a
+  site), Locus's `database/*-seed/**`, hearth's `docs/guides/` (kb-house
+  edit-staging). **Excluding a corpus never exempts it from `leaks`** — that check
+  is scoped by git tracking, not the doc-graph ignore layers, by design: a
+  compendium of commands is exactly where a secret gets pasted.
 
 A repo that doesn't use the `Footgun:` note convention at all opts out of
 `footgun-drift` entirely rather than passing `--skip` (it isn't a `docgraph .`

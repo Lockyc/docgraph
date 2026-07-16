@@ -392,6 +392,19 @@ their way through `docs/`), which fits most repos. Two exceptions:
 - Repos with genuinely unreferenced design docs report real orphans — link them
   from `CLAUDE.md`/`README`, or accept and `--skip orphans`.
 
+**A knowledge base is not a doc graph — exclude it, don't `--skip` it.** Tracked
+`.md` a repo *publishes* or feeds to something, rather than documents itself with
+(a cheatsheet site, a wiki's pages, a seed corpus, verbatim clippings), is
+content: it prose-links nothing and often carries a foreign frontmatter
+vocabulary (an Obsidian clipping's `created`/`source`/`author`), so it floods
+orphans and frontmatter. Reaching for `--skip` is the trap — skipping is
+**repo-wide**, so the corpus's conventions also disable those checks on your
+`CLAUDE.md`/`README.md`, where they're valid. Put the corpus in
+`.docgraphignore` instead: it's path-scoped, so the gate runs bare with every
+check live on the real docs. Excluding a corpus does **not** exempt it from
+`leaks` — that scan is scoped by git tracking, so published content is still
+checked for secrets.
+
 A repo that doesn't use the `Footgun:` convention opts out of `footgun-drift`
 outright (it's not a check, so no `--skip` name) — `DOCGRAPH_FOOTGUN_OFF=1` or
 `install-hook --no-footgun-drift`.
