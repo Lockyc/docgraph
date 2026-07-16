@@ -109,6 +109,47 @@ func TestParseFrontmatterOK(t *testing.T) {
 	}
 }
 
+func TestFirstHeading(t *testing.T) {
+	cases := map[string]string{
+		"# Title\n\nbody\n":                      "Title",
+		"\n\n#   Spaced   \nbody":                "Spaced",
+		"intro prose\n# Later\n":                 "Later",
+		"## Only H2\n":                           "",
+		"no heading at all\n":                    "",
+		"#NoSpace\n":                             "",
+		"```sh\n# not a heading\n```\n# Real\n":  "Real",
+		"~~~\n# fenced\n~~~\n":                   "",
+		"    # indented is a code block\n":       "",
+		"```sh\n# unclosed fence swallows all\n": "",
+	}
+	for body, want := range cases {
+		if got := firstHeading(body); got != want {
+			t.Errorf("firstHeading(%q) = %q, want %q", body, got, want)
+		}
+	}
+}
+
+func TestParseFrontmatterHeadingFromBody(t *testing.T) {
+	// Heading is derived from the body, never a frontmatter key — a doc must not
+	// restate its own H1.
+	d, err := ParseFrontmatter("---\ntype: guide\n---\n# Real Title\n\nbody\n")
+	if err != nil || d == nil {
+		t.Fatalf("got (%v, %v)", d, err)
+	}
+	if d.Heading != "Real Title" {
+		t.Errorf("Heading = %q, want %q", d.Heading, "Real Title")
+	}
+	// A `heading:` key in the frontmatter must not populate it (nor be rejected —
+	// unknown keys land in Extra).
+	d2, err := ParseFrontmatter("---\ntype: guide\nheading: injected\n---\n# Body Wins\n")
+	if err != nil || d2 == nil {
+		t.Fatalf("got (%v, %v)", d2, err)
+	}
+	if d2.Heading != "Body Wins" {
+		t.Errorf("Heading = %q, want the body H1 to win over a `heading:` key", d2.Heading)
+	}
+}
+
 func TestSplitFrontmatterNoClose(t *testing.T) {
 	// Opening --- with no closing --- is NOT frontmatter (a lone fence line).
 	fm, body, has := SplitFrontmatter("---\ntype: runbook\nno close here\n")

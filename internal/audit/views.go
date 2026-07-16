@@ -55,9 +55,11 @@ func CoversOf(docs map[string]*Doc, target string) []string {
 
 // IndexMarkdown renders a markdown index of the doc graph: docs grouped by type
 // (core types first in their canonical CoreTypes order, then custom types
-// alphabetically), each listed with its title (or path, if untitled) and
-// description. Only docs with frontmatter appear — they are the graph nodes.
-// Intended to be redirected into an index.md.
+// alphabetically), each listed with its label and description. The label is the
+// doc's `title` if set, else its body H1, else its path — so a doc gets a
+// readable index entry without restating its own heading in frontmatter. Only
+// docs with frontmatter appear — they are the graph nodes. Intended to be
+// redirected into an index.md.
 func IndexMarkdown(docs map[string]*Doc) string {
 	byType := map[string][]string{}
 	for src, d := range docs {
@@ -93,6 +95,9 @@ func IndexMarkdown(docs map[string]*Doc) string {
 		for _, src := range srcs {
 			d := docs[src]
 			title := d.Title
+			if strings.TrimSpace(title) == "" {
+				title = d.Heading
+			}
 			if strings.TrimSpace(title) == "" {
 				title = src
 			}

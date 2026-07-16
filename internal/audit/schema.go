@@ -27,8 +27,14 @@ func SchemaJSON(version string) []byte {
 				"type":        "string",
 				"description": "doc kind; core: " + strings.Join(CoreTypes, ", ") + " (custom allowed)",
 			},
-			"title":       map[string]any{"type": "string"},
-			"description": map[string]any{"type": "string"},
+			"title": map[string]any{
+				"type":        "string",
+				"description": "index label; omit unless it should differ from the doc's H1, which is the default",
+			},
+			"description": map[string]any{
+				"type":        "string",
+				"description": "one-line summary shown beside the doc in the generated index",
+			},
 			"tags": map[string]any{
 				"type":  "array",
 				"items": map[string]any{"type": "string"},

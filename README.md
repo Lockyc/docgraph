@@ -269,8 +269,11 @@ docgraph stale --older-than 90       # override the default 180-day threshold
   an inline markdown link. Prints nothing (exit `0`) if no doc covers it.
 - **`index`** — prints a **generated** markdown index: every doc with
   frontmatter, grouped by `type` (core types in canonical order, then custom
-  types alphabetically), each as `- [title](path) — description` (the tail is
-  omitted when a doc has no `description`). It's a view, not a hand-maintained
+  types alphabetically), each as `- [label](path) — description` (the tail is
+  omitted when a doc has no `description`). The label is the doc's `title` if
+  set, else its **body H1**, else its path — so a doc gets a readable entry
+  without restating its own heading in frontmatter; set `title` only when the
+  index label should differ from the H1. It's a view, not a hand-maintained
   page — redirect it into a tracked file (`docgraph index > docs/index.md`) and
   regenerate when the graph changes.
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is

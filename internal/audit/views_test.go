@@ -32,8 +32,9 @@ func TestCoversOf(t *testing.T) {
 func TestIndexMarkdown(t *testing.T) {
 	docs := map[string]*Doc{
 		"docs/run.md": {Type: "runbook", Title: "Restore", Description: "recover it"},
-		"docs/a.md":   {Type: "reference", Title: "API"},
-		"docs/z.md":   {Type: "reference"}, // no title → falls back to path
+		"docs/a.md":   {Type: "reference", Title: "API", Heading: "Ignored"}, // explicit title overrides the H1
+		"docs/h.md":   {Type: "reference", Heading: "From H1"},               // no title → falls back to the body H1
+		"docs/z.md":   {Type: "reference"},                                   // no title, no H1 → falls back to path
 	}
 	out := IndexMarkdown(docs)
 	// runbook is earlier than reference in CoreTypes order.
@@ -46,8 +47,14 @@ func TestIndexMarkdown(t *testing.T) {
 	if !strings.Contains(out, "[Restore](docs/run.md) — recover it") {
 		t.Errorf("runbook entry missing/incorrect:\n%s", out)
 	}
+	if !strings.Contains(out, "[API](docs/a.md)") {
+		t.Errorf("explicit title should override the body H1:\n%s", out)
+	}
+	if !strings.Contains(out, "[From H1](docs/h.md)") {
+		t.Errorf("titleless doc should fall back to its body H1:\n%s", out)
+	}
 	if !strings.Contains(out, "[docs/z.md](docs/z.md)") {
-		t.Errorf("titleless doc should fall back to its path:\n%s", out)
+		t.Errorf("doc with neither title nor H1 should fall back to its path:\n%s", out)
 	}
 }
 
