@@ -277,28 +277,40 @@ Repos fall into models the orphan check treats differently:
   Run with `--skip orphans`.
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
   makes these reachable; genuine orphans that remain are real gaps worth linking.
-- **D — a knowledge base / content corpus**: tracked `.md` the repo *publishes* or
-  *feeds to something* rather than documents itself with — a personal cheatsheet
-  site, a household wiki's pages, a seed corpus, verbatim third-party clippings.
-  **Exclude it (`.docgraphignore`), do NOT `--skip` the checks it trips.** Its
-  frontmatter is often a foreign vocabulary (an Obsidian clipping's
-  `created`/`source`/`author`, a static-site generator's) that is correct but
-  isn't docgraph's, and a nav-driven corpus prose-links nothing, so it floods
-  orphans *and* frontmatter. The trap is reaching for `--skip`: skipping is
-  **repo-wide**, so a corpus's conventions silently disable those checks on
-  `CLAUDE.md`/`README.md` too, where they're valid and wanted. `.docgraphignore`
-  is path-scoped, so the gate then runs **bare** — every check live on the actual
-  documentation. Real instances: cheatsheet's whole `docs/**` (a KB served as a
-  site), Locus's `database/*-seed/**`, hearth's `docs/guides/` (kb-house
-  edit-staging). **`.docgraphignore` never exempts a corpus from `leaks`** — that
-  check is scoped by git tracking, not the doc-graph ignore layers. That's the
-  *separate* question, with its own lever: a KB is legitimately full of the hosts,
-  paths and identifiers the rules match, and that isn't a leak — silence it with a
-  `[[dir]]` `ignore` in the **leaks config** (the single control surface; not a
-  per-repo `--skip`/`--ignore`, per the dir-scoped-exclusions footgun above). Two
-  ignore layers answering two different questions; don't conflate them.
-  **Scope caveat — a corpus that is git-*untracked* (hearth's `docs/guides/`) is
-  already outside `leaks` entirely**, since `LeakScan` walks `git ls-files`.
+- **D — a content corpus** (a cheatsheet section, a wiki's pages, seed data,
+  verbatim third-party clippings): tracked `.md` the repo *publishes* or *feeds to
+  something* rather than documents itself with. The deciding question is **not**
+  "is this a knowledge base?" — it's **"is this corpus mine to conform?"**
+  - **Hand-curated → CONFORM it, don't exclude it.** Give each page a `type:` and
+    give the corpus a hand-maintained prose-link **index page** for reachability.
+    That's it — no `.docgraphignore`, no `--skip`. A foreign vocabulary is not an
+    obstacle: `Doc.Extra` (`yaml:",inline"`) exists so domain keys ride along, so
+    an Obsidian clipping keeps `created`/`source`/`author` and merely gains
+    `type: reference`. Reference instance: homelab's `docs/cheatsheet/**` (22
+    clippings folded in 2026-07-17) — gate bare, all six checks, clean. The corpus
+    becomes a first-class graph citizen instead of a blind spot, which is the
+    better outcome: excluding it means `broken`/`untracked` stop covering it too.
+  - **Derived / never-hand-edited → exclude** (`.docgraphignore`). Conforming is
+    not available: the generator would drop any `type:` you added on the next
+    regen, so the edit can't survive. Reference instance: Locus's
+    `database/*-seed/**` (a regenerated export read as source material).
+  - **`--skip` is wrong for both** — it's **repo-wide**, so a corpus's conventions
+    silently disable those checks on `CLAUDE.md`/`README.md` too, where they're
+    valid and wanted. Prefer conform; fall back to the path-scoped ignore.
+  - **Footgun — "it floods orphans and frontmatter" is a reason to look, not to
+    exclude.** Both floods have a cheap fix (an index page; a `type:` line), and
+    reaching for the ignore because the numbers are big buys a quiet gate at the
+    cost of never checking that content again. docgraph itself made this mistake
+    in this section's first draft.
+
+  **Leaks is a separate layer, and `.docgraphignore` never touches it** —
+  `LeakScan` is scoped by git tracking, not the doc-graph ignore layers. A corpus
+  legitimately full of the hosts, paths and identifiers the rules match is not
+  leaking; that decision belongs in the **leaks config** as a `[[dir]]` `ignore`
+  (its single control surface — not a per-repo `--skip`/`--ignore`, per the
+  dir-scoped-exclusions footgun above). Two layers, two questions; don't conflate
+  them. Scope caveat: a git-*untracked* corpus is already outside `leaks`
+  entirely, since `LeakScan` walks `git ls-files`.
 
 A repo that doesn't use the `Footgun:` note convention at all opts out of
 `footgun-drift` entirely rather than passing `--skip` (it isn't a `docgraph .`

@@ -392,16 +392,23 @@ their way through `docs/`), which fits most repos. Two exceptions:
 - Repos with genuinely unreferenced design docs report real orphans — link them
   from `CLAUDE.md`/`README`, or accept and `--skip orphans`.
 
-**A knowledge base is not a doc graph — exclude it, don't `--skip` it.** Tracked
-`.md` a repo *publishes* or feeds to something, rather than documents itself with
-(a cheatsheet site, a wiki's pages, a seed corpus, verbatim clippings), is
-content: it prose-links nothing and often carries a foreign frontmatter
-vocabulary (an Obsidian clipping's `created`/`source`/`author`), so it floods
-orphans and frontmatter. Reaching for `--skip` is the trap — skipping is
-**repo-wide**, so the corpus's conventions also disable those checks on your
-`CLAUDE.md`/`README.md`, where they're valid. Put the corpus in
-`.docgraphignore` instead: it's path-scoped, so the gate runs bare with every
-check live on the real docs.
+**A content corpus — a cheatsheet section, a wiki's pages, a seed export,
+verbatim clippings — asks one question: is it yours to conform?**
+
+- **Hand-curated → conform it.** Give each page a `type:` and the corpus one
+  hand-maintained prose-link index page for reachability. No `.docgraphignore`,
+  no `--skip`. A foreign frontmatter vocabulary is no obstacle — unknown keys ride
+  along untouched, so an Obsidian clipping keeps `created`/`source`/`author` and
+  just gains `type: reference`. The corpus becomes a real graph node, and
+  `broken`/`untracked` keep covering it.
+- **Derived / never hand-edited → exclude it** with `.docgraphignore`, because a
+  regen would drop any `type:` you added, so conforming can't stick.
+- **`--skip` is wrong either way** — it's repo-wide, so a corpus's conventions
+  also disable those checks on your `CLAUDE.md`/`README.md`, where they're valid.
+
+A flood of orphans or frontmatter findings is a reason to look, not to exclude:
+each has a cheap fix (an index page; a `type:` line), and excluding buys a quiet
+gate by never checking that content again.
 
 `.docgraphignore` does **not** exempt a corpus from `leaks` — that scan is scoped
 by git tracking, not the doc-graph ignore layers. That's a separate decision with
