@@ -812,6 +812,13 @@ func TestHookScriptInvokesCoversDrift(t *testing.T) {
 	if !strings.Contains(s, "covers-drift") {
 		t.Fatalf("generated hook must invoke covers-drift:\n%s", s)
 	}
+	// covers-drift is advisory on the same terms as footgun-drift: its hook line
+	// must never abort the push. The Go-side exit-0 tests can't catch this — the
+	// breakage would be in the generated shell, where `set -euo pipefail` turns an
+	// exit-2 tool error into a blocked push the moment `|| true` goes missing.
+	if !strings.Contains(s, `covers-drift . || true`) {
+		t.Fatalf("covers-drift hook line must be advisory (|| true), never blocking:\n%s", s)
+	}
 	off := hookScript("", nil, false, true)
 	if strings.Contains(off, "covers-drift") {
 		t.Fatalf("--no-covers-drift must omit it:\n%s", off)

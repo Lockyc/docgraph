@@ -13,6 +13,7 @@ func TestCoversOf(t *testing.T) {
 		"docs/dir.md":   {Links: []Edge{{Rel: "covers", To: "src/auth/"}}}, // covers a directory
 		"docs/other.md": {Links: []Edge{{Rel: "covers", To: "src/db/x.go"}}},
 		"docs/ref.md":   {Links: []Edge{{Rel: "see-also", To: "src/auth/login.go"}}}, // not a covers edge
+		"docs/near.md":  {Links: []Edge{{Rel: "covers", To: "src/au"}}},              // a path PREFIX of src/auth, not a parent dir
 	}
 	// A file covered directly by auth.md and by-directory by dir.md.
 	got := CoversOf(docs, "src/auth/login.go")
@@ -26,6 +27,16 @@ func TestCoversOf(t *testing.T) {
 	// Nothing covers this.
 	if got := CoversOf(docs, "src/nope.go"); len(got) != 0 {
 		t.Errorf("CoversOf(nope) = %v, want empty", got)
+	}
+	// A covers target that is a string prefix of the file's path but NOT a parent
+	// directory of it must not match: "src/au" does not cover "src/auth/login.go".
+	// Directory containment is a path-segment relationship, which is what the "/"
+	// in the prefix test enforces — drop it and near.md claims every path under a
+	// sibling whose name merely starts the same way, nagging on unrelated docs.
+	for _, src := range CoversOf(docs, "src/auth/login.go") {
+		if src == "docs/near.md" {
+			t.Error("CoversOf matched a bare string prefix (src/au) as a covering directory of src/auth/login.go")
+		}
 	}
 }
 
@@ -79,6 +90,10 @@ func TestStaleDocs(t *testing.T) {
 		"tight.md":    {Verified: "2026-06-01", Review: "7d"}, // ~44d old, over its own 7d
 		"noverify.md": {Type: "runbook"},                      // no verified → skipped
 		"baddate.md":  {Verified: "not-a-date"},               // unparseable → skipped
+		// An unparseable `review` (a unit-less "90" is the plausible typo) falls back
+		// to the caller's default, NOT to a zero threshold — zero would report every
+		// verified doc stale, turning one typo into a repo-wide false flood.
+		"badreview.md": {Verified: "2026-07-01", Review: "90"}, // 14d old, under the 180d default
 	}
 	got := StaleDocs(docs, now, 180)
 	files := map[string]bool{}
@@ -90,5 +105,8 @@ func TestStaleDocs(t *testing.T) {
 	}
 	if files["fresh.md"] || files["noverify.md"] || files["baddate.md"] {
 		t.Errorf("stale wrongly includes a fresh/unverified/bad-date doc: %+v", got)
+	}
+	if files["badreview.md"] {
+		t.Errorf("an unparseable `review` must fall back to the default threshold, not zero: %+v", got)
 	}
 }

@@ -102,6 +102,65 @@ func TestChangedCodeExcludesProse(t *testing.T) {
 	}
 }
 
+func TestClosestBasePicksTheNearestCandidate(t *testing.T) {
+	// Two integration branches at different distances from head: main is 2 commits
+	// back, dev is 1. ClosestBase must arbitrate on fewest-commits and pick dev —
+	// picking the further base widens the range, so the diff-scoped riders would
+	// nag about code the push never touched.
+	dir := setupRepo(t, map[string]string{"CLAUDE.md": "a\n"}, []string{"CLAUDE.md"})
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
+	commit := func(msg string) string {
+		git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", msg)
+		return trim(git("rev-parse", "HEAD"))
+	}
+	commit("base")
+	git("branch", "-M", "main")
+
+	git("checkout", "-b", "dev")
+	writeFile(t, dir, "CLAUDE.md", "a\nb\n")
+	git("add", "CLAUDE.md")
+	devSHA := commit("dev work")
+
+	git("checkout", "-b", "feature")
+	writeFile(t, dir, "CLAUDE.md", "a\nb\nc\n")
+	git("add", "CLAUDE.md")
+	commit("feature work")
+
+	got, ok := ClosestBase(dir, "feature")
+	if !ok || got != devSHA {
+		t.Fatalf("want the nearer base dev=%s, got %q ok=%v", devSHA, got, ok)
+	}
+}
+
+func TestChangedCodeExcludesEveryProseExtension(t *testing.T) {
+	// nonCodePathspec is shared by changedCode, gitDiff and stillDefinedInCode, so
+	// each excluded extension must be pinned once here for all three. An extension
+	// silently dropped from the set makes prose count as code: a covers-drift nag
+	// fires on a docs-only push.
+	prose := []string{"a.md", "a.mdx", "a.txt", "a.rst", "a.adoc", "a.markdown"}
+	base := map[string]string{"keep.go": "package a\n"}
+	head := map[string]string{"keep.go": "package a\n\nfunc New() {}\n"}
+	for _, p := range prose {
+		base[p] = "before\n"
+		head[p] = "after\n"
+	}
+	dir, baseSHA, headSHA := commitRepo(t, base, head)
+
+	got, err := changedCode(dir, baseSHA+".."+headSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"keep.go"}) {
+		t.Fatalf("changedCode = %v, want only [keep.go] — every prose extension must be excluded", got)
+	}
+}
+
 func TestClosestBaseFailsOpenWithNoIntegrationBranch(t *testing.T) {
 	// No main/master/dev/develop/trunk branch exists → ClosestBase can resolve no
 	// range and fails OPEN (the caller then runs no footgun-drift check).
