@@ -79,15 +79,25 @@ leave it out.
 
 ## Rolling edges out across a repo
 
-**First ask whether it pays at all.** `covers` earns its keep only where an agent
-*cannot hold all the docs at once*. A repo whose documentation is just its
-auto-loaded roots (`CLAUDE.md`, `README.md`) gains nothing — the answer is
-already in context before the question forms. Don't declare edges there; it's
-ceremony. The test is the number of **non-root** docs, not total docs.
+**What an edge buys scales with the repo, but it is never nothing.**
 
-**Roots themselves get no frontmatter** (the convention in every repo that has
-adopted this). They're always-loaded entry points; a `type:` on them buys nothing
-and puts an index entry where no one needs one.
+- **Many docs** → `covers` answers *which of the N*, which is the question an
+  agent genuinely can't answer by reading. This is where a rollout pays most.
+- **Few docs, or only the auto-loaded roots** → "which doc" is obvious, but the
+  edge still buys two things the auto-load doesn't: it's **gate-checked**, so a
+  moved or renamed path breaks the push instead of rotting silently; and a
+  `note:` on the edge pins *what that doc holds about this path*, which having
+  the doc in context does not tell you.
+
+**Roots may carry frontmatter and edges** — docgraph's own `CLAUDE.md` covers
+`internal/audit` and `main.go` (each with a `note:`), and its `README.md` covers
+`install.sh`. Some repos (homelab, ops) leave their roots bare instead. Both are
+fine: it's a per-repo choice, not a rule — don't "fix" either shape into the
+other.
+
+Use `note:` when the edge isn't self-explaining. It's the field that survives the
+reader already having the doc: `note: CLI surface, exit contracts, hook wiring`
+says which slice of a long doc governs the path.
 
 **Derive the edges from what the docs already assert — do not guess.** Repos
 encode ownership in prose long before anyone declares it: a hand-maintained
