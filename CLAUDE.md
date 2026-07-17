@@ -434,8 +434,13 @@ docs/" with zero config.
   mechanism (`go install`, dual-mode IN_REPO/`@latest`, seeds `~/.config/docgraph/`,
   edits no global config); `/docgraph:install` is the guided layer that wires the
   `doc-drift` Stop hook into `~/.claude/settings.json`, offers the per-repo pre-push
-  gate, seeds the leaks config, and installs the skill below. Both single-source the
-  module path and never depend on `just`.
+  gate, seeds the leaks config, and installs the skill below. Neither depends on `just`,
+  and both declare the module path once, in a `MODULE` var, rather than inline — so the
+  `MODULE` lines are `/vN` sites a major bump must move along with every other
+  `@latest` site (see the major-bump footgun). `/docgraph:install`'s copy is the one
+  that already rotted: it inlined the *bare* path, which matches no `go.mod` at major
+  ≥2, so the detect step reported `NOT_IN_REPO` from inside the checkout — and this
+  sentence claiming otherwise is what kept the `/v2` sweep from looking there.
 - `.claude/skills/docgraph/SKILL.md` — **the only thing that advertises the read-only
   views.** The gates push themselves at an agent (a hook fires whether or not it knows
   docgraph exists); `covers`/`index`/`stale` are pull-only, so an agent that never

@@ -18,8 +18,15 @@ Stop hook, a repo's pre-push gate, and the leaks config dir.
 Check whether the current working directory is the docgraph repo:
 
 ```bash
-[ -f install.sh ] && [ -f main.go ] && grep -q '^module github.com/lockyc/docgraph$' go.mod 2>/dev/null && echo "IN_REPO" || echo "NOT_IN_REPO"
+MODULE="github.com/lockyc/docgraph/v2"
+[ -f install.sh ] && [ -f main.go ] && grep -q "^module $MODULE\$" go.mod 2>/dev/null && echo "IN_REPO" || echo "NOT_IN_REPO"
 ```
+
+`MODULE` is the `go.mod` module line verbatim, `/v2` included — the same shape
+`install.sh` uses. The suffix is load-bearing here too: an anchored grep for the
+bare path matches no `go.mod` at major ≥2, so this step would report
+`NOT_IN_REPO` from inside the checkout and clone needlessly. A major bump moves
+it in lockstep with every other `@latest` site.
 
 **If in repo:** set `REPO_DIR` to the current working directory.
 **If not in repo:** clone into a temp dir and set `REPO_DIR` to it:
