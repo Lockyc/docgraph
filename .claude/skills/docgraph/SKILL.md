@@ -84,16 +84,27 @@ leave it out.
 - **Many docs** → `covers` answers *which of the N*, which is the question an
   agent genuinely can't answer by reading. This is where a rollout pays most.
 - **Few docs, or only the auto-loaded roots** → "which doc" is obvious, but the
-  edge still buys two things the auto-load doesn't: it's **gate-checked**, so a
-  moved or renamed path breaks the push instead of rotting silently; and a
-  `note:` on the edge pins *what that doc holds about this path*, which having
-  the doc in context does not tell you.
+  edge still buys three things the auto-load doesn't: it's **gate-checked**, so a
+  moved or renamed path breaks the push instead of rotting silently; a `note:` on
+  the edge pins *what that doc holds about this path*, which having the doc in
+  context does not tell you; and it arms `covers-drift` (below).
+
+**An edge buys reconciliation pressure, not just a query.** `docgraph covers-drift`
+is an advisory pre-push rider: when a push changes code a doc declares it `covers`
+and that doc is untouched, it names the doc and exits 0 — a nag, never a block.
+Editing the doc silences it. So a declared edge surfaces the doc at exactly the
+moment it might have gone stale; a repo with no `covers` edges never sees it.
 
 **Roots may carry frontmatter and edges** — docgraph's own `CLAUDE.md` covers
-`internal/audit` and `main.go` (each with a `note:`), and its `README.md` covers
-`install.sh`. Some repos (homelab, ops) leave their roots bare instead. Both are
-fine: it's a per-repo choice, not a rule — don't "fix" either shape into the
-other.
+`internal/audit` and `main.go`, each with a `note:`. Some repos (homelab, ops)
+leave their roots bare instead. Both are fine: it's a per-repo choice, not a rule
+— don't "fix" either shape into the other.
+
+**But prefer `CLAUDE.md` and `docs/` over `README.md`.** GitHub renders a leading
+YAML frontmatter block as a metadata table above the page content, so a
+frontmattered `README.md` greets every visitor with a table of `type` and `links`
+rows. Frontmatter is agent-facing and the README is the human's front door.
+docgraph itself follows this: its README carries no frontmatter at all.
 
 Use `note:` when the edge isn't self-explaining. It's the field that survives the
 reader already having the doc: `note: CLI surface, exit contracts, hook wiring`

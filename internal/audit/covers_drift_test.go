@@ -146,20 +146,27 @@ func TestCoversDriftGroupsPathsUnderOneDoc(t *testing.T) {
 	}
 }
 
-// TestCoversDriftSortsByDoc pins the sort.Slice by Doc in CoversDrift. Go map
-// iteration is randomized, so a two-doc version of this test passes ~50% of
-// the time even with the sort deleted — not a reliable detector of the thing
-// it exists to pin. Four docs whose insertion order (zeta, mid, beta, alpha)
-// cannot accidentally land in sorted order make an unsorted result fail
-// reliably: the odds of 4 random permutations independently matching sorted
-// order are 1/24, and this test is run with -count=20 to confirm.
+// TestCoversDriftSortsByDoc pins the sort.Slice by Doc in CoversDrift.
+//
+// Making this a RELIABLE detector takes care. CoversDrift builds byDoc by
+// iterating changedCode's output, which git already emits lexicographically —
+// so if each doc covered its same-named file, docs would be INSERTED in sorted
+// order and the map would often iterate out already-sorted, passing with the
+// sort deleted. Go's iteration over a single-bucket map is a random ROTATION of
+// insertion order, not a uniform permutation, so extra docs alone don't fix it.
+//
+// The fix is the covers mapping below: it is deliberately INVERTED (zeta→a.go,
+// mid→b.go, beta→m.go, alpha→z.go) so the sorted code paths a,b,m,z insert the
+// docs in reverse-sorted order (zeta, mid, beta, alpha). No rotation of a
+// reverse-sorted list is ever sorted, so deleting the sort fails this test every
+// run. Keep the inversion — "tidying" it into matching names silently defeats it.
 func TestCoversDriftSortsByDoc(t *testing.T) {
 	dir, base, head := commitRepo(t,
 		map[string]string{
-			"docs/zeta.md":  "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/z.go\n---\n\n# Z\n",
-			"docs/mid.md":   "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/m.go\n---\n\n# M\n",
-			"docs/beta.md":  "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/b.go\n---\n\n# B\n",
-			"docs/alpha.md": "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/a.go\n---\n\n# A\n",
+			"docs/zeta.md":  "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/a.go\n---\n\n# Z\n",
+			"docs/mid.md":   "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/b.go\n---\n\n# M\n",
+			"docs/beta.md":  "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/m.go\n---\n\n# B\n",
+			"docs/alpha.md": "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/z.go\n---\n\n# A\n",
 			"src/z.go":      "package s\n",
 			"src/m.go":      "package s\n",
 			"src/b.go":      "package s\n",
@@ -177,10 +184,10 @@ func TestCoversDriftSortsByDoc(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []CoversFinding{
-		{Doc: "docs/alpha.md", Paths: []string{"src/a.go"}},
-		{Doc: "docs/beta.md", Paths: []string{"src/b.go"}},
-		{Doc: "docs/mid.md", Paths: []string{"src/m.go"}},
-		{Doc: "docs/zeta.md", Paths: []string{"src/z.go"}},
+		{Doc: "docs/alpha.md", Paths: []string{"src/z.go"}},
+		{Doc: "docs/beta.md", Paths: []string{"src/m.go"}},
+		{Doc: "docs/mid.md", Paths: []string{"src/b.go"}},
+		{Doc: "docs/zeta.md", Paths: []string{"src/a.go"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("findings must be sorted by Doc: got %+v, want %+v", got, want)
