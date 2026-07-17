@@ -29,12 +29,20 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   flags *every* footgun declaration added in the pushed range (no rationale
   judgment, never re-scans the existing corpus) and **exits 0** — a nag to
   double-check the declaration, never a block.
-- **`docgraph doc-drift`** — a **Stop-hook, blocking** subcommand: scans the
-  branch's working-tree-inclusive diff (base→worktree, committed + uncommitted)
-  for two mechanical staleness classes — a **dangling reference** (a symbol whose
+- **`docgraph doc-drift`** — a **Stop-hook, sometimes-blocking** subcommand: it
+  scans the branch's working-tree-inclusive diff (base→worktree, committed +
+  uncommitted) and carries two classes of finding with two different contracts.
+  The **blocking** pair are mechanical — a **dangling reference** (a symbol whose
   definition was removed but a tracked doc still names it) and **anchored value
   drift** (a constant whose numeric value changed while a doc still names the
-  symbol and shows the old literal) — and **exits 2** to block the Stop.
+  symbol and shows the old literal); either **exits 2** to block the Stop. Riding
+  alongside is the **advisory covers rider** (`audit.CoversDrift`): a doc
+  declaring a frontmatter `covers` edge onto code the change set modified, while
+  the doc itself went untouched. It judges nothing — it cannot know whether the
+  doc needed reconciling — so it **exits 0** and reports through Stop-hook JSON
+  `hookSpecificOutput.additionalContext` (the JSON shape is load-bearing; see its
+  footgun). Editing the doc is the escape hatch; a repo with no `covers` edges
+  never sees it.
 - **`docgraph schema`** — read-only, no repo state read at all: emits the JSON
   Schema (draft 2020-12) describing the frontmatter vocabulary that
   `frontmatter`/`edges` enforce, so another consumer (an editor, a catalog
@@ -72,7 +80,9 @@ Separately, `docgraph doc-drift` is meant to be wired as a **Stop hook** by the
 agent harness (e.g. a Claude Code `Stop` hook entry that runs `docgraph
 doc-drift`): it fires at the end of a turn, not at push time, so a dangling
 reference or stale anchored value is caught and blocked before the agent hands
-control back — see [`doc-drift`](README.md#docgraph-doc-drift) in `README.md`.
+control back, and a doc that *covers* the changed code is surfaced to the agent
+advisorily in the same run — see [`doc-drift`](README.md#docgraph-doc-drift) in
+`README.md`.
 
 ## What it is (and is not)
 
@@ -89,8 +99,10 @@ control back — see [`doc-drift`](README.md#docgraph-doc-drift) in `README.md`.
   `footgun-drift` scans added markdown lines (like `leaks`, but diff-scoped);
   `doc-drift` diffs tracked **code** (removed definitions, changed constants) and
   greps the *docs* for stale references to what changed — the one check that
-  compares two different file types. The six `docgraph .` checks have no range
-  concept; the intro maps each mode's trigger and range.
+  compares two different file types. Its covers rider is the same join done
+  through the graph instead of a grep: `changedCode` against the `covers` edges
+  in the parsed doc set. The six `docgraph .` checks have no range concept; the
+  intro maps each mode's trigger and range.
 
 ## Frontmatter model
 
@@ -212,7 +224,9 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   self-referential annotations, silently un-nagging whatever it's placed on. A
   flagged `footgun-drift`/`doc-drift` reference is a situation-based judgment call
   — reconcile the doc, or confirm it's intentional framed history and move on —
-  de-duped only by doc-drift's once-per-HEAD loop-guard.
+  de-duped only by doc-drift's per-class once-per-HEAD loop-guards. The covers
+  rider needs no suppression surface at all: it only fires on a doc the change
+  set left untouched, so editing that doc *is* the escape hatch.
 - **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
   (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
   in docs (e.g. a `[docs](services/name.md)` template row) don't register as real
@@ -277,6 +291,16 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   as undocumented as one in `CLAUDE.md`, so narrowing to the doc-graph roots
   would blind the check to exactly the files most likely to accumulate
   footgun notes over time. Do not apply `defaultIgnores` or `.docgraphignore` here.
+- **A Stop hook's plain stdout is invisible to the agent — the covers rider MUST
+  use JSON `additionalContext`.** Exit-0 stdout from a Stop hook reaches only the
+  user's transcript; the model never sees it. Of the Stop-hook output fields only
+  `additionalContext` (a system reminder) and exit-2 stderr reach the model —
+  `systemMessage` and `decision`/`reason` do not. So `emitStopJSON` is the one
+  shape that is advisory *and* agent-visible, and "simplifying" it to a bare
+  `Fprintln` would silently make the whole advisory class a no-op that still looks
+  like it works locally. The two guard markers are load-bearing for the same
+  class of reason: sharing one would let an advisory nag consume the marker and
+  silently suppress a *blocking* finding at the same HEAD.
 
 ## Doc models (why `--skip` exists)
 
@@ -344,9 +368,16 @@ docs/" with zero config.
   whole-state checks), `runFootgunDrift(args, stdout, stderr) int` (the
   diff-scoped pre-push subcommand), `runDocDrift(args, stdin, stdout, stderr)
   int` (the Stop-hook subcommand — checks `DOC_DRIFT_OFF`, resolves the diff
-  spec via `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints
-  via `printDocDrift` and returns 2, gated on bare invocation by
-  `docDriftGuardOK`'s once-per-HEAD marker under `docDriftStateDir()`),
+  spec via `docDriftDiffBase`, then runs both classes: `audit.DocDrift` for the
+  blocking pair, and `audit.RepoDocs` + `audit.CoversDrift` for the advisory
+  rider. On a blocking finding it prints via `printDocDrift` to stderr — with
+  `printCoversDrift` appended if the rider also fired — and returns 2; on a
+  covers-only finding it returns 0, emitting `coversDriftMessage` through
+  `emitStopJSON` in bare mode and as plain text via `printCoversDrift` under
+  `--range`. Each class is gated independently on bare invocation by
+  `driftGuardOK(root, class)`'s once-per-HEAD marker under
+  `driftStateDir(class)`; a tool error from any of the three audit calls is not
+  a finding — stderr, exit 2),
   `runCovers`/`runIndex`/`runStale` (the read-only views — each resolves the
   repo root, calls `audit.RepoDocs`, and prints; always `return 0`), report
   format, `maybeLog` (opt-in usage logging side-channel).
@@ -354,8 +385,11 @@ docs/" with zero config.
   three views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
-  `addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go` and
-  `doc_drift.go` use to read a range instead of a tree snapshot), `leaks.go`
+  `changedCode`/`addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go`,
+  `doc_drift.go` and `covers_drift.go` use to read a range instead of a tree
+  snapshot; `changedCode` shares `nonCodePathspec` with `gitDiff`/
+  `stillDefinedInCode` so every code-side scan agrees on what "code" is),
+  `leaks.go`
   (TOML config decode + dir-scoped content scan), `footguns.go` (the
   declaration scanner — `scanDeclarations`/`isFootgunDeclaration`; a
   *declaration* is a footgun being introduced, not a passing mention of one,
@@ -367,8 +401,12 @@ docs/" with zero config.
   `stillDefinedInCode`, `docGrepSymbol`, `docGrepValue`: diffs `gitDiff(root,
   spec)`, finds removed-and-not-readded definitions and changed numeric
   constants, then greps tracked docs for a lingering reference to either),
+  `covers_drift.go` (`CoversDrift` + `CoversFinding`: joins `changedCode`
+  against the `covers` edges of an already-parsed doc set — `RepoDocs` — via
+  `CoversOf`, dropping any doc `changedMarkdown` says the change set also
+  touched),
   `audit.go` (`Audit` → `Report`, the whole-state orchestrator; unrelated to
-  `FootgunDrift`/`DocDrift`), `usage.go` (usage-log config + tiered
+  `FootgunDrift`/`DocDrift`/`CoversDrift`), `usage.go` (usage-log config + tiered
   `BuildRecord` + best-effort `LogRun`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.

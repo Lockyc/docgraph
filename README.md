@@ -31,7 +31,7 @@ docgraph has three independent modes, each with its own trigger and scope:
 | --- | --- | --- | --- | --- |
 | **Whole-state checks** | `docgraph [path]` | the current tree | pre-push / CI | **yes** — exit 1 on any finding |
 | **`footgun-drift`** | `docgraph footgun-drift` | what a push *adds* | pre-push (advisory rider) | no — nags, always exit 0 |
-| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **yes** — exit 2 on a finding |
+| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **on the mechanical classes** — exit 2; its advisory covers rider exits 0 |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
 vocabulary), and the doc-graph **views** `covers` / `index` / `stale`.
@@ -84,6 +84,15 @@ vocabularies (as `x-docgraph-core-types` / `x-docgraph-core-rels`). Another tool
 (an editor, a catalog builder) validates against the same rules docgraph uses
 instead of re-encoding them. **Read-only** — never reads the repo, never part of
 the gate.
+
+**Where to put frontmatter.** Prefer `CLAUDE.md` and `docs/` pages over
+`README.md`: GitHub renders a leading YAML frontmatter block as a metadata table
+above the page content, so a `README.md` with frontmatter greets every visitor
+with a table of `type` and `links` rows. Frontmatter is agent-facing metadata and
+the README is the human's front door — the two don't want the same file. docgraph
+itself follows this: `CLAUDE.md` carries the `covers` edges onto its code, this
+README carries no frontmatter at all. Nothing enforces it — a frontmattered
+README is valid, it just renders that way.
 
 ### `leaks` — the content scan
 
@@ -202,14 +211,14 @@ hook that never invokes it. There is no in-file suppression marker.
 ## `docgraph doc-drift` — the Stop-hook staleness gate
 
 Wire `doc-drift` into your agent harness's `Stop` hook (invoked directly, no
-wrapper) so it runs at the end of every turn and **blocks** the turn from ending
-while a tracked doc still describes code that just changed underneath it.
+wrapper) so it runs at the end of every turn, while a tracked doc still describes
+code that just changed underneath it.
 
 It scans a **working-tree-inclusive** range — base→worktree, covering committed
 *and* uncommitted changes, because it fires before a commit necessarily exists.
 On a trunk branch the base is `HEAD` (uncommitted-only); on a feature branch it's
 the closest integration branch's merge-base (the whole branch so far). It flags
-two mechanical staleness classes:
+two mechanical staleness classes, and both **block** the turn from ending:
 
 1. **Dangling reference** — a symbol whose *definition* was removed in the diff
    and survives nowhere else in tracked code, but a tracked doc still names it.
@@ -224,14 +233,38 @@ docgraph doc-drift --range base..head     # explicit range — bypasses the loop
 Bare invocation applies a **once-per-HEAD loop-guard**: after it nags for a given
 `HEAD`, a repeat at the same `HEAD` is silent, so an agent that keeps ending its
 turn without acting isn't nagged every Stop. The next commit moves `HEAD` and
-re-arms it. This de-dupes the *nag*, it doesn't suppress the *finding*.
+re-arms it. This de-dupes the *nag*, it doesn't suppress the *finding*. The
+blocking classes and the advisory covers rider below guard **independently**, so
+an advisory nag can never silence a block at the same `HEAD`.
 
-A `doc-drift` finding **blocks** — prints to **stderr**, exits **2**.
-`DOC_DRIFT_OFF=1` disables it outright, for a repo that doesn't use the
-anchored-symbol-and-value convention it relies on. There is no other suppression
-surface (no `.docgraphignore`, no per-finding flag, no inline marker): a flagged
-reference is a judgment call — reconcile the doc, or confirm it's intentional
-framed history.
+A finding in either mechanical class **blocks** — prints to **stderr**, exits
+**2**. `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
+doesn't use the anchored-symbol-and-value convention it relies on. There is no
+other suppression surface (no `.docgraphignore`, no per-finding flag, no inline
+marker): a flagged reference is a judgment call — reconcile the doc, or confirm
+it's intentional framed history.
+
+### The advisory covers rider
+
+The same run also reports **covers drift**: a doc that declares a frontmatter
+`covers` edge onto code the change set modified, while the doc itself went
+untouched. It's the graph join the two mechanical classes can't do — a rewritten
+function whose doc describes the old behaviour in prose leaves no removed symbol
+and no changed literal to grep for, but a `covers` edge already declares that doc
+the architecture of record for the code.
+
+It **never blocks**. It can't judge whether the doc actually needed reconciling,
+so it exits `0` and merely surfaces the pairing. Bare (Stop-hook) mode reports it
+as JSON on stdout — `hookSpecificOutput.additionalContext`, the one exit-0
+channel a Stop hook has that reaches the agent rather than only the user's
+transcript. Under `--range` it prints as plain text instead. When a *blocking*
+finding is also present, the rider's text rides along on the stderr message and
+the exit stays `2` on the blocking class's account.
+
+Editing the doc is the escape hatch, so there's nothing to suppress: a doc the
+change set touched never fires. A repo with no `covers` edges never sees the
+rider at all. Like the mechanical classes it is de-duped once per `HEAD`, on its
+own independent marker.
 
 Scope limits worth knowing:
 
@@ -266,7 +299,10 @@ docgraph stale --older-than 90       # override the default 180-day threshold
   frontmatter `covers` edge, directly or by covering a parent directory
   (`covers: src/auth/` covers `src/auth/login.go`). `<path>` is
   **repo-root-relative** — frontmatter edges resolve against the repo root, unlike
-  an inline markdown link. Prints nothing (exit `0`) if no doc covers it.
+  an inline markdown link. Prints nothing (exit `0`) if no doc covers it. The same
+  `covers` edges feed
+  [`doc-drift`'s advisory rider](#the-advisory-covers-rider), so declaring one
+  both answers this query and gets the doc surfaced when its code changes.
 - **`index`** — prints a **generated** markdown index: every doc with
   frontmatter, grouped by `type` (core types in canonical order, then custom
   types alphabetically), each as `- [label](path) — description` (the tail is
@@ -346,9 +382,12 @@ docgraph version                    # print version (also --version, -v)
 
 **Exit codes.** `docgraph [path]`: `0` clean · `1` findings · `2` usage / not a
 git repo / malformed leak config. `footgun-drift` is advisory: `0` regardless of
-findings, `2` only on a git/usage error. `doc-drift` **blocks**: `0` clean (or
-loop-guard-silenced) · `2` on a finding (stderr) or error. `covers` / `index` /
-`stale` are read-only: `0` always on success, `2` only on error.
+findings, `2` only on a git/usage error. `doc-drift` blocks on its **mechanical**
+classes only: `0` clean (or loop-guard-silenced) · `2` on a dangling-reference or
+anchored-value finding (stderr) or on an error. A **covers-rider-only** finding
+exits `0` and reports through Stop-hook JSON on stdout (plain text under
+`--range`). `covers` / `index` / `stale` are read-only: `0` always on success,
+`2` only on error.
 
 On a finding, `docgraph [path]` prints a self-describing footer below the
 findings — what docgraph is, why the non-zero exit aborts the push, and how to
