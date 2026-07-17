@@ -230,14 +230,21 @@ reconciling, which is exactly why it never gates.
 
 With no `--range` it reads the ref lines git feeds a `pre-push` hook on stdin and
 derives `remotesha..localsha` per ref, deduping findings across refs. Docs are
-`.md`/`.mdx`; "code" is every other tracked path except the prose formats
-`.txt`/`.rst`/`.adoc`/`.markdown`.
+`.md` only — the same `RepoDocs`/`trackedMD` set every whole-state check reads,
+unlike `doc-drift`'s doc-grep which also matches `.mdx`; "code" is every other
+tracked path except the prose formats `.txt`/`.rst`/`.adoc`/`.markdown`. An
+`.mdx` file is therefore neither: a `covers` edge declared in one never fires.
 
 **Editing the doc silences it** — a doc the change set touched never fires, so
 there's nothing to suppress and no in-file marker exists. A repo with no `covers`
 edges never sees it at all. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
 it.
+
+> **Already have a hook installed?** The `covers-drift` invocation is only
+> written into `.githooks/pre-push` at hook-*generation* time, so a hook
+> generated before this rider existed reads this section but never runs it.
+> Regenerate with `docgraph install-hook --force` to pick it up.
 
 ## `docgraph doc-drift` — the Stop-hook staleness gate
 
