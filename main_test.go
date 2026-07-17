@@ -317,7 +317,7 @@ func TestInstallHookIgnorePassthrough(t *testing.T) {
 }
 
 func TestHookScriptRunsBothChecks(t *testing.T) {
-	s := hookScript("", nil, false)
+	s := hookScript("", nil, false, false)
 	if !strings.Contains(s, `"$bin" `) || !strings.Contains(s, ".") {
 		t.Fatal("hook must run the whole-state check")
 	}
@@ -335,7 +335,7 @@ func TestHookScriptRunsBothChecks(t *testing.T) {
 }
 
 func TestHookScriptNoFootgunDrift(t *testing.T) {
-	s := hookScript("", nil, true)
+	s := hookScript("", nil, true, false)
 	if strings.Contains(s, "footgun-drift") {
 		t.Fatal("--no-footgun-drift must omit the footgun line")
 	}
@@ -741,106 +741,54 @@ func TestDocDriftUnbornHeadNoOp(t *testing.T) {
 	}
 }
 
-const coversDocFM = "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/auth.go\n---\n\n# Auth\n"
+const coversFM = "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/auth.go\n---\n\n# Auth\n"
 
-// commitBase commits everything setupRepoMain staged, so the working tree is the
-// change set. Bare mode resolves spec to "HEAD" (uncommitted only) — see
-// docDriftDiffBase and setupRepoMain's `git branch -M wip`. A bare-mode test MUST
-// leave the change under test UNCOMMITTED or the diff is empty and the test
-// asserts nothing.
-func commitBase(t *testing.T, dir string) {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t",
-		"commit", "-m", "base").CombinedOutput()
-	if err != nil {
-		t.Fatalf("git commit: %v\n%s", err, out)
-	}
-}
-
-// Covers-only findings are advisory: exit 0, and the message must travel via Stop
-// JSON additionalContext — a Stop hook's plain stdout is invisible to the agent.
-func TestDocDriftCoversOnlyEmitsStopJSONAndExitsZero(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	dir := setupRepoMain(t, map[string]string{
-		"docs/auth.md": coversDocFM,
-		"src/auth.go":  "package auth\n",
-	})
-	commitBase(t, dir)
-	// Uncommitted change to covered code; docs/auth.md deliberately untouched.
-	if err := os.WriteFile(filepath.Join(dir, "src", "auth.go"),
-		[]byte("package auth\n\nfunc Login() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var out, errb bytes.Buffer
-	code := runDocDrift([]string{dir}, strings.NewReader(""), &out, &errb)
-	if code != 0 {
-		t.Fatalf("covers findings are advisory — want exit 0, got %d\nstderr: %s", code, errb.String())
-	}
-	var payload struct {
-		HookSpecificOutput struct {
-			HookEventName     string `json:"hookEventName"`
-			AdditionalContext string `json:"additionalContext"`
-		} `json:"hookSpecificOutput"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
-		t.Fatalf("stdout must be Stop-hook JSON, got %q: %v", out.String(), err)
-	}
-	if payload.HookSpecificOutput.HookEventName != "Stop" {
-		t.Fatalf("hookEventName = %q, want Stop", payload.HookSpecificOutput.HookEventName)
-	}
-	if !strings.Contains(payload.HookSpecificOutput.AdditionalContext, "docs/auth.md") {
-		t.Fatalf("additionalContext must name the unreconciled doc, got %q", payload.HookSpecificOutput.AdditionalContext)
-	}
-}
-
-// --range is the manual mode: human-readable text, never JSON.
-func TestDocDriftRangeModeNeverEmitsJSON(t *testing.T) {
+// Advisory: a finding prints the nag but exits 0 — the push is never aborted.
+func TestCoversDriftSubcommandRangeIsAdvisory(t *testing.T) {
 	dir, base, head := commitRepoMain(t,
-		map[string]string{"docs/auth.md": coversDocFM, "src/auth.go": "package auth\n"},
+		map[string]string{"docs/auth.md": coversFM, "src/auth.go": "package auth\n"},
 		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n"},
 	)
 	var out, errb bytes.Buffer
-	code := runDocDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	code := runCoversDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
 	if code != 0 {
-		t.Fatalf("covers-only in --range must exit 0, got %d", code)
+		t.Fatalf("covers-drift is advisory — want exit 0, got %d\n%s", code, errb.String())
 	}
-	combined := out.String() + errb.String()
-	if strings.Contains(combined, "hookSpecificOutput") {
-		t.Fatalf("--range must never emit JSON, got:\n%s", combined)
-	}
-	if !strings.Contains(combined, "docs/auth.md") {
-		t.Fatalf("want the doc named in human-readable output, got:\n%s", combined)
+	if !strings.Contains(out.String(), "docs/auth.md") || !strings.Contains(out.String(), "src/auth.go") {
+		t.Fatalf("want the doc and the covered path named, got:\n%s", out.String())
 	}
 }
 
-// Real drift still blocks, and stdout must stay clean of JSON in that path.
-func TestDocDriftRealDriftStillBlocksWithCoversPresent(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	dir := setupRepoMain(t, map[string]string{
-		"docs/auth.md": coversDocFM,
-		"src/auth.go":  "package auth\n\ntype OldWidget struct{}\n",
-		"CLAUDE.md":    "we use OldWidget here\n",
-	})
-	commitBase(t, dir)
-	// Uncommitted removal of OldWidget -> dangling reference in CLAUDE.md (blocking),
-	// AND src/auth.go changed while docs/auth.md (which covers it) stays untouched.
-	if err := os.WriteFile(filepath.Join(dir, "src", "auth.go"),
-		[]byte("package auth\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// No covers edge -> nothing to nag about -> no output at all.
+func TestCoversDriftSubcommandSilentWithNoEdges(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"docs/auth.md": "---\ntype: reference\n---\n\n# Auth\n", "src/auth.go": "package auth\n"},
+		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n"},
+	)
 	var out, errb bytes.Buffer
-	code := runDocDrift([]string{dir}, strings.NewReader(""), &out, &errb)
-	if code != 2 {
-		t.Fatalf("real drift must still block — want exit 2, got %d", code)
+	code := runCoversDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 || out.Len() != 0 {
+		t.Fatalf("want exit 0 and no output, got %d and:\n%s", code, out.String())
 	}
-	if !strings.Contains(errb.String(), "OldWidget") {
-		t.Fatalf("want the dangling symbol on stderr, got:\n%s", errb.String())
+}
+
+func TestCoversDriftOffSwitch(t *testing.T) {
+	t.Setenv("DOCGRAPH_COVERS_OFF", "1")
+	var out, errb bytes.Buffer
+	code := runCoversDrift([]string{"--range", "a..b", "/nonexistent"}, strings.NewReader(""), &out, &errb)
+	if code != 0 || out.Len() != 0 {
+		t.Fatalf("DOCGRAPH_COVERS_OFF=1 -> want exit 0 before any work, got %d", code)
 	}
-	if !strings.Contains(errb.String(), "docs/auth.md") {
-		t.Fatalf("covers section must ride along on stderr, got:\n%s", errb.String())
+}
+
+func TestHookScriptInvokesCoversDrift(t *testing.T) {
+	s := hookScript("", nil, false, false)
+	if !strings.Contains(s, "covers-drift") {
+		t.Fatalf("generated hook must invoke covers-drift:\n%s", s)
 	}
-	if strings.Contains(out.String(), "hookSpecificOutput") {
-		t.Fatalf("blocking path must not also emit JSON, got:\n%s", out.String())
+	off := hookScript("", nil, false, true)
+	if strings.Contains(off, "covers-drift") {
+		t.Fatalf("--no-covers-drift must omit it:\n%s", off)
 	}
 }
 
@@ -887,30 +835,6 @@ func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
 	second := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard)
 	if second != 0 {
 		t.Fatalf("same HEAD already nagged -> want exit 0, got %d", second)
-	}
-}
-
-// The advisory class must never consume the blocking class's marker: a covers nag
-// at HEAD X must leave a later real-drift block at HEAD X free to fire.
-func TestDriftGuardMarkersAreIndependent(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	dir := setupRepoMain(t, map[string]string{"a.go": "package a\n"})
-	git := func(a ...string) {
-		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", a, err, out)
-		}
-	}
-	git("add", "a.go")
-	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
-
-	if !driftGuardOK(dir, "covers-drift") {
-		t.Fatal("first covers-drift call must pass the guard")
-	}
-	if driftGuardOK(dir, "covers-drift") {
-		t.Fatal("second covers-drift call at same HEAD must be suppressed")
-	}
-	if !driftGuardOK(dir, "doc-drift") {
-		t.Fatal("doc-drift marker must be independent — a consumed covers marker must not suppress it")
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -34,6 +33,8 @@ func main() {
 			os.Exit(runLeaksRules(args[1:], os.Stdout, os.Stderr))
 		case "footgun-drift":
 			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
+		case "covers-drift":
+			os.Exit(runCoversDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "doc-drift":
 			os.Exit(runDocDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "schema":
@@ -86,6 +87,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&ignores, "ignore", "path glob to exclude from the gated scan (repeatable)")
 	force := fs.Bool("force", false, "overwrite an existing .githooks/pre-push")
 	noFootgun := fs.Bool("no-footgun-drift", false, "omit the diff-scoped footgun-drift check from the generated hook")
+	noCovers := fs.Bool("no-covers-drift", false, "omit the diff-scoped covers-drift check from the generated hook")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -111,7 +113,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
-	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores, *noFootgun)), 0o755); err != nil {
+	if err := os.WriteFile(hookPath, []byte(hookScript(*skip, ignores, *noFootgun, *noCovers)), 0o755); err != nil {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
@@ -200,16 +202,17 @@ func docgraphBinFunc() string {
 }
 
 // hookScript generates the tracked .githooks/pre-push gate. It runs the
-// whole-state check (`docgraph .`) and, unless noFootgun, the diff-scoped
-// `docgraph footgun-drift` fed git's pre-push stdin (ref lines: local/remote
-// SHA pairs for what's being pushed) so footgun-drift can scope itself to the
-// pushed commit range. The whole-state line is a plain command, not `exec` —
-// `exec` would replace the shell process, so a failing `docgraph .` would never
-// reach the footgun-drift line below it. Under `set -e` a non-zero exit from the
-// whole-state command aborts the script (and the push) immediately, so its
-// fail-closed behavior is unchanged. The footgun-drift line is ADVISORY (`|| true`,
-// and the subcommand exits 0 on findings): it prints a nag but never blocks.
-func hookScript(skip string, ignores []string, noFootgun bool) string {
+// whole-state check (`docgraph .`) and then the diff-scoped riders — unless
+// noFootgun, `docgraph footgun-drift`; unless noCovers, `docgraph covers-drift`
+// — each fed git's pre-push stdin (ref lines: local/remote SHA pairs for what's
+// being pushed) so they can scope themselves to the pushed commit range. The
+// whole-state line is a plain command, not `exec` — `exec` would replace the
+// shell process, so a failing `docgraph .` would never reach the rider lines
+// below it. Under `set -e` a non-zero exit from the whole-state command aborts
+// the script (and the push) immediately, so its fail-closed behavior is
+// unchanged. Both rider lines are ADVISORY (`|| true`, and each subcommand exits
+// 0 on findings): they print a nag but never block.
+func hookScript(skip string, ignores []string, noFootgun, noCovers bool) string {
 	args := ""
 	if skip != "" {
 		args += " --skip " + skip
@@ -226,6 +229,14 @@ func hookScript(skip string, ignores []string, noFootgun bool) string {
 # Diff-scoped ADVISORY nag: footgun declarations ADDED in the pushed range. Never blocks.
 printf '%s' "$refs" | "$bin" footgun-drift . || true`
 	}
+	covers := ""
+	if !noCovers {
+		// Advisory on the same terms as footgun-drift above: covers-drift exits 0 on
+		// findings, and `|| true` swallows even an operational error.
+		covers = `
+# Diff-scoped ADVISORY nag: docs whose 'covers' edge points at code this push changed. Never blocks.
+printf '%s' "$refs" | "$bin" covers-drift . || true`
+	}
 	return `#!/usr/bin/env bash
 # docgraph pre-push gate — installed by 'docgraph install-hook'. Activated per
 # clone via core.hooksPath -> .githooks. Fails closed: if docgraph can't be found
@@ -240,7 +251,7 @@ if ! bin="$(docgraph_bin)"; then
   echo "  install it: go install github.com/lockyc/docgraph@latest" >&2
   exit 1
 fi
-` + stateLine + footgun + `
+` + stateLine + footgun + covers + `
 `
 }
 
@@ -687,6 +698,73 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	fmt.Fprintln(w, bar)
 }
 
+// runCoversDrift is the diff-scoped ADVISORY pre-push subcommand: it nags when a
+// pushed range changed code a doc declares it `covers` while that doc went
+// untouched. Always exits 0 on a finding — it judges nothing (it cannot tell
+// whether the doc actually needed reconciling), so it must not block. Contrast
+// doc-drift, which blocks on mechanical staleness.
+//
+// It lives at pre-push rather than in the doc-drift Stop hook because a Stop hook
+// has no channel that is both advisory and agent-visible: its exit-0 stdout
+// reaches only the debug log, while every channel that DOES reach the agent (a
+// blocking decision, or its JSON context-injection field) keeps the turn from
+// ending, under the same loop protections. That is structural — a Stop hook
+// exists to decide whether to stop — so an advisory check cannot live there.
+// Pre-push is where advisory already works; it is how footgun-drift operates.
+func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
+		return 0
+	}
+	fs := flag.NewFlagSet("docgraph covers-drift", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	rangeFlag := fs.String("range", "", "explicit base..head to check (else read pre-push stdin)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	path := "."
+	if fs.NArg() > 0 {
+		path = fs.Arg(0)
+	}
+	root, err := audit.GitRoot(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: not a git repository: %s\n", path)
+		return 2
+	}
+	var ranges []audit.RevRange
+	if *rangeFlag != "" {
+		b, h, ok := splitRange(*rangeFlag)
+		if !ok {
+			fmt.Fprintf(stderr, "docgraph: bad --range %q (want base..head)\n", *rangeFlag)
+			return 2
+		}
+		ranges = []audit.RevRange{{Base: b, Head: h}}
+	} else {
+		ranges = rangesFromPrePushStdin(stdin, root)
+	}
+	if len(ranges) == 0 {
+		return 0
+	}
+	// An error from either call is a TOOL error, not a finding: stderr + exit 2.
+	// The advisory-never-blocks rule governs findings, not bugs — swallowing a
+	// genuine failure would hide it forever. The hook line's `|| true` still keeps
+	// even this from aborting a push.
+	docs, err := audit.RepoDocs(root, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	findings, err := audit.CoversDrift(root, ranges, docs)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	if len(findings) == 0 {
+		return 0
+	}
+	printCoversDrift(stdout, findings)
+	return 0
+}
+
 // runDocDrift is the Stop-hook subcommand: it flags dangling doc references and
 // anchored value drift over the branch's working-tree-inclusive diff, and BLOCKS
 // the Stop (exit 2, message on stderr) on any finding. Contrast footgun-drift,
@@ -736,48 +814,14 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
-
-	// The advisory covers rider: docs that govern changed code but went untouched.
-	// Its gate is evaluated independently of the blocking class above — see
-	// driftGuardOK's class parameter.
-	//
-	// An error from either call is a TOOL error, not a finding, and takes the same
-	// path DocDrift's does above: stderr + exit 2. The advisory-never-blocks rule
-	// governs findings, not bugs — and by here DocDrift's own gitDiff already
-	// succeeded, so a failure means something is genuinely broken. Swallowing it
-	// would hide a real bug forever.
-	docs, err := audit.RepoDocs(root, nil)
-	if err != nil {
-		fmt.Fprintf(stderr, "docgraph: %v\n", err)
-		return 2
-	}
-	covers, err := audit.CoversDrift(root, spec, docs)
-	if err != nil {
-		fmt.Fprintf(stderr, "docgraph: %v\n", err)
-		return 2
-	}
-	if len(covers) > 0 && guard && !driftGuardOK(root, "covers-drift") {
-		covers = nil // already advised for this HEAD
-	}
-
-	blocking := len(findings) > 0 && (!guard || driftGuardOK(root, "doc-drift"))
-
-	switch {
-	case blocking:
-		printDocDrift(stderr, findings)
-		if len(covers) > 0 {
-			printCoversDrift(stderr, covers)
-		}
-		return 2
-	case len(covers) > 0:
-		if guard {
-			emitStopJSON(stdout, coversDriftMessage(covers))
-		} else {
-			printCoversDrift(stdout, covers)
-		}
+	if len(findings) == 0 {
 		return 0
 	}
-	return 0
+	if guard && !docDriftGuardOK(root) {
+		return 0 // already nagged for this HEAD
+	}
+	printDocDrift(stderr, findings)
+	return 2
 }
 
 // docDriftDiffBase resolves what to `git diff` against: the closest integration
@@ -795,22 +839,18 @@ func docDriftDiffBase(root string) string {
 	return "HEAD"
 }
 
-// driftGuardOK reports whether to nag for this repo at its current HEAD, for the
-// given class ("doc-drift" or "covers-drift"). Returns true at most once per
-// (repo, HEAD, class): the first true records HEAD so a repeat call returns
-// false. Each commit moves HEAD, re-arming.
-//
-// The class parameter is load-bearing, not decoration: the blocking class
-// (doc-drift) and the advisory class (covers-drift) MUST NOT share a marker, or
-// an advisory nag consuming it would silently suppress a real blocking finding
-// discovered later at the same HEAD.
-func driftGuardOK(root, class string) bool {
+// docDriftGuardOK reports whether to nag for this repo at its current HEAD.
+// Returns true at most once per (repo, HEAD): the first true records HEAD so a
+// repeat call returns false. Each commit moves HEAD, re-arming — so a blocked
+// Stop can be resolved by committing, or by simply stopping again once the
+// finding has been judged intentional.
+func docDriftGuardOK(root string) bool {
 	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return true // unborn HEAD -> don't suppress
 	}
 	h := strings.TrimSpace(string(head))
-	dir := driftStateDir(class)
+	dir := docDriftStateDir()
 	if dir == "" {
 		return true // can't resolve state dir -> never suppress
 	}
@@ -824,9 +864,9 @@ func driftGuardOK(root, class string) bool {
 	return true
 }
 
-// driftStateDir resolves $XDG_STATE_HOME/docgraph/<class> (default
+// docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
 // ~/.local/state/...), matching the usage-log XDG-state convention.
-func driftStateDir(class string) string {
+func docDriftStateDir() string {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -835,7 +875,7 @@ func driftStateDir(class string) string {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "docgraph", class)
+	return filepath.Join(dir, "docgraph", "doc-drift")
 }
 
 // printDocDrift renders findings grouped by kind, with the reconcile guidance.
@@ -876,46 +916,23 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 	fmt.Fprintln(w, "be re-prompted for this HEAD.")
 }
 
-// coversDriftMessage renders the advisory covers-drift text shared by the JSON
-// and human-readable paths.
+// coversDriftMessage renders the advisory covers-drift nag.
 func coversDriftMessage(fs []audit.CoversFinding) string {
 	var b strings.Builder
-	b.WriteString("covers-drift: this change set modified code that a doc declares it covers,\n")
-	b.WriteString("but the doc itself is untouched. Reconcile it in THIS change set, or confirm\n")
-	b.WriteString("it is still accurate:\n")
+	b.WriteString("COVERS-DRIFT: this push changes code that a doc declares it covers,\n")
+	b.WriteString("but the doc itself is untouched. Reconcile it, or confirm it is still accurate:\n")
 	for _, f := range fs {
 		fmt.Fprintf(&b, "  • %s covers:\n", f.Doc)
 		for _, p := range f.Paths {
 			fmt.Fprintf(&b, "      %s\n", p)
 		}
 	}
-	b.WriteString("This is advisory — nothing is blocked. Editing the doc silences it.\n")
+	b.WriteString("Advisory — the push is not blocked. Editing the doc silences it.\n")
 	return b.String()
 }
 
-// printCoversDrift writes the advisory text for human consumption (--range mode,
-// or riding along on a blocking stderr message).
 func printCoversDrift(w io.Writer, fs []audit.CoversFinding) {
 	fmt.Fprint(w, coversDriftMessage(fs))
-}
-
-// emitStopJSON writes a Stop-hook JSON payload carrying msg as additionalContext.
-// This is the ONLY exit-0 channel a Stop hook has that reaches the agent: plain
-// stdout from a Stop hook goes to the user's transcript and the model never sees
-// it. Do not "simplify" this to a bare Fprintln — that would silently make the
-// whole advisory class invisible.
-func emitStopJSON(w io.Writer, msg string) {
-	payload := map[string]any{
-		"hookSpecificOutput": map[string]any{
-			"hookEventName":     "Stop",
-			"additionalContext": msg,
-		},
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return // advisory: never break the turn
-	}
-	fmt.Fprintln(w, string(b))
 }
 
 // runSchema prints the JSON Schema describing docgraph frontmatter, stamped with
