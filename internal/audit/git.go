@@ -58,6 +58,15 @@ func changedMarkdown(root, rng string) ([]string, error) {
 	return gitLines(root, "diff", "--name-only", rng, "--", "*.md")
 }
 
+// changedCode lists the non-prose ("code") files changed in the given diff spec.
+// It shares nonCodePathspec with gitDiff/stillDefinedInCode on purpose: all three
+// answer questions about the same "what is code?" set, so a divergent definition
+// here would report drift against a file class the diff never scanned.
+func changedCode(root, spec string) ([]string, error) {
+	args := append([]string{"diff", "--name-only", spec, "--"}, nonCodePathspec...)
+	return gitLines(root, args...)
+}
+
 // addedLines returns the set of new-file line numbers added to path in rng, by
 // parsing unified-diff hunk headers and counting '+' lines from the new start.
 func addedLines(root, rng, path string) (map[int]bool, error) {

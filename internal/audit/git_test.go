@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -78,6 +79,26 @@ func TestClosestBaseFindsIntegrationBranch(t *testing.T) {
 	got, ok := ClosestBase(dir, "feature")
 	if !ok || got != base {
 		t.Fatalf("want base=%s ok=true, got %q ok=%v", base, got, ok)
+	}
+}
+
+func TestChangedCodeExcludesProse(t *testing.T) {
+	dir, base, head := commitRepo(t,
+		map[string]string{"a.go": "package a\n", "CLAUDE.md": "intro\n"},
+		map[string]string{
+			"a.go":          "package a\n\nfunc New() {}\n",
+			"CLAUDE.md":     "intro\nmore\n",
+			"docs/x.md":     "doc\n",
+			"internal/b.go": "package b\n",
+		},
+	)
+	got, err := changedCode(dir, base+".."+head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a.go", "internal/b.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changedCode = %v, want %v (prose must be excluded)", got, want)
 	}
 }
 
