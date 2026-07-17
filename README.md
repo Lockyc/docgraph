@@ -1,11 +1,3 @@
----
-type: guide
-links:
-  - rel: covers
-    to: install.sh
-    note: the documented install path
----
-
 # docgraph
 
 [![Release](https://img.shields.io/github/v/release/Lockyc/docgraph?sort=semver&label=release)](https://github.com/lockyc/docgraph/releases/latest)
