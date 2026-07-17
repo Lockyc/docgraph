@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -751,6 +752,31 @@ func TestCoversDriftSubcommandRangeIsAdvisory(t *testing.T) {
 	)
 	var out, errb bytes.Buffer
 	code := runCoversDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("covers-drift is advisory — want exit 0, got %d\n%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "docs/auth.md") || !strings.Contains(out.String(), "src/auth.go") {
+		t.Fatalf("want the doc and the covered path named, got:\n%s", out.String())
+	}
+}
+
+// The generated hook drives runCoversDrift with NO --range at all — it feeds git's
+// pre-push stdin lines instead — so that is the only path the production gate
+// actually exercises. Every other covers-drift test above passes --range with an
+// empty stdin reader, which leaves rangesFromPrePushStdin (main.go) completely
+// uncovered. Drive it directly: the line format is git's pre-push hook protocol
+// (`<local ref> <local sha1> <remote ref> <remote sha1>`, one ref update per line),
+// which rangesFromPrePushStdin parses at main.go:657. A non-zero remote sha (the
+// common case: the branch already exists upstream) maps straight to
+// RevRange{Base: remoteSHA, Head: localSHA} with no ClosestBase fallback needed.
+func TestCoversDriftSubcommandReadsPrePushStdin(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"docs/auth.md": coversFM, "src/auth.go": "package auth\n"},
+		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n"},
+	)
+	stdin := strings.NewReader(fmt.Sprintf("refs/heads/dev %s refs/heads/dev %s\n", head, base))
+	var out, errb bytes.Buffer
+	code := runCoversDrift([]string{dir}, stdin, &out, &errb)
 	if code != 0 {
 		t.Fatalf("covers-drift is advisory — want exit 0, got %d\n%s", code, errb.String())
 	}

@@ -707,10 +707,11 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 // It lives at pre-push rather than in the doc-drift Stop hook because a Stop hook
 // has no channel that is both advisory and agent-visible: its exit-0 stdout
 // reaches only the debug log, while every channel that DOES reach the agent (a
-// blocking decision, or its JSON context-injection field) keeps the turn from
-// ending, under the same loop protections. That is structural — a Stop hook
-// exists to decide whether to stop — so an advisory check cannot live there.
-// Pre-push is where advisory already works; it is how footgun-drift operates.
+// blocking decision, or `hookSpecificOutput.additionalContext`) keeps the turn
+// from ending, under the same loop protections as `decision: block`. That is
+// structural — a Stop hook exists to decide whether to stop — so an advisory
+// check cannot live there. Pre-push is where advisory already works; it is how
+// footgun-drift operates.
 func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
 		return 0
