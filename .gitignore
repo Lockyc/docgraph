@@ -1,5 +1,6 @@
 /docgraph
 docs/superpowers/
+.superpowers/
 .claude/worktrees/
 # Per-release scratch for `just release`. Ignored so it isn't an untracked .md —
 # which docgraph's own `untracked` check would flag, failing the gate inside the
