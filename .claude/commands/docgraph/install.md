@@ -174,7 +174,7 @@ Print three sections:
 - `docgraph covers <path>` names the doc governing a file — the skill teaches agents to
   reach for it. It answers only in repos whose docs declare `covers:` edges.
 - Update any time by re-running `/docgraph:install` (or `go install
-  github.com/lockyc/docgraph@latest`) — nothing auto-updates the binary.
+  github.com/lockyc/docgraph/v2@latest`) — nothing auto-updates the binary.
 - `DOC_DRIFT_OFF=1` disables the Stop hook for a repo that doesn't use the
   anchored-symbol convention; `DOCGRAPH_FOOTGUN_OFF=1` disables the footgun nag and
   `DOCGRAPH_COVERS_OFF=1` the covers nag.
