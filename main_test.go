@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lockyc/docgraph/internal/audit"
+	"github.com/lockyc/docgraph/v2/internal/audit"
 )
 
 // noCfg returns a leaks-config path guaranteed not to exist, so a test that isn't

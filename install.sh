@@ -11,7 +11,12 @@
 # job (a non-interactive curl|bash must not silently edit global config). Never uses `just`.
 set -e
 
-MODULE="github.com/lockyc/docgraph"
+# The /v2 suffix is Go's semantic import versioning, not decoration: a module at
+# major >=2 MUST declare it, or the proxy rejects every v2 tag and `@latest`
+# silently falls back to the newest v1 — which is how the published install path
+# broke once already. It is also the go.mod module line verbatim, so the IN_REPO
+# grep below and the @latest install stay one source.
+MODULE="github.com/lockyc/docgraph/v2"
 
 command -v go >/dev/null 2>&1 || {
   echo "docgraph: Go is required (https://go.dev/dl/). Install it, then re-run." >&2

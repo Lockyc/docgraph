@@ -459,8 +459,35 @@ docs/" with zero config.
   breaking CLI change, minor for a new feature, patch for a fix.
 - **Cut a release** from `dev` with `VERSION` bumped + committed: `just release` runs
   `gate`, fast-forwards `main`, tags `v<VERSION>`, and publishes the GitHub release.
+- **The major version lives in the module path too** — `go.mod` declares
+  `github.com/lockyc/docgraph/v2`, and the `/vN` suffix must be bumped in lockstep with
+  a major `VERSION` bump (`v3` → `module …/v3`, plus the `internal/` import paths, plus
+  every `go install …@latest` site). This is Go's semantic import versioning, not a
+  style choice; the footgun below is what enforcing it costs when you don't.
 
-## Footgun — the gate must find its own binary under a minimal PATH
+## Footgun — a major bump must move the module path, or the release is invisible
+
+Go **ignores every `vN` tag (N≥2) on a module whose path lacks the matching `/vN`
+suffix**. Tagging `v2.0.0` while `go.mod` said `module github.com/lockyc/docgraph`
+made the proxy reject it outright (`invalid version: module path must match major
+version`), so `@latest` silently resolved to the newest **v1** tag instead — which
+still carried the pre-rename `docaudit` path, and `go install` then hard-failed with
+`module declares its path as … but was required as …`. Net effect: the published
+install command in the README, `install.sh`, `SKILL.md` and **the fail-closed hook's
+own "install it:" message** could not install anything, for anyone, for a week.
+
+**Why it survived a week undetected — this is the part that generalizes.** Every
+path this repo exercises bypasses module resolution: `just install` is `go install .`
+(local build, no proxy), and CI is `checkout` + `vet` + `test` (also local). A green
+gate and a working local binary say *nothing* about whether a consumer can install
+the thing. Only a fresh `go install <module>@latest` tests that, and nothing here
+runs one.
+
+So: **after any release that moves the module path or major version, verify from
+outside the repo** — `GOPATH=$(mktemp -d) go install github.com/lockyc/docgraph/v2@latest`
+in a temp dir. Do not infer it from a green gate. And never "fix" a rejected v2 tag by
+dropping back to v1 numbering — the tags are public and `checksFlagRemoved`'s
+user-facing message commits to the v2 lineage; move the module path instead.
 
 The pre-push hook `hookScript` generates must resolve docgraph via PATH **and**
 the Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone. Git

@@ -146,6 +146,6 @@ re-encoding the vocabulary if you're building something that reads the graph.
 
 ## If the binary is missing
 
-`go install github.com/lockyc/docgraph@latest` (it lands in `~/go/bin`, which
+`go install github.com/lockyc/docgraph/v2@latest` (it lands in `~/go/bin`, which
 may not be on a minimal PATH — try `~/go/bin/docgraph` before concluding it
 isn't installed). Nothing auto-updates it.
