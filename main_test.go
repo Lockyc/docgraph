@@ -787,6 +787,30 @@ func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
 	}
 }
 
+// The advisory class must never consume the blocking class's marker: a covers nag
+// at HEAD X must leave a later real-drift block at HEAD X free to fire.
+func TestDriftGuardMarkersAreIndependent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := setupRepoMain(t, map[string]string{"a.go": "package a\n"})
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("add", "a.go")
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "base")
+
+	if !driftGuardOK(dir, "covers-drift") {
+		t.Fatal("first covers-drift call must pass the guard")
+	}
+	if driftGuardOK(dir, "covers-drift") {
+		t.Fatal("second covers-drift call at same HEAD must be suppressed")
+	}
+	if !driftGuardOK(dir, "doc-drift") {
+		t.Fatal("doc-drift marker must be independent — a consumed covers marker must not suppress it")
+	}
+}
+
 func TestRunSchema(t *testing.T) {
 	var buf bytes.Buffer
 	if code := runSchema(&buf); code != 0 {

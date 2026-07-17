@@ -738,7 +738,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(findings) == 0 {
 		return 0
 	}
-	if guard && !docDriftGuardOK(root) {
+	if guard && !driftGuardOK(root, "doc-drift") {
 		return 0 // already nagged for this HEAD
 	}
 	printDocDrift(stderr, findings)
@@ -760,17 +760,22 @@ func docDriftDiffBase(root string) string {
 	return "HEAD"
 }
 
-// docDriftGuardOK reports whether to nag for this repo at its current HEAD.
-// Returns true at most once per (repo, HEAD): the first true records HEAD so a
-// repeat call for the same HEAD returns false. Each commit moves HEAD, re-arming.
-// This de-dupes the nag within one HEAD; it never suppresses a finding across HEADs.
-func docDriftGuardOK(root string) bool {
+// driftGuardOK reports whether to nag for this repo at its current HEAD, for the
+// given class ("doc-drift" or "covers-drift"). Returns true at most once per
+// (repo, HEAD, class): the first true records HEAD so a repeat call returns
+// false. Each commit moves HEAD, re-arming.
+//
+// The class parameter is load-bearing, not decoration: the blocking class
+// (doc-drift) and the advisory class (covers-drift) MUST NOT share a marker, or
+// an advisory nag consuming it would silently suppress a real blocking finding
+// discovered later at the same HEAD.
+func driftGuardOK(root, class string) bool {
 	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		return true // unborn HEAD -> don't suppress
 	}
 	h := strings.TrimSpace(string(head))
-	dir := docDriftStateDir()
+	dir := driftStateDir(class)
 	if dir == "" {
 		return true // can't resolve state dir -> never suppress
 	}
@@ -784,9 +789,9 @@ func docDriftGuardOK(root string) bool {
 	return true
 }
 
-// docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
+// driftStateDir resolves $XDG_STATE_HOME/docgraph/<class> (default
 // ~/.local/state/...), matching the usage-log XDG-state convention.
-func docDriftStateDir() string {
+func driftStateDir(class string) string {
 	dir := os.Getenv("XDG_STATE_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -795,7 +800,7 @@ func docDriftStateDir() string {
 		}
 		dir = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(dir, "docgraph", "doc-drift")
+	return filepath.Join(dir, "docgraph", class)
 }
 
 // printDocDrift renders findings grouped by kind, with the reconcile guidance.
