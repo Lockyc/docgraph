@@ -11,8 +11,9 @@ links:
 
 # docgraph — notes for the next agent
 
-A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
-`git`) with four independent audit modes, each with its own trigger, plus
+A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode and
+`gopkg.in/yaml.v3` for frontmatter decode; shells out to `git`) with four
+independent audit modes, each with its own trigger, plus
 read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
 `stale`):
 
@@ -125,8 +126,8 @@ schema` all key off:
   accepted (tolerate-unknown), never rejected.
 - **`verified`/`review`** — freshness metadata: `verified` is the date the doc
   was last checked against reality, `review` is a per-doc staleness-cadence
-  override (e.g. `90d`). Vocabulary only today — no check reads either field
-  yet.
+  override (e.g. `90d`). Read by the `stale` **view** only — no *check* reads
+  either field, so neither can ever gate a push.
 - **`links`** — typed edges (`Edge{Rel, To, Note}`, the "label the link"
   model). `rel` core vocabulary (`CoreRels`): `covers`, `part-of`,
   `supersedes`, `depends-on`, `runbook-for`, `see-also`, `source` — advisory,

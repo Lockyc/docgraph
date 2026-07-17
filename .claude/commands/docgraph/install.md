@@ -1,6 +1,7 @@
 You are installing or updating **docgraph** — a Go CLI documentation-audit gate (whole-state
-doc-graph + leak checks, a diff-scoped `footgun-drift` pre-push nag, and a `doc-drift`
-**Stop hook** that blocks a turn while a tracked doc still describes code that just changed).
+doc-graph + leak checks, two diff-scoped pre-push nags — `footgun-drift` and `covers-drift` —
+and a `doc-drift` **Stop hook** that blocks a turn while a tracked doc still describes code
+that just changed).
 
 GitHub: `https://github.com/lockyc/docgraph`
 
@@ -112,8 +113,11 @@ From inside the target repo:
 docgraph install-hook          # writes .githooks/pre-push and sets core.hooksPath -> .githooks
 ```
 
-Add `--skip orphans` for a nav-driven MkDocs repo, `--ignore '<glob>'` to bake in an
-exclusion, or `--no-footgun-drift` to omit the footgun nag. Report the result.
+The generated hook runs the whole-state gate plus both advisory riders — `footgun-drift`
+and `covers-drift`. Add `--skip orphans` for a nav-driven MkDocs repo, `--ignore '<glob>'`
+to bake in an exclusion, or `--no-footgun-drift` / `--no-covers-drift` to omit a rider.
+Neither rider can block a push, and `covers-drift` is silent in a repo with no `covers:`
+edges, so both are safe to leave in. Report the result.
 
 ### 8. Seed the leaks config (if selected)
 
@@ -172,4 +176,5 @@ Print three sections:
 - Update any time by re-running `/docgraph:install` (or `go install
   github.com/lockyc/docgraph@latest`) — nothing auto-updates the binary.
 - `DOC_DRIFT_OFF=1` disables the Stop hook for a repo that doesn't use the
-  anchored-symbol convention; `DOCGRAPH_FOOTGUN_OFF=1` disables the footgun nag.
+  anchored-symbol convention; `DOCGRAPH_FOOTGUN_OFF=1` disables the footgun nag and
+  `DOCGRAPH_COVERS_OFF=1` the covers nag.

@@ -59,7 +59,7 @@ orphans`.)
    only agent tooling under `.claude/` and `.agents/` plus untracked scratch are
    excluded.
 2. **Broken links** — a `[x](y.md)` whose target doesn't exist. Checked across
-   all tracked `.md`.
+   the same tracked, non-ignored `.md` set as orphans.
 3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
 4. **Leaks** — tracked file *content* matching a configured leak pattern (see
    [`leaks`](#leaks--the-content-scan)).
@@ -357,8 +357,9 @@ go install github.com/lockyc/docgraph@latest   # or, from a checkout: just insta
 ```
 
 Needs **Go** (the install is `go install`) and **git** on PATH (docgraph shells
-out to it at runtime). The only module dependency is
-`github.com/BurntSushi/toml`; the rest is the Go stdlib.
+out to it at runtime). The module dependencies are `github.com/BurntSushi/toml`
+(config decode) and `gopkg.in/yaml.v3` (frontmatter decode); the rest is the Go
+stdlib.
 
 ### As a pre-push gate
 
@@ -506,8 +507,9 @@ Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
 
 ```json
 {"ts":"2026-07-09T21:30:00+10:00","version":"2.0.0","repo":"/abs/git/root",
- "cmd":"run","checks":["broken","leaks","orphans","untracked"],"exit":1,
- "counts":{"orphans":0,"broken":1,"untracked":0,"leaks":0}}
+ "cmd":"run","checks":["broken","edges","frontmatter","leaks","orphans","untracked"],
+ "exit":1,
+ "counts":{"broken":1,"edges":0,"frontmatter":0,"leaks":0,"orphans":0,"untracked":0}}
 ```
 
 **Detail level** trades richness for exposure:

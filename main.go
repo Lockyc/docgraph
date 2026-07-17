@@ -770,8 +770,8 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 // anchored value drift over the branch's working-tree-inclusive diff, and BLOCKS
 // the Stop (exit 2, message on stderr) on any finding. Contrast footgun-drift,
 // which is advisory. Bare invocation resolves the diff base and applies the
-// once-per-HEAD loop-guard (Task 5); --range runs a deterministic, guard-free
-// check for manual use.
+// once-per-HEAD loop-guard; --range runs a deterministic, guard-free check for
+// manual use.
 func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOC_DRIFT_OFF") != "" {
 		return 0
