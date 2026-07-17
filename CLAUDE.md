@@ -292,15 +292,23 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   would blind the check to exactly the files most likely to accumulate
   footgun notes over time. Do not apply `defaultIgnores` or `.docgraphignore` here.
 - **A Stop hook's plain stdout is invisible to the agent — the covers rider MUST
-  use JSON `additionalContext`.** Exit-0 stdout from a Stop hook reaches only the
-  user's transcript; the model never sees it. Of the Stop-hook output fields only
-  `additionalContext` (a system reminder) and exit-2 stderr reach the model —
-  `systemMessage` and `decision`/`reason` do not. So `emitStopJSON` is the one
-  shape that is advisory *and* agent-visible, and "simplifying" it to a bare
-  `Fprintln` would silently make the whole advisory class a no-op that still looks
-  like it works locally. The two guard markers are load-bearing for the same
-  class of reason: sharing one would let an advisory nag consume the marker and
-  silently suppress a *blocking* finding at the same HEAD.
+  use JSON `additionalContext`.** Exit-0 stdout from a Stop hook goes to the debug
+  log only: it is shown neither in the transcript nor to the model (the harness
+  adds stdout to context for `UserPromptSubmit`/`UserPromptExpansion`/
+  `SessionStart` — Stop is not among them). Of the Stop-hook output channels,
+  `additionalContext` is the only one that is both agent-visible and non-error:
+  the harness wraps it in a system reminder so the model acts on it, with no hook
+  error raised. The others are each excluded for their own reason, not for
+  invisibility: `systemMessage` is shown to the user only; `decision: "block"`'s
+  `reason` *does* reach the model, but `reason` is only deliverable alongside
+  `decision: "block"` and so cannot be sent without raising a blocking hook error
+  — which an advisory rider must never do; exit-2 stderr reaches the model the
+  same way, and is what the *blocking* classes deliberately use. So `emitStopJSON`
+  is the one shape that carries an advisory nag to the agent without an error, and
+  "simplifying" it to a bare `Fprintln` would silently make the whole advisory
+  class a no-op that still looks like it works locally. The two guard markers are
+  load-bearing for the same class of reason: sharing one would let an advisory nag
+  consume the marker and silently suppress a *blocking* finding at the same HEAD.
 
 ## Doc models (why `--skip` exists)
 

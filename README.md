@@ -211,8 +211,9 @@ hook that never invokes it. There is no in-file suppression marker.
 ## `docgraph doc-drift` — the Stop-hook staleness gate
 
 Wire `doc-drift` into your agent harness's `Stop` hook (invoked directly, no
-wrapper) so it runs at the end of every turn, while a tracked doc still describes
-code that just changed underneath it.
+wrapper) so it runs at the end of every turn, catching tracked docs that still
+describe code which just changed underneath them — before the agent hands control
+back.
 
 It scans a **working-tree-inclusive** range — base→worktree, covering committed
 *and* uncommitted changes, because it fires before a commit necessarily exists.
