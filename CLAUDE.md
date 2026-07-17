@@ -1,3 +1,14 @@
+---
+type: architecture
+links:
+  - rel: covers
+    to: internal/audit
+    note: the invariants every check in this package must hold
+  - rel: covers
+    to: main.go
+    note: CLI surface, exit contracts, hook wiring
+---
+
 # docgraph — notes for the next agent
 
 A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode; shells out to
