@@ -23,15 +23,16 @@ Under Claude Code, `/docgraph:install` does the install, wires the `doc-drift`
 Stop hook, and seeds the leaks config for you. See [Install](#install) for the
 full menu.
 
-## The three modes
+## The four modes
 
-docgraph has three independent modes, each with its own trigger and scope:
+docgraph has four independent modes, each with its own trigger and scope:
 
 | Mode | Command | Scans | Runs at | Blocks? |
 | --- | --- | --- | --- | --- |
 | **Whole-state checks** | `docgraph [path]` | the current tree | pre-push / CI | **yes** — exit 1 on any finding |
 | **`footgun-drift`** | `docgraph footgun-drift` | what a push *adds* | pre-push (advisory rider) | no — nags, always exit 0 |
-| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **on the mechanical classes** — exit 2; its advisory covers rider exits 0 |
+| **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
+| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **yes** — exit 2 on any finding |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
 vocabulary), and the doc-graph **views** `covers` / `index` / `stale`.
@@ -208,6 +209,36 @@ the right doc level (invariant → `CLAUDE.md`, rationale → `docs/`, human pro
 `Footgun:` convention); `docgraph install-hook --no-footgun-drift` generates a
 hook that never invokes it. There is no in-file suppression marker.
 
+## `covers-drift` — the advisory pre-push rider
+
+`covers-drift` scans the **code** a push changes and reports any doc that
+declares a frontmatter `covers` edge onto it while the doc itself went
+untouched. Like `footgun-drift` it is **advisory**: it prints a nag, exits 0, and
+never blocks.
+
+```bash
+docgraph covers-drift                       # reads git's pre-push ref lines from stdin
+docgraph covers-drift --range base..head    # explicit range, for manual use
+```
+
+It's the graph join [`doc-drift`](#docgraph-doc-drift--the-stop-hook-staleness-gate)
+can't do: a rewritten function whose doc describes the old behaviour in prose
+leaves no removed symbol and no changed literal to grep for, but a `covers` edge
+already declares that doc the architecture of record for the code. What it can't
+do is *judge* — it has no way to know whether the doc actually needed
+reconciling, which is exactly why it never gates.
+
+With no `--range` it reads the ref lines git feeds a `pre-push` hook on stdin and
+derives `remotesha..localsha` per ref, deduping findings across refs. Docs are
+`.md`/`.mdx`; "code" is every other tracked path except the prose formats
+`.txt`/`.rst`/`.adoc`/`.markdown`.
+
+**Editing the doc silences it** — a doc the change set touched never fires, so
+there's nothing to suppress and no in-file marker exists. A repo with no `covers`
+edges never sees it at all. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
+`docgraph install-hook --no-covers-drift` to generate a hook that never invokes
+it.
+
 ## `docgraph doc-drift` — the Stop-hook staleness gate
 
 Wire `doc-drift` into your agent harness's `Stop` hook (invoked directly, no
@@ -234,38 +265,16 @@ docgraph doc-drift --range base..head     # explicit range — bypasses the loop
 Bare invocation applies a **once-per-HEAD loop-guard**: after it nags for a given
 `HEAD`, a repeat at the same `HEAD` is silent, so an agent that keeps ending its
 turn without acting isn't nagged every Stop. The next commit moves `HEAD` and
-re-arms it. This de-dupes the *nag*, it doesn't suppress the *finding*. The
-blocking classes and the advisory covers rider below guard **independently**, so
-an advisory nag can never silence a block at the same `HEAD`.
+re-arms it. This de-dupes the *nag*, it doesn't suppress the *finding*.
 
-A finding in either mechanical class **blocks** — prints to **stderr**, exits
-**2**. `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
+A finding in either class **blocks** — prints to **stderr**, exits **2**. Both
+are mechanical facts, which is what earns them a hook that can stop a turn;
+judgment calls belong in the advisory pre-push riders instead.
+`DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
 doesn't use the anchored-symbol-and-value convention it relies on. There is no
 other suppression surface (no `.docgraphignore`, no per-finding flag, no inline
 marker): a flagged reference is a judgment call — reconcile the doc, or confirm
 it's intentional framed history.
-
-### The advisory covers rider
-
-The same run also reports **covers drift**: a doc that declares a frontmatter
-`covers` edge onto code the change set modified, while the doc itself went
-untouched. It's the graph join the two mechanical classes can't do — a rewritten
-function whose doc describes the old behaviour in prose leaves no removed symbol
-and no changed literal to grep for, but a `covers` edge already declares that doc
-the architecture of record for the code.
-
-It **never blocks**. It can't judge whether the doc actually needed reconciling,
-so it exits `0` and merely surfaces the pairing. Bare (Stop-hook) mode reports it
-as JSON on stdout — `hookSpecificOutput.additionalContext`, the one exit-0
-channel a Stop hook has that reaches the agent rather than only the user's
-transcript. Under `--range` it prints as plain text instead. When a *blocking*
-finding is also present, the rider's text rides along on the stderr message and
-the exit stays `2` on the blocking class's account.
-
-Editing the doc is the escape hatch, so there's nothing to suppress: a doc the
-change set touched never fires. A repo with no `covers` edges never sees the
-rider at all. Like the mechanical classes it is de-duped once per `HEAD`, on its
-own independent marker.
 
 Scope limits worth knowing:
 
@@ -301,9 +310,10 @@ docgraph stale --older-than 90       # override the default 180-day threshold
   (`covers: src/auth/` covers `src/auth/login.go`). `<path>` is
   **repo-root-relative** — frontmatter edges resolve against the repo root, unlike
   an inline markdown link. Prints nothing (exit `0`) if no doc covers it. The same
-  `covers` edges feed
-  [`doc-drift`'s advisory rider](#the-advisory-covers-rider), so declaring one
-  both answers this query and gets the doc surfaced when its code changes.
+  `covers` edges feed the
+  [`covers-drift`](#covers-drift--the-advisory-pre-push-rider) pre-push rider, so
+  declaring one both answers this query and gets the doc surfaced when its code
+  changes.
 - **`index`** — prints a **generated** markdown index: every doc with
   frontmatter, grouped by `type` (core types in canonical order, then custom
   types alphabetically), each as `- [label](path) — description` (the tail is
@@ -351,12 +361,14 @@ docgraph install-hook --skip orphans            # nav-driven repos (no orphan ga
 docgraph install-hook --ignore '**/*_test.go'   # bake an --ignore glob into the hook
 docgraph install-hook --force                   # regenerate an existing hook
 docgraph install-hook --no-footgun-drift        # omit the footgun-drift rider
+docgraph install-hook --no-covers-drift         # omit the covers-drift rider
 ```
 
 The generated hook runs the whole-state gate `docgraph .` (a bare invocation, so
 a later-version check is enforced without regenerating), then the advisory
-`docgraph footgun-drift` fed git's pre-push stdin. Only the first can block a push
-(`footgun-drift` rides with `|| true`). It writes a tracked `.githooks/pre-push`
+`docgraph footgun-drift` and `docgraph covers-drift`, each fed git's pre-push
+stdin. Only the first can block a push — both riders ride with `|| true`, so not
+even an operational error in one can abort it. It writes a tracked `.githooks/pre-push`
 and sets `core.hooksPath` for this clone (others activate with `git config
 core.hooksPath .githooks`). It refuses to clobber an existing hook (pass
 `--force`, or integrate a docgraph call into your own). It fails **closed** — a
@@ -373,6 +385,7 @@ docgraph --skip orphans             # exclude a check (comma-separated)
 docgraph --leaks-config <path>      # override the global leak rules file
 docgraph --config <path>            # override the global config.toml (usage logging)
 docgraph footgun-drift              # advisory: reads pre-push ref lines from stdin
+docgraph covers-drift               # advisory: docs covering the code a push changes
 docgraph doc-drift                  # Stop-hook: working-tree-inclusive diff
 docgraph schema                     # print the frontmatter JSON Schema (read-only)
 docgraph covers <path>              # read-only: docs that cover <path>
@@ -382,13 +395,11 @@ docgraph version                    # print version (also --version, -v)
 ```
 
 **Exit codes.** `docgraph [path]`: `0` clean · `1` findings · `2` usage / not a
-git repo / malformed leak config. `footgun-drift` is advisory: `0` regardless of
-findings, `2` only on a git/usage error. `doc-drift` blocks on its **mechanical**
-classes only: `0` clean (or loop-guard-silenced) · `2` on a dangling-reference or
-anchored-value finding (stderr) or on an error. A **covers-rider-only** finding
-exits `0` and reports through Stop-hook JSON on stdout (plain text under
-`--range`). `covers` / `index` / `stale` are read-only: `0` always on success,
-`2` only on error.
+git repo / malformed leak config. `footgun-drift` and `covers-drift` are
+advisory: `0` regardless of findings (nag on stdout), `2` only on a git/usage
+error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
+dangling-reference or anchored-value finding (stderr) or on an error. `covers` /
+`index` / `stale` are read-only: `0` always on success, `2` only on error.
 
 On a finding, `docgraph [path]` prints a self-describing footer below the
 findings — what docgraph is, why the non-zero exit aborts the push, and how to
@@ -417,9 +428,10 @@ not the default/`.docgraphignore` layers — see [`leaks`](#leaks--the-content-s
 **No inline markers.** Every suppression lives in config or on the command line —
 `.docgraphignore`, `--ignore`, `--skip`, and the leaks config's `allow` /
 `allow_regex` / `[[dir]]`. docgraph never reads a suppression comment inside the
-audited files. `footgun-drift` and `doc-drift` have no in-file escape at all —
-they're opted out only whole-check, via `DOCGRAPH_FOOTGUN_OFF=1` /
-`--no-footgun-drift` and `DOC_DRIFT_OFF=1` respectively.
+audited files. `footgun-drift`, `covers-drift` and `doc-drift` have no in-file
+escape at all — they're opted out only whole-check, via `DOCGRAPH_FOOTGUN_OFF=1` /
+`--no-footgun-drift`, `DOCGRAPH_COVERS_OFF=1` / `--no-covers-drift`, and
+`DOC_DRIFT_OFF=1` respectively.
 
 ### Doc models and when to `--skip orphans`
 
@@ -460,7 +472,9 @@ scanned?" — answer them independently.
 
 A repo that doesn't use the `Footgun:` convention opts out of `footgun-drift`
 outright (it's not a check, so no `--skip` name) — `DOCGRAPH_FOOTGUN_OFF=1` or
-`install-hook --no-footgun-drift`.
+`install-hook --no-footgun-drift`. `covers-drift` has the same pair
+(`DOCGRAPH_COVERS_OFF=1` / `install-hook --no-covers-drift`), though a repo with
+no `covers` edges has nothing to turn off.
 
 ## Usage logging
 
@@ -542,5 +556,5 @@ sandboxed agents often push with a bare PATH that omits `~/go/bin`.
 Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
 `internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers plus
 diff helpers, the whole-state `Audit` orchestrator, the leak scanner, the
-diff-scoped `FootgunDrift`, and the `DocDrift` orchestrator that diffs code and
-greps docs). See `CLAUDE.md` for design invariants.
+diff-scoped `FootgunDrift` and `CoversDrift`, and the `DocDrift` orchestrator
+that diffs code and greps docs). See `CLAUDE.md` for design invariants.
