@@ -741,6 +741,109 @@ func TestDocDriftUnbornHeadNoOp(t *testing.T) {
 	}
 }
 
+const coversDocFM = "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src/auth.go\n---\n\n# Auth\n"
+
+// commitBase commits everything setupRepoMain staged, so the working tree is the
+// change set. Bare mode resolves spec to "HEAD" (uncommitted only) — see
+// docDriftDiffBase and setupRepoMain's `git branch -M wip`. A bare-mode test MUST
+// leave the change under test UNCOMMITTED or the diff is empty and the test
+// asserts nothing.
+func commitBase(t *testing.T, dir string) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "-m", "base").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+
+// Covers-only findings are advisory: exit 0, and the message must travel via Stop
+// JSON additionalContext — a Stop hook's plain stdout is invisible to the agent.
+func TestDocDriftCoversOnlyEmitsStopJSONAndExitsZero(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := setupRepoMain(t, map[string]string{
+		"docs/auth.md": coversDocFM,
+		"src/auth.go":  "package auth\n",
+	})
+	commitBase(t, dir)
+	// Uncommitted change to covered code; docs/auth.md deliberately untouched.
+	if err := os.WriteFile(filepath.Join(dir, "src", "auth.go"),
+		[]byte("package auth\n\nfunc Login() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("covers findings are advisory — want exit 0, got %d\nstderr: %s", code, errb.String())
+	}
+	var payload struct {
+		HookSpecificOutput struct {
+			HookEventName     string `json:"hookEventName"`
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout must be Stop-hook JSON, got %q: %v", out.String(), err)
+	}
+	if payload.HookSpecificOutput.HookEventName != "Stop" {
+		t.Fatalf("hookEventName = %q, want Stop", payload.HookSpecificOutput.HookEventName)
+	}
+	if !strings.Contains(payload.HookSpecificOutput.AdditionalContext, "docs/auth.md") {
+		t.Fatalf("additionalContext must name the unreconciled doc, got %q", payload.HookSpecificOutput.AdditionalContext)
+	}
+}
+
+// --range is the manual mode: human-readable text, never JSON.
+func TestDocDriftRangeModeNeverEmitsJSON(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"docs/auth.md": coversDocFM, "src/auth.go": "package auth\n"},
+		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n"},
+	)
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	if code != 0 {
+		t.Fatalf("covers-only in --range must exit 0, got %d", code)
+	}
+	combined := out.String() + errb.String()
+	if strings.Contains(combined, "hookSpecificOutput") {
+		t.Fatalf("--range must never emit JSON, got:\n%s", combined)
+	}
+	if !strings.Contains(combined, "docs/auth.md") {
+		t.Fatalf("want the doc named in human-readable output, got:\n%s", combined)
+	}
+}
+
+// Real drift still blocks, and stdout must stay clean of JSON in that path.
+func TestDocDriftRealDriftStillBlocksWithCoversPresent(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := setupRepoMain(t, map[string]string{
+		"docs/auth.md": coversDocFM,
+		"src/auth.go":  "package auth\n\ntype OldWidget struct{}\n",
+		"CLAUDE.md":    "we use OldWidget here\n",
+	})
+	commitBase(t, dir)
+	// Uncommitted removal of OldWidget -> dangling reference in CLAUDE.md (blocking),
+	// AND src/auth.go changed while docs/auth.md (which covers it) stays untouched.
+	if err := os.WriteFile(filepath.Join(dir, "src", "auth.go"),
+		[]byte("package auth\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	code := runDocDrift([]string{dir}, strings.NewReader(""), &out, &errb)
+	if code != 2 {
+		t.Fatalf("real drift must still block — want exit 2, got %d", code)
+	}
+	if !strings.Contains(errb.String(), "OldWidget") {
+		t.Fatalf("want the dangling symbol on stderr, got:\n%s", errb.String())
+	}
+	if !strings.Contains(errb.String(), "docs/auth.md") {
+		t.Fatalf("covers section must ride along on stderr, got:\n%s", errb.String())
+	}
+	if strings.Contains(out.String(), "hookSpecificOutput") {
+		t.Fatalf("blocking path must not also emit JSON, got:\n%s", out.String())
+	}
+}
+
 func setupRepoMain(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -735,14 +736,48 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
-	if len(findings) == 0 {
+
+	// The advisory covers rider: docs that govern changed code but went untouched.
+	// Its gate is evaluated independently of the blocking class above — see
+	// driftGuardOK's class parameter.
+	//
+	// An error from either call is a TOOL error, not a finding, and takes the same
+	// path DocDrift's does above: stderr + exit 2. The advisory-never-blocks rule
+	// governs findings, not bugs — and by here DocDrift's own gitDiff already
+	// succeeded, so a failure means something is genuinely broken. Swallowing it
+	// would hide a real bug forever.
+	docs, err := audit.RepoDocs(root, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	covers, err := audit.CoversDrift(root, spec, docs)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	if len(covers) > 0 && guard && !driftGuardOK(root, "covers-drift") {
+		covers = nil // already advised for this HEAD
+	}
+
+	blocking := len(findings) > 0 && (!guard || driftGuardOK(root, "doc-drift"))
+
+	switch {
+	case blocking:
+		printDocDrift(stderr, findings)
+		if len(covers) > 0 {
+			printCoversDrift(stderr, covers)
+		}
+		return 2
+	case len(covers) > 0:
+		if guard {
+			emitStopJSON(stdout, coversDriftMessage(covers))
+		} else {
+			printCoversDrift(stdout, covers)
+		}
 		return 0
 	}
-	if guard && !driftGuardOK(root, "doc-drift") {
-		return 0 // already nagged for this HEAD
-	}
-	printDocDrift(stderr, findings)
-	return 2
+	return 0
 }
 
 // docDriftDiffBase resolves what to `git diff` against: the closest integration
@@ -839,6 +874,48 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 	fmt.Fprintln(w, "names the docs that govern a file you changed, including ones no symbol drift")
 	fmt.Fprintln(w, "points at. Already reconciled, or is it framed history? Stop again — you won't")
 	fmt.Fprintln(w, "be re-prompted for this HEAD.")
+}
+
+// coversDriftMessage renders the advisory covers-drift text shared by the JSON
+// and human-readable paths.
+func coversDriftMessage(fs []audit.CoversFinding) string {
+	var b strings.Builder
+	b.WriteString("covers-drift: this change set modified code that a doc declares it covers,\n")
+	b.WriteString("but the doc itself is untouched. Reconcile it in THIS change set, or confirm\n")
+	b.WriteString("it is still accurate:\n")
+	for _, f := range fs {
+		fmt.Fprintf(&b, "  • %s covers:\n", f.Doc)
+		for _, p := range f.Paths {
+			fmt.Fprintf(&b, "      %s\n", p)
+		}
+	}
+	b.WriteString("This is advisory — nothing is blocked. Editing the doc silences it.\n")
+	return b.String()
+}
+
+// printCoversDrift writes the advisory text for human consumption (--range mode,
+// or riding along on a blocking stderr message).
+func printCoversDrift(w io.Writer, fs []audit.CoversFinding) {
+	fmt.Fprint(w, coversDriftMessage(fs))
+}
+
+// emitStopJSON writes a Stop-hook JSON payload carrying msg as additionalContext.
+// This is the ONLY exit-0 channel a Stop hook has that reaches the agent: plain
+// stdout from a Stop hook goes to the user's transcript and the model never sees
+// it. Do not "simplify" this to a bare Fprintln — that would silently make the
+// whole advisory class invisible.
+func emitStopJSON(w io.Writer, msg string) {
+	payload := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "Stop",
+			"additionalContext": msg,
+		},
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return // advisory: never break the turn
+	}
+	fmt.Fprintln(w, string(b))
 }
 
 // runSchema prints the JSON Schema describing docgraph frontmatter, stamped with
