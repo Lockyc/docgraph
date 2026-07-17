@@ -77,6 +77,42 @@ it merely references — that belongs to the primitive's own register. A wrong
 edge misdirects the next agent and is worse than a missing one; when unsure,
 leave it out.
 
+## Rolling edges out across a repo
+
+**First ask whether it pays at all.** `covers` earns its keep only where an agent
+*cannot hold all the docs at once*. A repo whose documentation is just its
+auto-loaded roots (`CLAUDE.md`, `README.md`) gains nothing — the answer is
+already in context before the question forms. Don't declare edges there; it's
+ceremony. The test is the number of **non-root** docs, not total docs.
+
+**Roots themselves get no frontmatter** (the convention in every repo that has
+adopted this). They're always-loaded entry points; a `type:` on them buys nothing
+and puts an index entry where no one needs one.
+
+**Derive the edges from what the docs already assert — do not guess.** Repos
+encode ownership in prose long before anyone declares it: a hand-maintained
+"Docs" column, "this page owns the *policy*; the runbook carries the mechanics",
+"Full design: <other doc>". Transcribe those claims; they are the owner's own
+answer. **Mention frequency is worthless** as a signal — one real repo mentions
+`tools/hl` in ~100 docs and it has exactly one owner.
+
+**Granularity follows the code's layout, not a rule.** Use a directory edge when
+the unit *is* a directory (`tools/nextdns-admin/` — one tool, one dir). Use file
+edges when a feature's code is scattered across layer directories, as in a
+Laravel app (`app/Models/X.php` + `app/Policies/XPolicy.php` +
+`app/Enums/XKind.php`). `covers` supports exact paths and directory prefixes —
+**there are no globs** — so a layer-organised repo needs many small edges, and
+that's correct rather than a smell.
+
+**Never stamp `verified:` you didn't earn.** It means "last checked against
+reality". Adding today's date to docs you merely read makes `stale` vouch for
+them forever. Declare `type:` and `covers:`; leave `verified:` to whoever
+actually verifies.
+
+**Check the result mechanically, not by eye.** Before committing a batch: every
+target exists (a missing one fails the gate), no path is claimed by two docs, and
+no doc claims a file sitting inside another doc's directory edge.
+
 ## The audit gate
 
 `docgraph .` runs six whole-state checks (orphans, broken links, untracked,
