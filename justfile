@@ -33,11 +33,26 @@ gate:
 
 # cut the release for the current VERSION: fast-forward main → tag v<VERSION> → GitHub release.
 # run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
-release:
+# NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). `gh
+# --generate-notes` used to fill this in and was removed: it summarises MERGED PRs, and this
+# repo integrates directly on the trunk, so it only ever emitted a bare "Full Changelog"
+# link — a release with no notes, which the release model forbids. Write them; don't
+# reintroduce the flag.
+release notes="RELEASE_NOTES.md":
     #!/usr/bin/env bash
     set -euo pipefail
     version="$(tr -d '[:space:]' < VERSION)"
     tag="v${version}"
+    # Check the notes FIRST: everything below this point (tag, push, release) is
+    # public and awkward to retract, so a missing notes file must fail before any
+    # of it happens, not between the tag push and the release create.
+    if [ ! -s "{{notes}}" ]; then
+      echo "✗ no release notes at '{{notes}}' — write them, then re-run." >&2
+      echo "  Summarise what shipped since the previous tag (features / fixes / docs)," >&2
+      echo "  leading with anything that changes how consumers install or invoke docgraph." >&2
+      echo "  Pass a different path with: just release <file>" >&2
+      exit 1
+    fi
     if [ -n "$(git status --porcelain)" ]; then
       echo "✗ working tree is dirty — commit the VERSION bump first" >&2
       exit 1
@@ -59,5 +74,5 @@ release:
     git push origin main
     git tag -a "${tag}" -m "${tag}" main
     git push origin "${tag}"
-    gh release create "${tag}" --target main --title "${tag}" --generate-notes
+    gh release create "${tag}" --target main --title "${tag}" --notes-file "{{notes}}"
     echo "✓ released ${tag}"

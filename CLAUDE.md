@@ -459,6 +459,11 @@ docs/" with zero config.
   breaking CLI change, minor for a new feature, patch for a fix.
 - **Cut a release** from `dev` with `VERSION` bumped + committed: `just release` runs
   `gate`, fast-forwards `main`, tags `v<VERSION>`, and publishes the GitHub release.
+  **Notes are hand-written and required** — put them in `RELEASE_NOTES.md` (gitignored,
+  per-release scratch) or pass a path: `just release <file>`. The recipe refuses to run
+  without them, before it touches anything public. `gh --generate-notes` is deliberately
+  *not* used: it summarises merged PRs, and this repo integrates on the trunk, so it only
+  ever produced a bare changelog link.
 - **The major version lives in the module path too** — `go.mod` declares
   `github.com/lockyc/docgraph/v2`, and the `/vN` suffix must be bumped in lockstep with
   a major `VERSION` bump (`v3` → `module …/v3`, plus the `internal/` import paths, plus
