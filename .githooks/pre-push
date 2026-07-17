@@ -26,3 +26,5 @@ fi
 "$bin" .
 # Diff-scoped ADVISORY nag: footgun declarations ADDED in the pushed range. Never blocks.
 printf '%s' "$refs" | "$bin" footgun-drift . || true
+# Diff-scoped ADVISORY nag: docs whose 'covers' edge points at code this push changed. Never blocks.
+printf '%s' "$refs" | "$bin" covers-drift . || true
