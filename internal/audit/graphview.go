@@ -100,6 +100,9 @@ func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, e
 
 	// Guarantee non-nil slices so the JSON always carries the keys as empty
 	// arrays rather than null — Mycelium keys off their presence.
+	if v.Nodes == nil {
+		v.Nodes = []GraphNode{}
+	}
 	if v.ContentEdges == nil {
 		v.ContentEdges = []ContentEdge{}
 	}

@@ -92,6 +92,45 @@ func TestBuildGraphViewNonNilSlicesWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestBuildGraphViewNodesEmptyArrayNotNullWhenNoMarkdown covers a repo with
+// zero tracked .md files (only a committed .go file) — the plausible
+// code-only/fresh-repo shape for an ecosystem scanner. BuildGraphView's node
+// loop never appends, so v.Nodes stays nil unless guarded like the sibling
+// slices; the JSON payload must still carry "nodes": [] , never null, since
+// Mycelium keys off its presence just like contentEdges/metadataEdges/islands.
+func TestBuildGraphViewNodesEmptyArrayNotNullWhenNoMarkdown(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"main.go": "package main\n",
+	}, []string{"main.go"})
+
+	v, err := BuildGraphView(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Nodes == nil {
+		t.Fatalf("Nodes must be non-nil, got nil")
+	}
+	b, err := v.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var round map[string]json.RawMessage
+	if err := json.Unmarshal(b, &round); err != nil {
+		t.Fatal(err)
+	}
+	nodes, ok := round["nodes"]
+	if !ok {
+		t.Fatalf("JSON missing key %q", "nodes")
+	}
+	if strings.TrimSpace(string(nodes)) == "null" {
+		t.Fatalf("nodes must not be JSON null, got: %s", nodes)
+	}
+	var arr []any
+	if err := json.Unmarshal(nodes, &arr); err != nil {
+		t.Fatalf("nodes is not a JSON array: %v (%s)", err, nodes)
+	}
+}
+
 // TestGraphViewJSONEdgeKeysAreCamelCase asserts the edge-object keys inside
 // contentEdges/metadataEdges are camelCase, matching every other key in the
 // payload (schemaVersion, repoRoot, hasFrontmatter, ...). ContentEdge and
