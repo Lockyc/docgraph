@@ -167,64 +167,14 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		}
 	}
 
-	read := func(rel string) (string, bool) {
-		b, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(rel)))
-		if err != nil {
-			return "", false
-		}
-		return string(b), true
-	}
-
 	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
 
-	// BFS reachability from roots, following only links to tracked .md files.
-	reachable := map[string]bool{}
-	var queue []string
-	enqueue := func(f string) {
-		if !reachable[f] {
-			reachable[f] = true
-			queue = append(queue, f)
-		}
-	}
+	rootSet := map[string]bool{}
 	for _, r := range roots {
-		enqueue(r)
+		rootSet[r] = true
 	}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		content, ok := read(cur)
-		if !ok {
-			continue
-		}
-		for _, link := range extractLinks(content) {
-			if !isLocalMd(link.Target) {
-				continue
-			}
-			if resolved := resolveTarget(cur, link.Target); trackedSet[resolved] {
-				enqueue(resolved)
-			}
-		}
-		// Path-mention edges: an agent follows a bare/inline-code path reference
-		// (`docs/x.md`) just like a markdown link, so a mention makes it reachable.
-		for f := range trackedSet {
-			if !reachable[f] && mentionsPath(content, f) {
-				enqueue(f)
-			}
-		}
-		// Frontmatter typed edges: a doc reached via a part-of/see-also/etc. edge
-		// to another tracked doc is reachable — same graph, third edge kind.
-		if d := docs[cur]; d != nil {
-			for _, e := range d.Links {
-				if ClassifyTarget(e.To) != EdgeDoc {
-					continue
-				}
-				tgt := ResolveEdgeTarget(e.To)
-				if trackedSet[tgt] {
-					enqueue(tgt)
-				}
-			}
-		}
-	}
+	cg := BuildContentGraph(repoRoot, tracked, trackedSet, rootSet, globs)
+	orphans := cg.Islands()
 
 	// Broken links: every tracked (non-ignored) md, any .md target missing on disk.
 	var broken []BrokenLink
@@ -232,8 +182,8 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		if matchesIgnore(f, globs) {
 			continue
 		}
-		content, ok := read(f)
-		if !ok {
+		content, err := readFile(repoRoot, f)
+		if err != nil {
 			continue
 		}
 		for _, link := range extractLinks(content) {
@@ -244,13 +194,6 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 			if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(resolved))); err != nil {
 				broken = append(broken, BrokenLink{Source: f, Line: link.Line, Target: resolved})
 			}
-		}
-	}
-
-	var orphans []string
-	for _, f := range tracked {
-		if !reachable[f] && !matchesIgnore(f, globs) {
-			orphans = append(orphans, f)
 		}
 	}
 
@@ -265,7 +208,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		}
 	}
 
-	sort.Strings(orphans)
+	// orphans is already sorted by cg.Islands().
 	sort.Strings(untracked)
 	sort.Slice(broken, func(i, j int) bool {
 		if broken[i].Source != broken[j].Source {
@@ -280,7 +223,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 	return Report{
 		Roots:               roots,
 		TrackedMD:           len(tracked),
-		Reachable:           len(reachable),
+		Reachable:           len(cg.Nodes) - len(orphans),
 		Orphans:             orphans,
 		BrokenLinks:         broken,
 		Untracked:           untracked,

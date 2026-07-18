@@ -159,12 +159,31 @@ func TestAuditReportsCycle(t *testing.T) {
 	}
 }
 
-func TestFrontmatterEdgeFeedsReachability(t *testing.T) {
-	// hub.md is a root-reachable doc; leaf.md is linked NOWHERE by markdown or
-	// path-mention — only reachable via hub.md's frontmatter see-also edge.
+// TestFrontmatterEdgeAloneIsIsland asserts the Task 3 pivot invariant: a
+// frontmatter typed edge (`links: [{rel: ..., to: ...}]`) is NOT a content
+// edge. hub.md is root-reachable; leaf.md is linked nowhere by markdown link
+// or path-mention — only referenced via hub.md's frontmatter see-also edge —
+// so under the content-graph island rule leaf.md has zero inbound content
+// edges and must be an orphan. (Superseded from a pre-pivot pair of tests
+// that asserted the opposite — that a frontmatter edge alone made a doc
+// reachable, back when reachability was one union BFS over links, mentions,
+// AND frontmatter edges. Frontmatter edges now feed the metadata graph
+// instead, Task 4.)
+//
+// The "./" prefix on the edge target is deliberate, not cosmetic: without it,
+// the raw "to: docs/leaf.md" YAML text in the frontmatter block itself would
+// satisfy mentionsPath's word-boundary check (preceding char is a space), so
+// leaf.md would pick up a *mention* content edge purely by coincidence of the
+// YAML syntax — passing the test for the wrong reason. "./docs/leaf.md" defeats
+// that: ResolveEdgeTarget's filepath.Clean still resolves the frontmatter edge
+// to "docs/leaf.md", but the raw text's "/" immediately before "docs/leaf.md"
+// is a path-word byte, so mentionsPath's boundary check fails on it and no
+// accidental mention edge is created. This isolates the assertion to the one
+// mechanism under test: frontmatter edges don't feed the content graph.
+func TestFrontmatterEdgeAloneIsIsland(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		"CLAUDE.md":    "[hub](docs/hub.md)\n",
-		"docs/hub.md":  "---\ntype: index\nlinks: [{rel: see-also, to: docs/leaf.md}]\n---\nhub body\n",
+		"docs/hub.md":  "---\ntype: index\nlinks: [{rel: see-also, to: ./docs/leaf.md}]\n---\nhub body\n",
 		"docs/leaf.md": "---\ntype: reference\n---\nleaf body\n",
 	}, []string{"CLAUDE.md", "docs/hub.md", "docs/leaf.md"})
 
@@ -172,33 +191,13 @@ func TestFrontmatterEdgeFeedsReachability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
+	found := false
 	for _, o := range rep.Orphans {
 		if o == "docs/leaf.md" {
-			t.Fatalf("docs/leaf.md is an orphan, but a frontmatter see-also edge should reach it; orphans=%v", rep.Orphans)
+			found = true
 		}
 	}
-}
-
-// TestFrontmatterEdgeIsolatedFromPathMention guards against the frontmatter-edge
-// BFS block being a no-op that happens to pass only because the raw "to: <path>"
-// YAML text also satisfies the path-mention edge kind. The "./" prefix here is
-// stripped by ResolveEdgeTarget's filepath.Clean but defeats mentionsPath's
-// word-boundary check (the char before "docs/leaf2.md" is '/', a path-word byte),
-// so only the frontmatter-edge mechanism can make leaf2.md reachable.
-func TestFrontmatterEdgeIsolatedFromPathMention(t *testing.T) {
-	dir := setupRepo(t, map[string]string{
-		"CLAUDE.md":     "[hub](docs/hub.md)\n",
-		"docs/hub.md":   "---\ntype: index\nlinks: [{rel: see-also, to: ./docs/leaf2.md}]\n---\nhub body\n",
-		"docs/leaf2.md": "---\ntype: reference\n---\nleaf body\n",
-	}, []string{"CLAUDE.md", "docs/hub.md", "docs/leaf2.md"})
-
-	rep, err := Audit(dir, Options{})
-	if err != nil {
-		t.Fatalf("Audit: %v", err)
-	}
-	for _, o := range rep.Orphans {
-		if o == "docs/leaf2.md" {
-			t.Fatalf("docs/leaf2.md is an orphan, but a frontmatter see-also edge should reach it; orphans=%v", rep.Orphans)
-		}
+	if !found {
+		t.Fatalf("docs/leaf.md should be an orphan: a frontmatter see-also edge is not a content edge, orphans=%v", rep.Orphans)
 	}
 }
