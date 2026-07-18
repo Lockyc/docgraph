@@ -55,6 +55,14 @@ func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, e
 	return buildGraphViewFrom(worktreeSource{root: repoRoot}, extraRoots, ignores)
 }
 
+// BuildGraphViewAtRef builds the graph view from the committed state at ref,
+// reading from gitDir's object store — the bare-repo-capable counterpart to
+// BuildGraphView. Output is identical to a clean-checkout BuildGraphView on the
+// same commit (bar RepoRoot, which is the caller's label).
+func BuildGraphViewAtRef(gitDir, ref string, extraRoots, ignores []string) (GraphView, error) {
+	return buildGraphViewFrom(refSource{gitDir: gitDir, ref: ref}, extraRoots, ignores)
+}
+
 func buildGraphViewFrom(src fileSource, extraRoots, ignores []string) (GraphView, error) {
 	tracked, err := src.tracked()
 	if err != nil {

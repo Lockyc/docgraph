@@ -3,6 +3,7 @@ package audit
 import (
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -106,6 +107,25 @@ func addedLines(root, rng, path string) (map[int]bool, error) {
 		}
 	}
 	return added, nil
+}
+
+// trackedAtRef lists the tracked "*.md" paths at ref from the object store, so it
+// works on a bare repo (no work-tree). It enumerates all files at the ref via
+// ls-tree and filters to .md — the same effective set trackedMD's "*.md" pathspec
+// yields in a checkout, without depending on pathspec-glob semantics.
+func trackedAtRef(gitDir, ref string) ([]string, error) {
+	lines, err := gitLines(gitDir, "ls-tree", "-r", "--name-only", ref)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, l := range lines {
+		if strings.HasSuffix(l, ".md") {
+			out = append(out, l)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // fileAtRev returns path's content at rev; ok=false if it doesn't exist there.

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -47,6 +48,20 @@ type worktreeSource struct{ root string }
 func (s worktreeSource) tracked() ([]string, error)      { return trackedMD(s.root) }
 func (s worktreeSource) read(rel string) (string, error) { return readFile(s.root, rel) }
 func (s worktreeSource) label() string                   { return s.root }
+
+// refSource reads tracked docs + content at a git ref from the object store, so
+// the graph can be built on a bare repo. It never touches a work-tree.
+type refSource struct{ gitDir, ref string }
+
+func (s refSource) tracked() ([]string, error) { return trackedAtRef(s.gitDir, s.ref) }
+func (s refSource) read(rel string) (string, error) {
+	content, ok := fileAtRev(s.gitDir, s.ref, rel)
+	if !ok {
+		return "", fmt.Errorf("%s not found at %s", rel, s.ref)
+	}
+	return content, nil
+}
+func (s refSource) label() string { return s.gitDir }
 
 // BuildContentGraph is the working-tree entry point (unchanged signature).
 func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[string]bool, globs []string) ContentGraph {
