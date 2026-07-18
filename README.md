@@ -454,10 +454,12 @@ error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
 dangling-reference or anchored-value finding (stderr) or on an error. `covers` /
 `index` / `stale` / `graph` are read-only: `0` always on success, `2` only on error.
 
-On a finding, `docgraph [path]` prints a self-describing footer below the
-findings — what docgraph is, why the non-zero exit aborts the push, and how to
-remediate each category — so a failed push doesn't have to be reverse-engineered.
-Clean/CI runs stay terse.
+A clean run prints a single line (`docgraph: clean ✓ (N tracked .md, M reachable,
+0 findings)`), so a green pre-push gate doesn't bury the terminal. Only on a
+finding does the output turn self-describing — a banner, the sections that
+actually have findings, and a footer explaining what docgraph is, why the
+non-zero exit aborts the push, and how to remediate each category — so a failed
+push doesn't have to be reverse-engineered.
 
 > **v3 breaking changes:** (1) `orphans` is now the **content-graph island** rule
 > (a non-root doc with zero inbound links/mentions) — frontmatter edges no longer
