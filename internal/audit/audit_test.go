@@ -1,6 +1,9 @@
 package audit
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestAudit(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
@@ -85,7 +88,7 @@ func TestAuditIgnore(t *testing.T) {
 
 func TestFrontmatterFindings(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
-		"CLAUDE.md":     "[a](docs/good.md) [b](docs/bad.md) [c](docs/plain.md)\n",
+		"CLAUDE.md":     "---\ntype: index\n---\n[a](docs/good.md) [b](docs/bad.md) [c](docs/plain.md)\n",
 		"docs/good.md":  "---\ntype: reference\n---\nok\n",
 		"docs/bad.md":   "---\ntitle: no type here\n---\nbody\n",
 		"docs/plain.md": "no frontmatter at all\n",
@@ -96,19 +99,49 @@ func TestFrontmatterFindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Audit: %v", err)
 	}
-	// Expect: bad.md (missing type) + broke.md (malformed). good.md and plain.md are clean.
+	// Expect: bad.md (missing type) + broke.md (malformed) + plain.md (no block at
+	// all, non-README — required under the Task 5 rule). good.md is clean; CLAUDE.md
+	// carries a real block so it isn't incidental noise in a test about the other cases.
 	got := map[string]string{}
 	for _, f := range rep.FrontmatterFindings {
 		got[f.File] = f.Detail
 	}
-	if len(got) != 2 {
-		t.Fatalf("findings = %v, want exactly bad.md + broke.md", rep.FrontmatterFindings)
+	if len(got) != 3 {
+		t.Fatalf("findings = %v, want exactly bad.md + broke.md + plain.md", rep.FrontmatterFindings)
 	}
 	if _, ok := got["docs/bad.md"]; !ok {
 		t.Error("missing finding for docs/bad.md (no type)")
 	}
 	if _, ok := got["docs/broke.md"]; !ok {
 		t.Error("missing finding for docs/broke.md (malformed)")
+	}
+	if _, ok := got["docs/plain.md"]; !ok {
+		t.Error("missing finding for docs/plain.md (no frontmatter block, non-README)")
+	}
+}
+
+// TestFrontmatterRequiredExceptReadme is the Task 5 pivot: a frontmatter block
+// is now required on every tracked, non-ignored doc EXCEPT a README.md (any
+// directory, matched by basename) — GitHub renders leading YAML as a metadata
+// table in every directory view, so READMEs stay exempt everywhere.
+func TestFrontmatterRequiredExceptReadme(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"README.md":     "# Root\n[x](docs/x.md)\n",
+		"sub/README.md": "# Sub, no frontmatter\n",
+		"docs/x.md":     "# X, no frontmatter\n",
+	}, []string{"README.md", "sub/README.md", "docs/x.md"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range rep.FrontmatterFindings {
+		got = append(got, f.File)
+	}
+	want := []string{"docs/x.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("frontmatter findings = %v, want %v", got, want)
 	}
 }
 

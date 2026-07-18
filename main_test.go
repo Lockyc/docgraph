@@ -94,8 +94,13 @@ func mkOrphanRepo(t *testing.T) string {
 		os.MkdirAll(filepath.Dir(full), 0o755)
 		os.WriteFile(full, []byte(c), 0o644)
 	}
-	write("CLAUDE.md", "hub with no links\n")
-	write("docs/orphan.md", "unreferenced\n")
+	// CLAUDE.md and docs/orphan.md now each need a frontmatter block (Task 5's
+	// mandatory rule), which would otherwise make both metadata islands too — give
+	// them a mutual frontmatter `see-also` edge to stay clean on that check. A
+	// frontmatter edge doesn't feed content-graph reachability (stripped before link
+	// scanning), so docs/orphan.md stays a genuine content-graph orphan below.
+	write("CLAUDE.md", "---\ntype: index\nlinks:\n  - rel: see-also\n    to: docs/orphan.md\n---\nhub with no links\n")
+	write("docs/orphan.md", "---\ntype: reference\n---\nunreferenced\n")
 	git := func(a ...string) {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
@@ -139,7 +144,13 @@ func mkMetadataIslandRepo(t *testing.T) string {
 		os.MkdirAll(filepath.Dir(full), 0o755)
 		os.WriteFile(full, []byte(c), 0o644)
 	}
-	write("CLAUDE.md", "hub\n[a](docs/a.md)\n")
+	// CLAUDE.md now needs a frontmatter block itself (Task 5's mandatory rule), which
+	// would make IT a second metadata island too unless it carries a real doc->doc
+	// edge. Point that edge at README.md (frontmatter-exempt by basename, so it
+	// doesn't need its own block) rather than at docs/a.md, so the island under test
+	// stays isolated to exactly docs/a.md.
+	write("README.md", "# repo\n")
+	write("CLAUDE.md", "---\ntype: index\nlinks:\n  - rel: see-also\n    to: README.md\n---\nhub\n[a](docs/a.md)\n")
 	write("docs/a.md", "---\ntype: reference\n---\nno metadata edges\n")
 	git := func(a ...string) {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
@@ -147,7 +158,7 @@ func mkMetadataIslandRepo(t *testing.T) string {
 		}
 	}
 	git("init")
-	git("add", "CLAUDE.md", "docs/a.md")
+	git("add", "CLAUDE.md", "docs/a.md", "README.md")
 	return dir
 }
 

@@ -88,8 +88,8 @@ func mentionsPath(content, path string) bool {
 // parseDocs reads and parses the frontmatter of every non-ignored tracked .md,
 // returning a cache of the successfully-parsed docs (keyed by repo-relative
 // slash path; malformed docs are omitted from the cache) plus well-formedness
-// findings: malformed YAML, or a block present with no `type`. Files with no
-// frontmatter block are valid and produce neither a cache entry nor a finding.
+// findings: malformed YAML, a block present with no `type`, or (except any
+// README.md, matched by basename) no frontmatter block at all.
 func parseDocs(repoRoot string, tracked, globs []string) (map[string]*Doc, []FrontmatterFinding) {
 	docs := map[string]*Doc{}
 	var findings []FrontmatterFinding
@@ -107,7 +107,13 @@ func parseDocs(repoRoot string, tracked, globs []string) (map[string]*Doc, []Fro
 			continue
 		}
 		if d == nil {
-			continue // no frontmatter block — valid
+			if filepath.Base(f) != "README.md" {
+				findings = append(findings, FrontmatterFinding{
+					File:   f,
+					Detail: "frontmatter block required (add a --- block with a type:)",
+				})
+			}
+			continue // no frontmatter block; README is exempt
 		}
 		if strings.TrimSpace(d.Type) == "" {
 			findings = append(findings, FrontmatterFinding{File: f, Detail: "frontmatter present but missing required field: type"})

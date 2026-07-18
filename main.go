@@ -582,7 +582,8 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
 	}
 	if frontmatter {
-		fmt.Fprintln(w, "  FRONTMATTER → fix the YAML block, or add a `type:` field (or remove the block).")
+		fmt.Fprintln(w, "  FRONTMATTER → add a `---` frontmatter block with a `type:` (every doc except a")
+		fmt.Fprintln(w, "                README.md needs one); or fix malformed YAML; or `--skip frontmatter`.")
 	}
 	if edges {
 		fmt.Fprintln(w, "  EDGES     → fix the frontmatter `to:` target (path is repo-root-relative), or remove the edge.")
