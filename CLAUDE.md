@@ -18,8 +18,9 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
 `stale`):
 
 - **`docgraph .`** — six **whole-state** checks against the current tree:
-  orphans (tracked `.md` unreachable from the roots), broken internal `.md`
-  links, untracked `.md`, a `leaks` content scan, `frontmatter` (a doc's
+  orphans (a non-root tracked `.md` with zero inbound content-graph edges),
+  broken internal `.md` links, untracked `.md`, a `leaks` content scan,
+  `frontmatter` (a doc's
   leading YAML frontmatter block, if present, must parse and carry a `type`),
   and `edges` (a frontmatter `links:` list's internal targets must exist, and
   `part-of`/`supersedes` edges must not cycle — see "Frontmatter model"
@@ -134,11 +135,13 @@ schema` all key off:
   custom allowed. `to` is **repo-root-relative** (`ResolveEdgeTarget` resolves
   against the repo root, not the source doc's directory — unlike a markdown
   link) with its kind inferred (`ClassifyTarget`), never declared: an internal
-  `.md` path is a doc edge (existence-checked, feeds reachability — see the
-  reachability footgun below), another internal path is a code edge
-  (existence-checked only), a URL/`mailto:` is external (unverifiable, never
-  checked), and an `owner/repo:path` form is cross-repo (deferred to
-  Mycelium — docgraph sees only one repo — and never a finding here).
+  `.md` path is a doc edge (existence-checked; as of v3 a frontmatter doc-edge
+  no longer feeds content-graph reachability, it's a metadata-graph edge in
+  its own right — see the two-graphs footgun below), another internal path is
+  a code edge (existence-checked only), a URL/`mailto:` is external
+  (unverifiable, never checked), and an `owner/repo:path` form is cross-repo
+  (deferred to Mycelium — docgraph sees only one repo — and never a finding
+  here).
 - **Cycles**: only `part-of`/`supersedes` edges between tracked docs form the
   acyclic-checked graph (`detectCycles`/`cycleRels`); every other `rel` is a
   cross-reference, not hierarchy/lineage, and is exempt from cycle detection.
@@ -245,15 +248,17 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   read inline-code path mentions — that's how an agent follows a bare
   `` `docs/x.md` `` reference. Link-extraction and reachability answer different
   questions; don't unify them.
-- **Reachability = markdown links, path mentions, OR frontmatter doc-edges —
-  don't narrow to any one.** Model-C repos (design docs referenced by path,
-  not clickable link) would show a flood of false orphans under link-only
-  reachability; removing `mentionsPath` reintroduces it. A frontmatter
-  `links:` edge to a tracked doc (`rel` doesn't matter — `part-of`,
-  `see-also`, anything) is the **third** reachability source: a doc reached
-  only via a typed edge is not an orphan. Only `EdgeDoc`-classified targets
-  (internal `.md`) count as reachability edges — code/external/cross-repo
-  edges never make a doc reachable.
+- **Two graphs, not one union (v3 pivot).** Reachability was once a single union
+  of markdown links ∪ path-mentions ∪ frontmatter-doc-edges. v3 splits this into
+  two independently-enforced graphs: the **content graph** (links ∪ path-mentions)
+  enforces *findability* via an island rule (a non-root doc with zero inbound
+  content edges is an `orphans` finding), and the **metadata graph** (frontmatter
+  doc→doc edges) enforces *structural placement* via its own island rule (a
+  frontmatter doc participating in zero doc→doc edges either direction is a
+  `disconnected` finding). Do NOT re-merge them into one union check — they answer
+  different questions (findability is inbound-only; placement is either-direction)
+  and root-reachability is deliberately no longer enforced (the generated `graph`
+  view provides findability, not a hand-curated index chain).
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
   and `.agents/**` agent skill/config files, which aren't documentation, and
