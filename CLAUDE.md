@@ -440,6 +440,15 @@ docs/" with zero config.
 - `internal/audit/graphview.go` — `BuildGraphView`/`GraphView` +
   `GraphSchemaVersion` (the `graph` view's payload: reuses both `Build*Graph`
   fns, renders `Markdown()` or `JSON()`; the stable Mycelium seam).
+- **`graph --ref <ref>` reads the doc-graph from the object store at a ref
+  (bare-repo capable).** It builds via `BuildGraphViewAtRef` over a `refSource`
+  (`git ls-tree` + `git show`/`fileAtRev`), reusing the *same* `buildContentGraph`/
+  `parseDocsFrom`/`buildGraphViewFrom` internals as the working-tree path (a
+  `worktreeSource`) — one graph computation, two sources, so the served graph can
+  never diverge by mode. `--ref` mode must **not** call `GitRoot`
+  (`rev-parse --show-toplevel` fails on a bare repo). Output shape is unchanged
+  (`GraphSchemaVersion` stays 1); a `--ref HEAD` run on a clean tree equals the
+  default run. Only `graph` is ref-aware — the audit checks stay working-tree only.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
   `changedCode`/`addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go`,

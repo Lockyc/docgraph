@@ -373,6 +373,14 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   presence. `schemaVersion` is `1`; a breaking change to the shape bumps it rather
   than silently reshaping the payload. `--root`/`--ignore` apply as elsewhere.
 
+  `graph` reads the working tree by default. Pass `--ref <ref>` (e.g. `--ref HEAD`,
+  `--ref dev`) to build the graph from the **committed state at that ref**, read
+  entirely from the git object store — so it also runs inside a **bare** repo (no
+  checkout). On a clean checkout `--ref HEAD` matches the default output exactly; it
+  diverges only by ignoring uncommitted/untracked changes to tracked docs, which is
+  what "at a ref" means. This is the mode a scanner (e.g. Mycelium) uses to read a
+  bare repo store without materializing a work-tree.
+
 ## Install
 
 **Guided (Claude Code):** `/docgraph:install` — installs the binary, offers to

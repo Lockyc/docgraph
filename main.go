@@ -1050,7 +1050,9 @@ func runStale(args []string, stdout, stderr io.Writer) int {
 
 // runGraph prints the doc graph — both the content and metadata graphs — as
 // human-readable markdown by default, or a stable JSON payload with --json (the
-// seam Mycelium ingests). A read-only view — never part of the gate; always 0.
+// seam Mycelium ingests). --ref <ref> reads the committed state at that ref from
+// the object store instead of the working tree (bare-repo capable). A read-only
+// view — never part of the gate; always 0.
 func runGraph(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docgraph graph", flag.ContinueOnError)
 	fs.SetOutput(stderr)
