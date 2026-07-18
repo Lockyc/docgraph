@@ -455,13 +455,26 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 	return cfg, err
 }
 
-// printReport prints the sections for the checks being run and reports whether any
-// has findings. The output is written to be self-describing: a reader (often a
-// fresh agent seeing only a failed `git push`) should learn from the text alone
-// what docgraph is, what a finding means, why a non-zero exit aborts a push, and
-// how to remediate. The banner prints always; the explain-and-remediate footer
-// only on findings, so green/CI runs stay terse.
+// printReport prints the outcome of the checks being run and reports whether any
+// has findings. A clean run is a single terse line, so a green pre-push gate does
+// not bury the terminal in headers nobody reads. Only on findings does the output
+// turn self-describing — a reader (often a fresh agent seeing only a failed `git
+// push`) should then learn from the text alone what docgraph is, what a finding
+// means, why a non-zero exit aborts a push, and how to remediate: banner, the
+// sections that actually have findings, and the explain-and-remediate footer.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
+	orphans := sel["orphans"] && len(r.Orphans) > 0
+	broken := sel["broken"] && len(r.BrokenLinks) > 0
+	untracked := sel["untracked"] && len(r.Untracked) > 0
+	frontmatter := sel["frontmatter"] && len(r.FrontmatterFindings) > 0
+	edges := sel["edges"] && (len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0)
+	leaksFound := sel["leaks"] && len(leaks) > 0
+	disconnected := sel["disconnected"] && len(r.Disconnected) > 0
+	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
+		fmt.Fprintf(w, "docgraph: clean ✓ (%d tracked .md, %d reachable, 0 findings)\n", r.TrackedMD, r.Reachable)
+		return false
+	}
+
 	fmt.Fprintln(w, "docgraph — enforces agent-facing repo hygiene across two doc graphs: the")
 	fmt.Fprintln(w, "content graph (findability — orphans flags an island no prose reference reaches)")
 	fmt.Fprintln(w, "and the metadata graph (structure — disconnected flags a frontmatter doc with no")
@@ -470,35 +483,35 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
-	if sel["orphans"] {
+	if orphans {
 		fmt.Fprintf(w, "ORPHANS (%d) — docs unreachable by link/path-following:\n", len(r.Orphans))
 		for _, o := range r.Orphans {
 			fmt.Fprintf(w, "  %s\n", o)
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["broken"] {
+	if broken {
 		fmt.Fprintf(w, "BROKEN LINKS (%d) — .md targets that don't exist:\n", len(r.BrokenLinks))
 		for _, b := range r.BrokenLinks {
 			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["untracked"] {
+	if untracked {
 		fmt.Fprintf(w, "UNTRACKED (%d) — .md on disk but not in git:\n", len(r.Untracked))
 		for _, u := range r.Untracked {
 			fmt.Fprintf(w, "  %s\n", u)
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["frontmatter"] {
+	if frontmatter {
 		fmt.Fprintf(w, "FRONTMATTER (%d) — malformed frontmatter or missing required `type`:\n", len(r.FrontmatterFindings))
 		for _, f := range r.FrontmatterFindings {
 			fmt.Fprintf(w, "  %s → %s\n", f.File, f.Detail)
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["edges"] {
+	if edges {
 		fmt.Fprintf(w, "EDGES (%d) — frontmatter typed edges with a missing target, or a part-of/supersedes cycle:\n", len(r.BrokenEdges)+len(r.EdgeCycles))
 		for _, e := range r.BrokenEdges {
 			fmt.Fprintf(w, "  %s [%s] → %s (%s)\n", e.Source, e.Rel, e.Target, e.Reason)
@@ -508,30 +521,19 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["leaks"] {
+	if leaksFound {
 		fmt.Fprintf(w, "LEAKS (%d) — tree content matching a leak pattern:\n", len(leaks))
 		for _, l := range leaks {
 			fmt.Fprintf(w, "  %s:%d → %s  (%s)\n", l.File, l.Line, l.Match, l.Pattern)
 		}
 		fmt.Fprintln(w)
 	}
-	if sel["disconnected"] {
+	if disconnected {
 		fmt.Fprintf(w, "DISCONNECTED (%d) — frontmatter docs with no doc→doc edge (metadata island):\n", len(r.Disconnected))
 		for _, d := range r.Disconnected {
 			fmt.Fprintf(w, "  %s\n", d)
 		}
 		fmt.Fprintln(w)
-	}
-	orphans := sel["orphans"] && len(r.Orphans) > 0
-	broken := sel["broken"] && len(r.BrokenLinks) > 0
-	untracked := sel["untracked"] && len(r.Untracked) > 0
-	frontmatter := sel["frontmatter"] && len(r.FrontmatterFindings) > 0
-	edges := sel["edges"] && (len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0)
-	leaksFound := sel["leaks"] && len(leaks) > 0
-	disconnected := sel["disconnected"] && len(r.Disconnected) > 0
-	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
-		fmt.Fprintln(w, "clean ✓")
-		return false
 	}
 
 	n := 0

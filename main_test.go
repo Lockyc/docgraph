@@ -367,7 +367,9 @@ func TestRunLeaksNoRulesWithoutConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (no config → no rules → nothing flagged)\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("LEAKS (0)")) {
+	// A clean run prints only the terse one-liner (no per-check sections), so the
+	// proof of "not flagged" is that the secret value never appears in the output.
+	if bytes.Contains(out.Bytes(), []byte("AKIAIOSFODNN7EXAMPLE")) {
 		t.Errorf("a secret-shaped string must NOT be flagged without a configured rule:\n%s", out.String())
 	}
 }
