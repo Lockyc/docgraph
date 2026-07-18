@@ -990,6 +990,47 @@ func TestRunCovers(t *testing.T) {
 	}
 }
 
+// TestRunGraphJSON exercises the graph subcommand end-to-end: exit 0, and
+// stdout is valid JSON carrying the versioned schema stamp. graph is a
+// read-only view (like covers/index/stale above) — never gates, never
+// appears in checkNames or the generated hook; the invariant tests below
+// confirm the isolation directly.
+func TestRunGraphJSON(t *testing.T) {
+	dir := setupRepoMain(t, map[string]string{
+		"CLAUDE.md": "[a](docs/a.md)\n",
+		"docs/a.md": "---\ntype: reference\n---\n# A\n",
+	})
+	var out, errb bytes.Buffer
+	restore := chdir(t, dir)
+	defer restore()
+	if code := runGraph(nil, &out, &errb); code != 0 {
+		t.Fatalf("markdown mode: exit = %d, stderr=%s", code, errb.String())
+	}
+	out.Reset()
+	if code := runGraph([]string{"--json"}, &out, &errb); code != 0 {
+		t.Fatalf("exit = %d, stderr=%s", code, errb.String())
+	}
+	var v map[string]any
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
+	}
+	if sv, ok := v["schemaVersion"].(float64); !ok || sv != audit.GraphSchemaVersion {
+		t.Fatalf("schemaVersion = %v, want %d", v["schemaVersion"], audit.GraphSchemaVersion)
+	}
+}
+
+// graph is a read-only view, not a gated check — it must never appear in
+// checkNames (the --skip vocabulary) nor in the generated pre-push hook.
+func TestGraphNotAGatedCheck(t *testing.T) {
+	if contains(checkNames, "graph") {
+		t.Fatal("graph must NOT be a whole-state check (checkNames)")
+	}
+	s := hookScript("", nil, false, false)
+	if strings.Contains(s, " graph") || strings.Contains(s, "\"$bin\" graph") {
+		t.Fatalf("generated hook must never invoke graph:\n%s", s)
+	}
+}
+
 func TestPrintReportEdgesHeaderCountsCycles(t *testing.T) {
 	var buf bytes.Buffer
 	rep := audit.Report{EdgeCycles: [][]string{{"a.md", "b.md"}}}

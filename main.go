@@ -45,6 +45,8 @@ func main() {
 			os.Exit(runIndex(args[1:], os.Stdout, os.Stderr))
 		case "stale":
 			os.Exit(runStale(args[1:], os.Stdout, os.Stderr))
+		case "graph":
+			os.Exit(runGraph(args[1:], os.Stdout, os.Stderr))
 		case "version", "--version", "-v":
 			fmt.Println("docgraph " + version)
 			os.Exit(0)
@@ -1041,5 +1043,42 @@ func runStale(args []string, stdout, stderr io.Writer) int {
 	for _, s := range audit.StaleDocs(docs, time.Now(), *olderThan) {
 		fmt.Fprintf(stdout, "%s (verified %s — %dd old, threshold %dd)\n", s.File, s.Verified, s.AgeDays, s.Threshold)
 	}
+	return 0
+}
+
+// runGraph prints the doc graph — both the content and metadata graphs — as
+// human-readable markdown by default, or a stable JSON payload with --json (the
+// seam Mycelium ingests). A read-only view — never part of the gate; always 0.
+func runGraph(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("docgraph graph", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var roots, ignores multiFlag
+	fs.Var(&roots, "root", "extra root doc (repeatable)")
+	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
+	asJSON := fs.Bool("json", false, "emit the graph as JSON (schemaVersion-stamped)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	root, err := audit.GitRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, "docgraph: not a git repository")
+		return 2
+	}
+	v, err := audit.BuildGraphView(root, roots, ignores)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	if *asJSON {
+		b, err := v.JSON()
+		if err != nil {
+			fmt.Fprintf(stderr, "docgraph: %v\n", err)
+			return 2
+		}
+		stdout.Write(b)
+		fmt.Fprintln(stdout)
+		return 0
+	}
+	fmt.Fprint(stdout, v.Markdown())
 	return 0
 }
