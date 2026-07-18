@@ -15,18 +15,20 @@ A Go CLI (stdlib + `github.com/BurntSushi/toml` for config decode and
 `gopkg.in/yaml.v3` for frontmatter decode; shells out to `git`) with four
 independent audit modes, each with its own trigger, plus
 read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
-`stale`):
+`stale`/`graph`):
 
-- **`docgraph .`** — six **whole-state** checks against the current tree:
-  orphans (a non-root tracked `.md` with zero inbound content-graph edges),
-  broken internal `.md` links, untracked `.md`, a `leaks` content scan,
-  `frontmatter` (a doc's
-  leading YAML frontmatter block, if present, must parse and carry a `type`),
-  and `edges` (a frontmatter `links:` list's internal targets must exist, and
-  `part-of`/`supersedes` edges must not cycle — see "Frontmatter model"
-  below). All six are **enforced by default**; exclude one with `--skip` (no
-  opt-in — an opt-in check enforces nothing). A finding exits non-zero —
-  that's the pre-push gate.
+- **`docgraph .`** — seven **whole-state** checks against the current tree,
+  spanning **two doc graphs** (see the two-graphs footgun):
+  `orphans` (a non-root tracked `.md` that is a **content-graph island** — zero
+  inbound markdown-link/path-mention edges over the doc *body*), `disconnected`
+  (a frontmatter doc that is a **metadata-graph island** — zero frontmatter
+  doc→doc edges in *or* out), broken internal `.md` links, untracked `.md`, a
+  `leaks` content scan, `frontmatter` (every doc except `README.md` must carry a
+  leading YAML block that parses and declares a `type` — see "Frontmatter model"
+  below), and `edges` (a frontmatter `links:` list's internal targets must exist,
+  and `part-of`/`supersedes` edges must not cycle). All seven are **enforced by
+  default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
+  nothing). A finding exits non-zero — that's the pre-push gate.
 - **`docgraph footgun-drift`** — a **diff-scoped, advisory** pre-push subcommand:
   flags *every* footgun declaration added in the pushed range (no rationale
   judgment, never re-scans the existing corpus) and **exits 0** — a nag to
@@ -51,25 +53,28 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   Schema (draft 2020-12) describing the frontmatter vocabulary that
   `frontmatter`/`edges` enforce, so another consumer (an editor, a catalog
   builder) conforms to it instead of re-encoding it. Never part of the gate.
-- **`docgraph covers`/`index`/`stale`** — read-only doc-graph **views**: they
-  read the graph via `audit.RepoDocs` (the same `parseDocs` path the six
-  whole-state checks use, malformed docs simply omitted) and never gate —
-  not `checkNames` entries, not `--skip`-able, never invoked by the generated
-  pre-push hook, always exit `0` on success regardless of what they print.
-  `covers <path>` answers "which doc governs this file" (a `covers`
-  frontmatter edge, direct or parent-directory); `stale` reads the
+- **`docgraph covers`/`index`/`stale`/`graph`** — read-only doc-graph **views**:
+  they read the graph via `audit.RepoDocs`/`audit.BuildGraphView` (the same
+  `parseDocs`/graph-build path the whole-state checks use, malformed docs simply
+  omitted) and never gate — not `checkNames` entries, not `--skip`-able, never
+  invoked by the generated pre-push hook, always exit `0` on success regardless of
+  what they print. `covers <path>` answers "which doc governs this file" (a
+  `covers` frontmatter edge, direct or parent-directory); `stale` reads the
   `verified`/`review` freshness fields the frontmatter model has carried since
   the `schema` vocabulary but that no check has read until now; `index` is a
   **generated** view (`IndexMarkdown`), not a hand-maintained page — redirect
-  it into a tracked file rather than editing the output.
+  it into a tracked file rather than editing the output; `graph` renders **both**
+  graphs (`BuildGraphView`) — a human markdown view (part-of tree + cross-refs +
+  both island lists) by default, or a stable `schemaVersion`-stamped JSON payload
+  with `--json`, the machine seam a catalog / Mycelium consumes.
 
-`frontmatter` and `edges` are ordinary `checkNames` entries — whole-state,
-`--skip`-able exactly like orphans/broken/untracked/leaks. `footgun-drift`,
-`covers-drift` and `doc-drift` are **not** `checkNames` — each is its own
-subcommand with its own trigger (a git range / a Stop invocation), not a
+`frontmatter`, `edges` and `disconnected` are ordinary `checkNames` entries —
+whole-state, `--skip`-able exactly like orphans/broken/untracked/leaks.
+`footgun-drift`, `covers-drift` and `doc-drift` are **not** `checkNames` — each is
+its own subcommand with its own trigger (a git range / a Stop invocation), not a
 `docgraph .` check. `schema`
-and the `covers`/`index`/`stale` views are a third kind again: not a check and
-not diff-scoped, no trigger of their own — `schema` emits a fixed vocabulary,
+and the `covers`/`index`/`stale`/`graph` views are a third kind again: not a check
+and not diff-scoped, no trigger of their own — `schema` emits a fixed vocabulary,
 the views query the current tree read-only. There's also an **opt-in usage
 log** (see the logging footgun). Human-facing usage lives in `README.md`; this
 file carries the invariants and footguns.
@@ -96,13 +101,15 @@ an advisory check is a pre-push rider instead.
 
 - **Agent-facing, not human-facing.** It measures the graph an agent traverses
   (grep + `[x](y.md)`), *not* whether a human can reach a page.
-- **Reads doc-graph structure, frontmatter, and, for `leaks`, arbitrary file
-  content — all as whole-state.** `orphans`/`broken`/`untracked`/`edges`
-  traverse the link graph (`edges` additionally checks internal-target
-  existence and `part-of`/`supersedes` cycles among frontmatter edges);
-  `frontmatter` parses each doc's leading YAML block for well-formedness;
-  `leaks` scans tracked file *content* (code included) for configured leak
-  patterns. All read the current tree, never git history.
+- **Reads two doc graphs, frontmatter, and, for `leaks`, arbitrary file
+  content — all as whole-state.** `orphans` reads the **content graph** (prose
+  findability: markdown links ∪ path-mentions over each doc's body);
+  `disconnected` reads the **metadata graph** (frontmatter doc→doc edges);
+  `broken`/`edges` check link/edge target existence (`edges` additionally checks
+  `part-of`/`supersedes` cycles among frontmatter edges); `frontmatter` requires
+  a well-formed, `type`-bearing leading YAML block on every doc except
+  `README.md`; `leaks` scans tracked file *content* (code included) for
+  configured leak patterns. All read the current tree, never git history.
 - **`footgun-drift`, `covers-drift` and `doc-drift` read a *diff*, not repo
   state.** `footgun-drift` scans added markdown lines (like `leaks`, but
   diff-scoped); `doc-drift` diffs tracked **code** (removed definitions, changed
@@ -259,6 +266,16 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   different questions (findability is inbound-only; placement is either-direction)
   and root-reachability is deliberately no longer enforced (the generated `graph`
   view provides findability, not a hand-curated index chain).
+  - **`covers`/`source` edges don't count toward metadata placement.**
+    `isMetadataEdge` (`internal/audit/graph.go`) excludes `covers` (code
+    ownership) and `source` (external provenance) even when the target is a
+    tracked `.md` — they point *out* of the doc→doc structure, not within it. So
+    a doc whose *only* frontmatter edges are `covers`→code (this very file was
+    one) is a **metadata island** and trips `disconnected`. The fix is a real
+    doc→doc edge — a `part-of` up to the entry doc, or a `see-also` across — not
+    demoting the `covers` edge. Dogfood instance: `docs/FOLLOWUPS.md` gained a
+    `part-of: CLAUDE.md` edge, which connects *both* (FOLLOWUPS gets outbound
+    degree, CLAUDE.md gets inbound), clearing both islands at once.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
   and `.agents/**` agent skill/config files, which aren't documentation, and
@@ -323,27 +340,38 @@ restating the vocabulary, so the schema and the checks can't drift apart.
 
 ## Doc models (why `--skip` exists)
 
-Repos fall into models the orphan check treats differently:
-- **A — prose-linked**: entry docs link/mention through `docs/`. Orphans are
-  real. Enforce every check (the default).
+Repos fall into models the orphan check treats differently. The v3 default is
+**stronger than a link check**: every doc except `README.md` must carry a
+frontmatter block (`frontmatter`), and a frontmatter doc must sit in the
+metadata graph (`disconnected`) — so a model that can't meet those needs a
+wider `--skip`, not just `--skip orphans`.
+- **A — prose-linked**: entry docs link/mention through `docs/`, and each doc
+  carries a `type:` block placed with a `part-of`/`see-also` edge. Orphans and
+  metadata islands are real. Enforce every check (the default) — docgraph's own
+  repo is model A.
 - **B — nav-driven MkDocs**: `docs/` with no `nav:` block; MkDocs auto-builds
-  the sidebar, pages never cross-link → every page is a prose-orphan *by design*.
-  Run with `--skip orphans`.
+  the sidebar, pages never cross-link → every page is a content-graph island
+  *by design*, and MkDocs pages typically carry no `type:` frontmatter either.
+  Run with `--skip orphans` and, unless you're willing to add a `type:` block to
+  every page, `--skip frontmatter` (which also moots `disconnected`, since a doc
+  with no frontmatter is not a metadata-graph node).
 - **C — flat reference `docs/`**: design notes referenced by path. `mentionsPath`
-  makes these reachable; genuine orphans that remain are real gaps worth linking.
+  makes these content-reachable; genuine islands that remain are real gaps worth
+  linking. Still owes each doc a frontmatter block + a placement edge like A.
 - **D — a content corpus** (a cheatsheet section, a wiki's pages, seed data,
   verbatim third-party clippings): tracked `.md` the repo *publishes* or *feeds to
   something* rather than documents itself with. The deciding question is **not**
   "is this a knowledge base?" — it's **"is this corpus mine to conform?"**
-  - **Hand-curated → CONFORM it, don't exclude it.** Give each page a `type:` and
-    give the corpus a hand-maintained prose-link **index page** for reachability.
-    That's it — no `.docgraphignore`, no `--skip`. A foreign vocabulary is not an
-    obstacle: `Doc.Extra` (`yaml:",inline"`) exists so domain keys ride along, so
-    an Obsidian clipping keeps `created`/`source`/`author` and merely gains
-    `type: reference`. Reference instance: homelab's `docs/cheatsheet/**` (22
-    clippings folded in 2026-07-17) — gate bare, all six checks, clean. The corpus
-    becomes a first-class graph citizen instead of a blind spot, which is the
-    better outcome: excluding it means `broken`/`untracked` stop covering it too.
+  - **Hand-curated → CONFORM it, don't exclude it.** Give each page a `type:`
+    (and, under v3, a `part-of` edge into an index doc so it isn't a metadata
+    island) and give the corpus a hand-maintained prose-link **index page** for
+    content reachability. That's it — no `.docgraphignore`, no `--skip`. A foreign
+    vocabulary is not an obstacle: `Doc.Extra` (`yaml:",inline"`) exists so domain
+    keys ride along, so an Obsidian clipping keeps `created`/`source`/`author` and
+    merely gains `type: reference`. Reference instance: homelab's
+    `docs/cheatsheet/**` (22 clippings folded in 2026-07-17). The corpus becomes a
+    first-class graph citizen instead of a blind spot, which is the better outcome:
+    excluding it means `broken`/`untracked` stop covering it too.
   - **Derived / never-hand-edited → exclude** (`.docgraphignore`). Conforming is
     not available: the generator would drop any `type:` you added on the next
     regen, so the edit can't survive. Reference instance: Locus's
@@ -386,7 +414,7 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the six
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the seven
   whole-state checks), `runFootgunDrift(args, stdout, stderr) int` and
   `runCoversDrift(args, stdin, stdout, stderr) int` (the two diff-scoped
   advisory pre-push subcommands — `runCoversDrift` checks `DOCGRAPH_COVERS_OFF`,
@@ -399,11 +427,19 @@ docs/" with zero config.
   `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints via
   `printDocDrift` to stderr and returns 2, gated on bare invocation by
   `docDriftGuardOK`'s once-per-HEAD marker under `docDriftStateDir()`),
-  `runCovers`/`runIndex`/`runStale` (the read-only views — each resolves the
-  repo root, calls `audit.RepoDocs`, and prints; always `return 0`), report
+  `runCovers`/`runIndex`/`runStale`/`runGraph` (the read-only views — each
+  resolves the repo root, calls `audit.RepoDocs` (or `audit.BuildGraphView` for
+  `runGraph`, which also takes `--json`), and prints; always `return 0`), report
   format, `maybeLog` (opt-in usage logging side-channel).
 - `internal/audit/views.go` — `RepoDocs` (the shared parse path behind the
-  three views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`.
+  views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`.
+- `internal/audit/graph.go` — the two graphs: `BuildContentGraph`/`ContentGraph`
+  (links ∪ path-mentions over doc bodies; `Islands()` = zero-inbound non-roots →
+  `orphans`) and `BuildMetadataGraph`/`MetadataGraph` (`isMetadataEdge` doc→doc
+  frontmatter edges; `Islands()` = zero-degree frontmatter docs → `disconnected`).
+- `internal/audit/graphview.go` — `BuildGraphView`/`GraphView` +
+  `GraphSchemaVersion` (the `graph` view's payload: reuses both `Build*Graph`
+  fns, renders `Markdown()` or `JSON()`; the stable Mycelium seam).
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
   `changedCode`/`addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go`,
@@ -426,9 +462,11 @@ docs/" with zero config.
   `changedCode` against the `covers` edges of an already-parsed doc set —
   `RepoDocs` — via `CoversOf`, dropping any doc `changedMarkdown` says the
   change set also touched, and deduping across ranges),
-  `audit.go` (`Audit` → `Report`, the whole-state orchestrator; unrelated to
-  `FootgunDrift`/`DocDrift`/`CoversDrift`), `usage.go` (usage-log config + tiered
-  `BuildRecord` + best-effort `LogRun`).
+  `audit.go` (`Audit` → `Report`, the whole-state orchestrator — builds both
+  graphs via `graph.go` and sets `Report.Orphans`/`Report.Disconnected` from
+  their `Islands()`; `parseDocs` also enforces the frontmatter-required-except-
+  README rule; unrelated to `FootgunDrift`/`DocDrift`/`CoversDrift`), `usage.go`
+  (usage-log config + tiered `BuildRecord` + best-effort `LogRun`).
 - `just test` / `just build` / `just install`. Tests build throwaway git repos
   in temp dirs, so `git` must be on PATH.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
@@ -474,11 +512,15 @@ docs/" with zero config.
   without them, before it touches anything public. `gh --generate-notes` is deliberately
   *not* used: it summarises merged PRs, and this repo integrates on the trunk, so it only
   ever produced a bare changelog link.
-- **The major version lives in the module path too** — `go.mod` declares
-  `github.com/lockyc/docgraph/v2`, and the `/vN` suffix must be bumped in lockstep with
-  a major `VERSION` bump (`v3` → `module …/v3`, plus the `internal/` import paths, plus
-  every `go install …@latest` site). This is Go's semantic import versioning, not a
-  style choice; the footgun below is what enforcing it costs when you don't.
+- **The major version lives in the module path too** — `go.mod` currently declares
+  `github.com/lockyc/docgraph/v3` (`VERSION` is `3.0.0`), and the `/vN` suffix must be
+  bumped in lockstep with a major `VERSION` bump (`v4` → `module …/v4`). The `/vN`
+  sites, all of which must move together: `go.mod`'s `module` line, the `internal/`
+  import paths, and **every `go install …@latest` site** — the README install line,
+  `install.sh`'s `MODULE` var, `/docgraph:install`'s `MODULE` var, `SKILL.md`, and the
+  fail-closed hook's own "install it:" message that `hookScript` prints. This is Go's
+  semantic import versioning, not a style choice; the footgun below is what enforcing
+  it costs when you don't.
 
 ## Footgun — a major bump must move the module path, or the release is invisible
 
@@ -500,9 +542,9 @@ runs one.
 
 So: **after any release that moves the module path or major version, verify from
 outside the repo** — `GOPATH=$(mktemp -d) go install github.com/lockyc/docgraph/v3@latest`
-in a temp dir. Do not infer it from a green gate. And never "fix" a rejected v2 tag by
-dropping back to v1 numbering — the tags are public and `checksFlagRemoved`'s
-user-facing message commits to the v2 lineage; move the module path instead.
+in a temp dir. Do not infer it from a green gate. And never "fix" a rejected major tag
+by dropping back to a lower major — the tags are public; move the module path forward to
+match instead.
 
 The pre-push hook `hookScript` generates must resolve docgraph via PATH **and**
 the Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone. Git

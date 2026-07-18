@@ -1,6 +1,6 @@
 ---
 name: docgraph
-description: Use when you need to find which documentation governs a file or subsystem before changing it, when asked "where are the docs for X" / "which doc covers this" / "is there a doc for this code", when reconciling docs after a code change, or when auditing a repo's doc graph (orphans, broken links, stale docs, doc index). Wraps the docgraph CLI's read-only views — covers, index, stale — and its audit gate.
+description: Use when you need to find which documentation governs a file or subsystem before changing it, when asked "where are the docs for X" / "which doc covers this" / "is there a doc for this code", when reconciling docs after a code change, or when auditing a repo's doc graph (orphans, broken links, stale docs, doc index, the content/metadata graphs). Wraps the docgraph CLI's read-only views — covers, index, stale, graph — and its audit gate.
 ---
 
 # docgraph — finding the doc that governs code
@@ -21,14 +21,24 @@ doc mentions that file.
 
 ## The commands
 
-All three are read-only, never gate, and exit 0 even when they print nothing.
+All four are read-only, never gate, and exit 0 even when they print nothing.
 
 ```bash
 docgraph covers <path>    # which docs govern <path> — REPO-ROOT-RELATIVE
 docgraph index            # generated markdown index of the doc graph
 docgraph stale            # docs past their freshness threshold
 docgraph stale --older-than 90
+docgraph graph            # both doc graphs (part-of tree + cross-refs + islands)
+docgraph graph --json     # ...as a stable schemaVersion-stamped JSON payload
 ```
+
+`graph` serves **both** doc graphs docgraph gates on: the **content graph**
+(prose findability — what `orphans` reads) and the **metadata graph** (frontmatter
+doc→doc structure — what `disconnected` reads). Default output is human markdown
+(the `part-of` hierarchy, cross-references, and both island lists); `--json` is
+the machine seam a catalog or Mycelium ingests. Like the others it answers little
+in a repo with no frontmatter/edges — an empty graph means "nothing declared", not
+"docgraph is broken".
 
 **`covers <path>` takes a repo-root-relative path**, unlike every markdown link
 you've seen — frontmatter edges resolve against the repo root, not the source
@@ -136,9 +146,9 @@ no doc claims a file sitting inside another doc's directory edge.
 
 ## The audit gate
 
-`docgraph .` runs six whole-state checks (orphans, broken links, untracked,
-leaks, frontmatter, edges) and exits non-zero on a finding — it's the pre-push
-gate, and `docgraph doc-drift` is a Stop hook. Both are wired by
+`docgraph .` runs seven whole-state checks (orphans, disconnected, broken links,
+untracked, leaks, frontmatter, edges) and exits non-zero on a finding — it's the
+pre-push gate, and `docgraph doc-drift` is a Stop hook. Both are wired by
 `/docgraph:install`; you rarely invoke them by hand.
 
 `docgraph schema` emits the frontmatter JSON Schema — use it instead of

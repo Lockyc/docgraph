@@ -462,9 +462,11 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // how to remediate. The banner prints always; the explain-and-remediate footer
 // only on findings, so green/CI runs stay terse.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
-	fmt.Fprintln(w, "docgraph — enforces agent-facing repo hygiene: doc-graph reachability")
-	fmt.Fprintln(w, "(orphans/broken/untracked .md), frontmatter well-formedness, broken typed-edge")
-	fmt.Fprintln(w, "targets, plus a content scan for configured leak patterns.")
+	fmt.Fprintln(w, "docgraph — enforces agent-facing repo hygiene across two doc graphs: the")
+	fmt.Fprintln(w, "content graph (findability — orphans flags an island no prose reference reaches)")
+	fmt.Fprintln(w, "and the metadata graph (structure — disconnected flags a frontmatter doc with no")
+	fmt.Fprintln(w, "doc→doc edge). Frontmatter is required on every doc except README. Plus broken")
+	fmt.Fprintln(w, "typed-edge/link targets, untracked .md, and a content scan for leak patterns.")
 	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 

@@ -35,7 +35,8 @@ docgraph has four independent modes, each with its own trigger and scope:
 | **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **yes** — exit 2 on any finding |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
-vocabulary), and the doc-graph **views** `covers` / `index` / `stale`.
+vocabulary), and the doc-graph **views** `covers` / `index` / `stale` / `graph`
+(`graph` serves both doc graphs — human render or JSON).
 
 **Scope note.** The whole-state doc-graph checks audit *documents* (`docs/`,
 `CLAUDE.md`, config-dir READMEs) — not content a site framework routes and
@@ -45,29 +46,49 @@ tracked files (see [`leaks`](#leaks--the-content-scan)).
 
 ## Whole-state checks
 
-Six checks run by default on `docgraph [path]`. **Everything is enforced; you
+Seven checks run by default on `docgraph [path]`. **Everything is enforced; you
 exclude explicitly** with `--skip <check[,check]>` — nothing is opt-in, so a
 check added in a later version gates everywhere the day it lands, with no
 run-list to update. (A nav-driven MkDocs repo, for instance, runs `--skip
 orphans`.)
 
-1. **Orphans** — a tracked doc not reachable from the entry points. Reachability
-   follows markdown links, bare/inline-code path mentions (`` `docs/x.md` ``),
-   *and* frontmatter typed edges (see `edges`) — an agent follows any of the
-   three, so a doc reached only via a `part-of` edge is not an orphan. Every real
-   `.md` is audited, including docs outside `docs/` (e.g. a config-dir README);
-   only agent tooling under `.claude/` and `.agents/` plus untracked scratch are
-   excluded.
-2. **Broken links** — a `[x](y.md)` whose target doesn't exist. Checked across
+The checks span **two independent doc graphs**:
+
+- **The content graph** — *findability*. Tracked docs joined by prose references:
+  markdown `[x](y.md)` links ∪ bare/inline-code path mentions (`` `docs/x.md` ``),
+  read over each doc's **body** (frontmatter stripped). `orphans` enforces it.
+- **The metadata graph** — *structural placement*. Tracked docs joined by their
+  frontmatter `links:` doc→doc edges (`part-of`, `see-also`, `depends-on`, …).
+  `disconnected` enforces it.
+
+They answer different questions and are **not** a single union: a doc can be
+findable (reachable in the content graph) yet declare no place in the structure,
+or vice versa. Both are flagged.
+
+1. **Orphans** — a **content-graph island**: a non-root tracked doc with zero
+   *inbound* content edges (nothing links to it or mentions its path). Roots
+   (`CLAUDE.md`/`README.md`/`AGENTS.md`/`docs/index.md` + `--root`) are exempt.
+   Frontmatter doc→doc edges do **not** count here — they belong to the metadata
+   graph. Every real `.md` is audited, including docs outside `docs/` (e.g. a
+   config-dir README); only agent tooling under `.claude/` and `.agents/` plus
+   untracked scratch are excluded.
+2. **Disconnected** — a **metadata-graph island**: a doc that carries frontmatter
+   but participates in zero doc→doc edges in *either* direction. `covers` (code
+   ownership) and `source` (external provenance) edges don't count — they point
+   out of the doc→doc structure — so a doc whose only edges are `covers`→code is
+   disconnected. Fix it with a real `part-of`/`see-also`/`depends-on` edge.
+3. **Broken links** — a `[x](y.md)` whose target doesn't exist. Checked across
    the same tracked, non-ignored `.md` set as orphans.
-3. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
-4. **Leaks** — tracked file *content* matching a configured leak pattern (see
+4. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
+5. **Leaks** — tracked file *content* matching a configured leak pattern (see
    [`leaks`](#leaks--the-content-scan)).
-5. **Frontmatter** — a doc's leading YAML block (first line exactly `---` to the
-   next `---`), if present, must be well-formed YAML and carry a `type` field. No
-   block at all is fine; malformed YAML or a missing `type` is a finding. `type`
-   is an advisory vocabulary — see [`schema`](#docgraph-schema--the-frontmatter-vocabulary).
-6. **Edges** — every internal `to` target in a frontmatter `links:` list (a
+6. **Frontmatter** — every doc except `README.md` (matched by basename) must
+   carry a leading YAML block (first line exactly `---` to the next `---`) that is
+   well-formed YAML and declares a `type`. A missing block, malformed YAML, or a
+   missing `type` is a finding; `README.md` is exempt (see *Where to put
+   frontmatter* below). `type` is an advisory vocabulary — see
+   [`schema`](#docgraph-schema--the-frontmatter-vocabulary).
+7. **Edges** — every internal `to` target in a frontmatter `links:` list (a
    repo-root-relative `.md` doc or code path) must exist, and `part-of` /
    `supersedes` edges between docs must not form a cycle. External URLs and
    `owner/repo:...` cross-repo targets are never checked.
@@ -86,14 +107,16 @@ vocabularies (as `x-docgraph-core-types` / `x-docgraph-core-rels`). Another tool
 instead of re-encoding them. **Read-only** — never reads the repo, never part of
 the gate.
 
-**Where to put frontmatter.** Prefer `CLAUDE.md` and `docs/` pages over
-`README.md`: GitHub renders a leading YAML frontmatter block as a metadata table
-above the page content, so a `README.md` with frontmatter greets every visitor
-with a table of `type` and `links` rows. Frontmatter is agent-facing metadata and
-the README is the human's front door — the two don't want the same file. docgraph
-itself follows this: `CLAUDE.md` carries the `covers` edges onto its code, this
-README carries no frontmatter at all. Nothing enforces it — a frontmattered
-README is valid, it just renders that way.
+**Where to put frontmatter.** Frontmatter is **required on every doc except
+`README.md`** — the one basename-wide exemption. GitHub renders a leading YAML
+frontmatter block as a metadata table above the page content, so a `README.md`
+with frontmatter greets every visitor with a table of `type` and `links` rows.
+Frontmatter is agent-facing metadata and the README is the human's front door —
+so docgraph exempts `README.md` from the `frontmatter` check (and, having no
+block, it is not a metadata-graph node, so `disconnected` never fires on it
+either). A frontmattered README is still valid — it just renders that way, so
+keep it out. docgraph itself follows this: `CLAUDE.md` carries a `covers` edge
+onto its code plus the `part-of` tree, this README carries no frontmatter at all.
 
 ### `leaks` — the content scan
 
@@ -298,10 +321,10 @@ Scope limits worth knowing:
 - It only catches those two mechanical classes — a paraphrased value or a
   reversed decision with no anchored symbol needs a semantic doc sweep.
 
-## `covers`, `index`, `stale` — read-only views
+## `covers`, `index`, `stale`, `graph` — read-only views
 
-Three subcommands that query the doc graph for a human or an agent tool, built on
-the same parse the six checks use. All three are **read-only**: never write, never
+Four subcommands that query the doc graph for a human or an agent tool, built on
+the same parse the seven checks use. All are **read-only**: never write, never
 gate (not in `checkNames`, not `--skip`-able, not run by the generated hook),
 always exit `0` on success — `2` only on a usage/git error.
 
@@ -310,6 +333,8 @@ docgraph covers <path>               # docs that cover <path> (repo-root-relativ
 docgraph index                       # generated markdown index of the doc graph
 docgraph stale                       # docs whose verified date is past its threshold
 docgraph stale --older-than 90       # override the default 180-day threshold
+docgraph graph                       # both doc graphs as human-readable markdown
+docgraph graph --json                # ...or as a stable JSON payload (machine seam)
 ```
 
 - **`covers <path>`** — prints every tracked doc that documents `<path>` via a
@@ -336,6 +361,17 @@ docgraph stale --older-than 90       # override the default 180-day threshold
   doc's own `review:` cadence (e.g. `review: 90d`) overrides it. A doc with no
   `verified` date, or an unparseable value, is silently skipped — malformed
   frontmatter is the `frontmatter` check's concern.
+- **`graph [--json]`** — serves **both** doc graphs over the same node set the
+  gate reads (so the served graph and the gated graph can never diverge). Default
+  output is human-readable markdown: the `part-of` hierarchy, cross-reference
+  edges, and both island lists (content-graph and metadata-graph). `--json` emits
+  a stable, `schemaVersion`-stamped payload instead — the machine seam a catalog
+  builder or an ecosystem-graph tool ingests. The JSON keys are
+  camelCase throughout: `schemaVersion`, `repoRoot`, `nodes`, `contentEdges`,
+  `metadataEdges`, `islands` (`{content, metadata}`). Edge/island slices are
+  always present as arrays (empty, never `null`), so a consumer keys off their
+  presence. `schemaVersion` is `1`; a breaking change to the shape bumps it rather
+  than silently reshaping the payload. `--root`/`--ignore` apply as elsewhere.
 
 ## Install
 
@@ -399,6 +435,7 @@ docgraph schema                     # print the frontmatter JSON Schema (read-on
 docgraph covers <path>              # read-only: docs that cover <path>
 docgraph index                      # read-only: generated markdown index
 docgraph stale                      # read-only: docs past their freshness threshold
+docgraph graph [--json]             # read-only: both doc graphs (markdown or JSON)
 docgraph version                    # print version (also --version, -v)
 ```
 
@@ -407,13 +444,22 @@ git repo / malformed leak config. `footgun-drift` and `covers-drift` are
 advisory: `0` regardless of findings (nag on stdout), `2` only on a git/usage
 error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
 dangling-reference or anchored-value finding (stderr) or on an error. `covers` /
-`index` / `stale` are read-only: `0` always on success, `2` only on error.
+`index` / `stale` / `graph` are read-only: `0` always on success, `2` only on error.
 
 On a finding, `docgraph [path]` prints a self-describing footer below the
 findings — what docgraph is, why the non-zero exit aborts the push, and how to
 remediate each category — so a failed push doesn't have to be reverse-engineered.
 Clean/CI runs stay terse.
 
+> **v3 breaking changes:** (1) `orphans` is now the **content-graph island** rule
+> (a non-root doc with zero inbound links/mentions) — frontmatter edges no longer
+> make a doc "reachable". (2) A new `disconnected` check flags **metadata-graph
+> islands** (a frontmatter doc with no doc→doc edge). (3) Frontmatter is now
+> **required** on every doc except `README.md`. A model-A repo may see new
+> `frontmatter`/`disconnected` findings on `@latest` — conform (add a `type:`
+> block and a `part-of`/`see-also` edge) rather than `--skip`. The module path
+> moved to `github.com/lockyc/docgraph/v3`; reinstall from the `/v3` path.
+>
 > **v2 breaking change:** the `--checks` (include) flag was removed. docgraph now
 > enforces every check by default; use `--skip` to exclude one, and regenerate any
 > installed hook with `docgraph install-hook --force`. A stray `--checks` prints a
@@ -443,24 +489,30 @@ escape at all — they're opted out only whole-check, via `DOCGRAPH_FOOTGUN_OFF=
 
 ### Doc models and when to `--skip orphans`
 
-The orphan check assumes a **prose-linked** doc graph (entry docs link/mention
-their way through `docs/`), which fits most repos. Two exceptions:
+The default is a **prose-linked, frontmattered** doc graph: entry docs link or
+mention their way through `docs/` (satisfying `orphans`), and every doc carries a
+`type:` block placed with a doc→doc edge (satisfying `frontmatter` and
+`disconnected`). That fits most repos. Two exceptions:
 
 - **Nav-driven MkDocs sites** — a `docs/` with no `nav:` block; MkDocs
   auto-builds the sidebar and pages never cross-link, so every page is a
-  prose-orphan by design. Gate with `--skip orphans`.
+  content-graph island by design, and such pages usually carry no `type:`
+  frontmatter either. Gate with `--skip orphans` and, unless you'll add a `type:`
+  block to every page, `--skip frontmatter` (which also moots `disconnected`,
+  since a doc with no frontmatter isn't a metadata-graph node).
 - Repos with genuinely unreferenced design docs report real orphans — link them
   from `CLAUDE.md`/`README`, or accept and `--skip orphans`.
 
 **A content corpus — a cheatsheet section, a wiki's pages, a seed export,
 verbatim clippings — asks one question: is it yours to conform?**
 
-- **Hand-curated → conform it.** Give each page a `type:` and the corpus one
-  hand-maintained prose-link index page for reachability. No `.docgraphignore`,
-  no `--skip`. A foreign frontmatter vocabulary is no obstacle — unknown keys ride
-  along untouched, so an Obsidian clipping keeps `created`/`source`/`author` and
-  just gains `type: reference`. The corpus becomes a real graph node, and
-  `broken`/`untracked` keep covering it.
+- **Hand-curated → conform it.** Give each page a `type:` (plus a `part-of` edge
+  into an index doc so it isn't a metadata island) and the corpus one
+  hand-maintained prose-link index page for content reachability. No
+  `.docgraphignore`, no `--skip`. A foreign frontmatter vocabulary is no
+  obstacle — unknown keys ride along untouched, so an Obsidian clipping keeps
+  `created`/`source`/`author` and just gains `type: reference`. The corpus becomes
+  a real graph node, and `broken`/`untracked` keep covering it.
 - **Derived / never hand-edited → exclude it** with `.docgraphignore`, because a
   regen would drop any `type:` you added, so conforming can't stick.
 - **`--skip` is wrong either way** — it's repo-wide, so a corpus's conventions
@@ -506,10 +558,10 @@ Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
 `DOCGRAPH_LOG`. A level-1 record:
 
 ```json
-{"ts":"2026-07-09T21:30:00+10:00","version":"2.0.0","repo":"/abs/git/root",
- "cmd":"run","checks":["broken","edges","frontmatter","leaks","orphans","untracked"],
+{"ts":"2026-07-09T21:30:00+10:00","version":"3.0.0","repo":"/abs/git/root",
+ "cmd":"run","checks":["broken","disconnected","edges","frontmatter","leaks","orphans","untracked"],
  "exit":1,
- "counts":{"broken":1,"edges":0,"frontmatter":0,"leaks":0,"orphans":0,"untracked":0}}
+ "counts":{"broken":1,"disconnected":0,"edges":0,"frontmatter":0,"leaks":0,"orphans":0,"untracked":0}}
 ```
 
 **Detail level** trades richness for exposure:
@@ -564,6 +616,8 @@ sandboxed agents often push with a bare PATH that omits `~/go/bin`.
 
 Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
 `internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers plus
-diff helpers, the whole-state `Audit` orchestrator, the leak scanner, the
-diff-scoped `FootgunDrift` and `CoversDrift`, and the `DocDrift` orchestrator
-that diffs code and greps docs). See `CLAUDE.md` for design invariants.
+diff helpers, the whole-state `Audit` orchestrator, the two graphs
+`BuildContentGraph`/`BuildMetadataGraph` and the `BuildGraphView` seam behind the
+`graph` view, the leak scanner, the diff-scoped `FootgunDrift` and `CoversDrift`,
+and the `DocDrift` orchestrator that diffs code and greps docs). See `CLAUDE.md`
+for design invariants.

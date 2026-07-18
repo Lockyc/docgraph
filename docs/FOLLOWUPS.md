@@ -1,5 +1,9 @@
 ---
 type: reference
+links:
+  - rel: part-of
+    to: CLAUDE.md
+    note: the deferred-work register CLAUDE.md's v1-gaps section points into
 ---
 
 # Follow-ups
@@ -116,3 +120,30 @@ shapes, neither chosen:
 The prerequisite for either is that a repo's docs carry `type` (Locus's now do).
 Decide the shape before building — a half-generated section that still needs
 hand-editing may be worse than an honest hand-written one.
+
+## Publish the `graph` payload's own JSON Schema (`graph --schema`)
+
+`docgraph schema` emits a JSON Schema for the *frontmatter* vocabulary, so a
+consumer conforms to the check rules instead of re-encoding them. The `graph
+--json` payload (`GraphView`, `GraphSchemaVersion = 1`) has **no** equivalent: a
+consumer ingesting it — a catalog builder, Mycelium — has only the prose in the
+README's `graph` section and the `schemaVersion` integer, not a machine-checkable
+contract for `nodes`/`contentEdges`/`metadataEdges`/`islands`.
+
+Deferred, not out of scope: the payload shape is single-sourced in
+`internal/audit/graphview.go` today, and there is exactly one consumer (Mycelium,
+below), which isn't built yet. Publish the schema when a second consumer appears
+or the shape stabilises enough to freeze — emitting it *now* would just add a
+second thing to keep in lockstep with a shape still settling. Likely surface:
+`docgraph graph --schema` (mirrors `docgraph schema`), reading the same struct so
+schema and payload can't drift.
+
+## Mycelium ingestion of the `graph --json` seam (Spec 2)
+
+The `graph --json` payload is built to be the seam the Mycelium ecosystem graph
+ingests — per-repo doc structure feeding the cross-repo map. That consumer is a
+separate project (Spec 2), not this repo's work: docgraph's responsibility ends at
+emitting a stable, `schemaVersion`-stamped payload. Tracked here so the seam's
+purpose isn't lost — the camelCase keys, the always-present empty arrays, and the
+`schemaVersion` bump-don't-reshape rule all exist for this consumer, and a change
+to the payload must weigh it even though it lives elsewhere.
