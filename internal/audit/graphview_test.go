@@ -92,6 +92,39 @@ func TestBuildGraphViewNonNilSlicesWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestGraphViewJSONEdgeKeysAreCamelCase asserts the edge-object keys inside
+// contentEdges/metadataEdges are camelCase, matching every other key in the
+// payload (schemaVersion, repoRoot, hasFrontmatter, ...). ContentEdge and
+// MetadataEdge (internal/audit/graph.go) previously carried no `json:` tags,
+// so Go's default field-name serialization emitted PascalCase
+// (From/To/Kind/Rel/Note) — a mixed-case document that must not ship under
+// GraphSchemaVersion 1.
+func TestGraphViewJSONEdgeKeysAreCamelCase(t *testing.T) {
+	v := GraphView{
+		SchemaVersion: GraphSchemaVersion,
+		RepoRoot:      "/repo",
+		Nodes:         []GraphNode{},
+		ContentEdges:  []ContentEdge{{From: "a.md", To: "b.md", Kind: "link"}},
+		MetadataEdges: []MetadataEdge{{From: "a.md", To: "b.md", Rel: "see-also", Note: "why"}},
+		Islands:       GraphIslands{Content: []string{}, Metadata: []string{}},
+	}
+	b, err := v.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{`"from"`, `"to"`, `"kind"`, `"rel"`, `"note"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("JSON missing camelCase key %s:\n%s", want, s)
+		}
+	}
+	for _, unwanted := range []string{`"From"`, `"To"`, `"Kind"`, `"Rel"`, `"Note"`} {
+		if strings.Contains(s, unwanted) {
+			t.Errorf("JSON contains PascalCase key %s (edge objects must be camelCase):\n%s", unwanted, s)
+		}
+	}
+}
+
 // TestGraphViewMarkdownShowsHierarchyAndIslands checks the human render covers
 // the part-of tree, a cross-reference, and both island sections.
 func TestGraphViewMarkdownShowsHierarchyAndIslands(t *testing.T) {

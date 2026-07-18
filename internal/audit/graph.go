@@ -9,9 +9,9 @@ import (
 // ContentEdge is a directed prose reference in the content graph. Kind is "link"
 // (a markdown [x](y.md)) or "mention" (a bare/inline-code path reference).
 type ContentEdge struct {
-	From string
-	To   string
-	Kind string
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"`
 }
 
 // ContentGraph is the findability layer: tracked docs joined by prose references
@@ -118,10 +118,10 @@ func isMetadataEdge(e Edge) bool {
 
 // MetadataEdge is a frontmatter doc→doc relationship in the metadata graph.
 type MetadataEdge struct {
-	From string
-	To   string
-	Rel  string
-	Note string
+	From string `json:"from"`
+	To   string `json:"to"`
+	Rel  string `json:"rel"`
+	Note string `json:"note,omitempty"`
 }
 
 // MetadataGraph is the structural-placement layer: docs carrying frontmatter,
