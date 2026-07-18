@@ -61,7 +61,11 @@ func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[
 		if err != nil {
 			continue
 		}
-		for _, link := range extractLinks(content) {
+		// Content-graph edges are prose references only — strip any leading
+		// frontmatter block before scanning so a frontmatter doc->doc edge
+		// (metadata graph, Task 4) never leaks in as a link or mention here.
+		_, body, _ := SplitFrontmatter(content)
+		for _, link := range extractLinks(body) {
 			if !isLocalMd(link.Target) {
 				continue
 			}
@@ -70,7 +74,7 @@ func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[
 			}
 		}
 		for _, to := range g.Nodes {
-			if to != f && mentionsPath(content, to) {
+			if to != f && mentionsPath(body, to) {
 				add(f, to, "mention")
 			}
 		}
