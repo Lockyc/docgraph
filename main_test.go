@@ -127,6 +127,54 @@ func TestRunEnforcesOrphansByDefault(t *testing.T) {
 	}
 }
 
+// mkMetadataIslandRepo builds a repo where docs/a.md is reachable in the
+// CONTENT graph (linked from the root, so `orphans` stays clean) but carries a
+// frontmatter block with no doc->doc `links` edge — a metadata island for the
+// `disconnected` check, isolated from the other checks.
+func mkMetadataIslandRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(p, c string) {
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		os.WriteFile(full, []byte(c), 0o644)
+	}
+	write("CLAUDE.md", "hub\n[a](docs/a.md)\n")
+	write("docs/a.md", "---\ntype: reference\n---\nno metadata edges\n")
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("init")
+	git("add", "CLAUDE.md", "docs/a.md")
+	return dir
+}
+
+func TestRunSkipExcludesDisconnected(t *testing.T) {
+	dir := mkMetadataIslandRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{"--skip", "disconnected", "--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (disconnected skipped)\n%s", code, out.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("DISCONNECTED")) {
+		t.Errorf("DISCONNECTED section shown despite --skip disconnected:\n%s", out.String())
+	}
+}
+
+func TestRunEnforcesDisconnectedByDefault(t *testing.T) {
+	dir := mkMetadataIslandRepo(t)
+	var out, errb bytes.Buffer
+	code := run([]string{"--leaks-config", noCfg(dir), dir}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (metadata island gated by default)\n%s", code, out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("DISCONNECTED (1)")) || !bytes.Contains(out.Bytes(), []byte("docs/a.md")) {
+		t.Errorf("missing disconnected finding for docs/a.md:\n%s", out.String())
+	}
+}
+
 func TestPrintReportFrontmatterSection(t *testing.T) {
 	var buf bytes.Buffer
 	rep := audit.Report{FrontmatterFindings: []audit.FrontmatterFinding{{File: "docs/x.md", Detail: "missing type"}}}
@@ -136,6 +184,18 @@ func TestPrintReportFrontmatterSection(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("FRONTMATTER (1)")) || !bytes.Contains(buf.Bytes(), []byte("docs/x.md")) {
 		t.Errorf("output missing frontmatter section:\n%s", buf.String())
+	}
+}
+
+func TestPrintReportDisconnectedSection(t *testing.T) {
+	var buf bytes.Buffer
+	rep := audit.Report{Disconnected: []string{"docs/only-covers.md"}}
+	sel := map[string]bool{"disconnected": true}
+	if !printReport(&buf, rep, nil, sel) {
+		t.Fatal("printReport returned false, want true (a metadata island is a finding)")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("DISCONNECTED (1)")) || !bytes.Contains(buf.Bytes(), []byte("docs/only-covers.md")) {
+		t.Errorf("output missing disconnected section:\n%s", buf.String())
 	}
 }
 

@@ -255,7 +255,7 @@ fi
 `
 }
 
-var checkNames = []string{"orphans", "broken", "untracked", "leaks", "frontmatter", "edges"}
+var checkNames = []string{"orphans", "broken", "untracked", "leaks", "frontmatter", "edges", "disconnected"}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
@@ -266,7 +266,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
-	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,frontmatter,edges)")
+	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,frontmatter,edges,disconnected)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCGRAPH_LEAKS or $XDG_CONFIG_HOME/docgraph/leaks.toml, else ~/.config/docgraph/leaks.toml)")
 	config := fs.String("config", "", "path to the global config.toml, holding [log] (default: $DOCGRAPH_CONFIG or $XDG_CONFIG_HOME/docgraph/config.toml)")
 	if err := fs.Parse(args); err != nil {
@@ -511,13 +511,21 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		}
 		fmt.Fprintln(w)
 	}
+	if sel["disconnected"] {
+		fmt.Fprintf(w, "DISCONNECTED (%d) — frontmatter docs with no doc→doc edge (metadata island):\n", len(r.Disconnected))
+		for _, d := range r.Disconnected {
+			fmt.Fprintf(w, "  %s\n", d)
+		}
+		fmt.Fprintln(w)
+	}
 	orphans := sel["orphans"] && len(r.Orphans) > 0
 	broken := sel["broken"] && len(r.BrokenLinks) > 0
 	untracked := sel["untracked"] && len(r.Untracked) > 0
 	frontmatter := sel["frontmatter"] && len(r.FrontmatterFindings) > 0
 	edges := sel["edges"] && (len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0)
 	leaksFound := sel["leaks"] && len(leaks) > 0
-	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound {
+	disconnected := sel["disconnected"] && len(r.Disconnected) > 0
+	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
 		fmt.Fprintln(w, "clean ✓")
 		return false
 	}
@@ -541,7 +549,10 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	if sel["leaks"] {
 		n += len(leaks)
 	}
-	printFailureFooter(w, n, orphans, broken, untracked, frontmatter, edges, leaksFound)
+	if sel["disconnected"] {
+		n += len(r.Disconnected)
+	}
+	printFailureFooter(w, n, orphans, broken, untracked, frontmatter, edges, leaksFound, disconnected)
 	return true
 }
 
@@ -549,15 +560,15 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmatter, edges, leaks bool) {
+func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmatter, edges, leaks, disconnected bool) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "docgraph: %d finding(s) in gated checks → exiting non-zero.\n", n)
 	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
 	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
 	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, malformed/incomplete frontmatter, a")
-	fmt.Fprintln(w, "frontmatter edge pointing at a missing target, or a configured leak pattern matched")
-	fmt.Fprintln(w, "in tracked content.")
+	fmt.Fprintln(w, "frontmatter edge pointing at a missing target, a configured leak pattern matched in")
+	fmt.Fprintln(w, "tracked content, or a frontmatter doc with no place in the metadata structure.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Fix the findings listed above:")
 	if orphans {
@@ -580,6 +591,10 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 	if leaks {
 		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
 		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
+	}
+	if disconnected {
+		fmt.Fprintln(w, "  DISCONNECTED → give the doc a frontmatter part-of/see-also/depends-on edge to a")
+		fmt.Fprintln(w, "                related doc (a covers→code edge does not count); or `--skip disconnected`.")
 	}
 	fmt.Fprintln(w, bar)
 }

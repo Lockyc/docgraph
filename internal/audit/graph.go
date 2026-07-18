@@ -102,3 +102,82 @@ func (g ContentGraph) Islands() []string {
 	sort.Strings(out)
 	return out
 }
+
+// isMetadataEdge reports whether e joins two docs structurally. It is an edge to
+// a tracked doc (EdgeDoc) whose rel is neither `covers` (code ownership) nor
+// `source` (external provenance) — the two rels that by nature point outside the
+// doc→doc structure. This operationalizes the spec's part-of/supersedes/
+// see-also/depends-on set while also admitting runbook-for and custom doc→doc
+// rels, and excluding covers/source even when they happen to target a .md.
+func isMetadataEdge(e Edge) bool {
+	if ClassifyTarget(e.To) != EdgeDoc {
+		return false
+	}
+	return e.Rel != "covers" && e.Rel != "source"
+}
+
+// MetadataEdge is a frontmatter doc→doc relationship in the metadata graph.
+type MetadataEdge struct {
+	From string
+	To   string
+	Rel  string
+	Note string
+}
+
+// MetadataGraph is the structural-placement layer: docs carrying frontmatter,
+// joined by doc→doc typed edges. Its island rule flags a frontmatter doc that
+// declares no place in the structure (zero doc→doc edges in OR out).
+type MetadataGraph struct {
+	Nodes  []string
+	Edges  []MetadataEdge
+	degree map[string]int
+}
+
+// BuildMetadataGraph builds the doc→doc edge graph over docs that carry
+// frontmatter. Degree counts both directions; self-edges are ignored.
+func BuildMetadataGraph(docs map[string]*Doc, trackedSet map[string]bool) MetadataGraph {
+	g := MetadataGraph{degree: map[string]int{}}
+	for src := range docs {
+		g.Nodes = append(g.Nodes, src)
+	}
+	sort.Strings(g.Nodes)
+	seen := map[MetadataEdge]bool{}
+	for _, src := range g.Nodes {
+		for _, e := range docs[src].Links {
+			if !isMetadataEdge(e) {
+				continue
+			}
+			to := ResolveEdgeTarget(e.To)
+			if to == src || !trackedSet[to] {
+				continue
+			}
+			me := MetadataEdge{From: src, To: to, Rel: e.Rel, Note: e.Note}
+			if seen[me] {
+				continue
+			}
+			seen[me] = true
+			g.Edges = append(g.Edges, me)
+			g.degree[src]++
+			g.degree[to]++
+		}
+	}
+	sort.Slice(g.Edges, func(i, j int) bool {
+		if g.Edges[i].From != g.Edges[j].From {
+			return g.Edges[i].From < g.Edges[j].From
+		}
+		return g.Edges[i].To < g.Edges[j].To
+	})
+	return g
+}
+
+// Islands returns frontmatter nodes with zero doc→doc edges (either direction).
+func (g MetadataGraph) Islands() []string {
+	var out []string
+	for _, n := range g.Nodes {
+		if g.degree[n] == 0 {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

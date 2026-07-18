@@ -100,3 +100,22 @@ func TestContentGraphMutualClusterNotIsland(t *testing.T) {
 		t.Fatalf("mutual cluster should not be islands, got %v", got)
 	}
 }
+
+func TestMetadataGraphIslands(t *testing.T) {
+	docs := map[string]*Doc{
+		"docs/arch.md":        {Type: "architecture"},                                                   // no doc->doc edge
+		"docs/auth.md":        {Type: "reference", Links: []Edge{{Rel: "part-of", To: "docs/arch.md"}}}, // points up -> connected
+		"docs/only-covers.md": {Type: "reference", Links: []Edge{{Rel: "covers", To: "main.go"}}},       // covers != metadata edge
+		"docs/see.md":         {Type: "guide", Links: []Edge{{Rel: "see-also", To: "docs/auth.md"}}},    // outbound see-also -> connected
+	}
+	trackedSet := map[string]bool{
+		"docs/arch.md": true, "docs/auth.md": true, "docs/only-covers.md": true, "docs/see.md": true, "main.go": true,
+	}
+	g := BuildMetadataGraph(docs, trackedSet)
+	got := g.Islands()
+	// arch has inbound part-of (from auth) -> connected. auth/see have edges. only-covers has none.
+	want := []string{"docs/only-covers.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("metadata islands = %v, want %v (edges: %+v)", got, want, g.Edges)
+	}
+}

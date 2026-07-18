@@ -40,11 +40,13 @@ type Report struct {
 	FrontmatterFindings []FrontmatterFinding
 	BrokenEdges         []BrokenEdge
 	EdgeCycles          [][]string
+	Disconnected        []string
 }
 
 func (r Report) HasFindings() bool {
 	return len(r.Orphans) > 0 || len(r.BrokenLinks) > 0 || len(r.Untracked) > 0 ||
-		len(r.FrontmatterFindings) > 0 || len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0
+		len(r.FrontmatterFindings) > 0 || len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0 ||
+		len(r.Disconnected) > 0
 }
 
 type Options struct {
@@ -220,6 +222,8 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 	brokenEdgeFindings := brokenEdges(repoRoot, docs)
 	edgeCycles := detectCycles(docs, trackedSet)
 
+	mg := BuildMetadataGraph(docs, trackedSet)
+
 	return Report{
 		Roots:               roots,
 		TrackedMD:           len(tracked),
@@ -230,5 +234,6 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		FrontmatterFindings: fmFindings,
 		BrokenEdges:         brokenEdgeFindings,
 		EdgeCycles:          edgeCycles,
+		Disconnected:        mg.Islands(),
 	}, nil
 }

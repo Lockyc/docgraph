@@ -72,6 +72,9 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 	if sel["edges"] {
 		counts["edges"] = len(rep.BrokenEdges) + len(rep.EdgeCycles)
 	}
+	if sel["disconnected"] {
+		counts["disconnected"] = len(rep.Disconnected)
+	}
 
 	rec := UsageRecord{
 		TS:      now.Format(time.RFC3339),
@@ -118,6 +121,9 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
 			}
 		}
+		if sel["disconnected"] {
+			f["disconnected"] = append([]string{}, rep.Disconnected...)
+		}
 		rec.Findings = f
 	case level == 2:
 		// Level 2 — paths only. broken/leaks carry file:line (a location), never the
@@ -151,6 +157,9 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 			for _, cyc := range rep.EdgeCycles {
 				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
 			}
+		}
+		if sel["disconnected"] {
+			f["disconnected"] = append([]string{}, rep.Disconnected...)
 		}
 		rec.Files = f
 	}
