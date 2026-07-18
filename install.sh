@@ -16,7 +16,7 @@ set -e
 # silently falls back to the newest v1 — which is how the published install path
 # broke once already. It is also the go.mod module line verbatim, so the IN_REPO
 # grep below and the @latest install stay one source.
-MODULE="github.com/lockyc/docgraph/v2"
+MODULE="github.com/lockyc/docgraph/v3"
 
 command -v go >/dev/null 2>&1 || {
   echo "docgraph: Go is required (https://go.dev/dl/). Install it, then re-run." >&2

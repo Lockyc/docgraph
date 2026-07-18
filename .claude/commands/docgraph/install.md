@@ -18,11 +18,11 @@ Stop hook, a repo's pre-push gate, and the leaks config dir.
 Check whether the current working directory is the docgraph repo:
 
 ```bash
-MODULE="github.com/lockyc/docgraph/v2"
+MODULE="github.com/lockyc/docgraph/v3"
 [ -f install.sh ] && [ -f main.go ] && grep -q "^module $MODULE\$" go.mod 2>/dev/null && echo "IN_REPO" || echo "NOT_IN_REPO"
 ```
 
-`MODULE` is the `go.mod` module line verbatim, `/v2` included — the same shape
+`MODULE` is the `go.mod` module line verbatim, `/v3` included — the same shape
 `install.sh` uses. The suffix is load-bearing here too: an anchored grep for the
 bare path matches no `go.mod` at major ≥2, so this step would report
 `NOT_IN_REPO` from inside the checkout and clone needlessly. A major bump moves
@@ -181,7 +181,7 @@ Print three sections:
 - `docgraph covers <path>` names the doc governing a file — the skill teaches agents to
   reach for it. It answers only in repos whose docs declare `covers:` edges.
 - Update any time by re-running `/docgraph:install` (or `go install
-  github.com/lockyc/docgraph/v2@latest`) — nothing auto-updates the binary.
+  github.com/lockyc/docgraph/v3@latest`) — nothing auto-updates the binary.
 - `DOC_DRIFT_OFF=1` disables the Stop hook for a repo that doesn't use the
   anchored-symbol convention; `DOCGRAPH_FOOTGUN_OFF=1` disables the footgun nag and
   `DOCGRAPH_COVERS_OFF=1` the covers nag.

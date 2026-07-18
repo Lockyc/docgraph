@@ -494,7 +494,7 @@ the thing. Only a fresh `go install <module>@latest` tests that, and nothing her
 runs one.
 
 So: **after any release that moves the module path or major version, verify from
-outside the repo** — `GOPATH=$(mktemp -d) go install github.com/lockyc/docgraph/v2@latest`
+outside the repo** — `GOPATH=$(mktemp -d) go install github.com/lockyc/docgraph/v3@latest`
 in a temp dir. Do not infer it from a green gate. And never "fix" a rejected v2 tag by
 dropping back to v1 numbering — the tags are public and `checksFlagRemoved`'s
 user-facing message commits to the v2 lineage; move the module path instead.

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/lockyc/docgraph/v2/internal/audit"
+	"github.com/lockyc/docgraph/v3/internal/audit"
 )
 
 type multiFlag []string
@@ -240,7 +240,7 @@ printf '%s' "$refs" | "$bin" covers-drift . || true`
 	return `#!/usr/bin/env bash
 # docgraph pre-push gate — installed by 'docgraph install-hook'. Activated per
 # clone via core.hooksPath -> .githooks. Fails closed: if docgraph can't be found
-# the push is blocked (install: go install github.com/lockyc/docgraph/v2@latest).
+# the push is blocked (install: go install github.com/lockyc/docgraph/v3@latest).
 set -euo pipefail
 refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running anything
 
@@ -248,7 +248,7 @@ refs="$(cat)"   # git feeds pre-push ref lines on stdin; captured before running
 
 if ! bin="$(docgraph_bin)"; then
   echo "docgraph: not found on PATH or in the Go bin dir — push blocked (fail-closed)." >&2
-  echo "  install it: go install github.com/lockyc/docgraph/v2@latest" >&2
+  echo "  install it: go install github.com/lockyc/docgraph/v3@latest" >&2
   exit 1
 fi
 ` + stateLine + footgun + covers + `

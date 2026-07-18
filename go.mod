@@ -1,4 +1,4 @@
-module github.com/lockyc/docgraph/v2
+module github.com/lockyc/docgraph/v3
 
 go 1.26.4
 

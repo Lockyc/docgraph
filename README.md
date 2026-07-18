@@ -14,7 +14,7 @@ finding exits non-zero and aborts the push.
 ## Quick start
 
 ```bash
-go install github.com/lockyc/docgraph/v2@latest   # needs Go + git on PATH
+go install github.com/lockyc/docgraph/v3@latest   # needs Go + git on PATH
 docgraph .                                      # audit the current repo
 docgraph install-hook                           # wire it in as a pre-push gate
 ```
@@ -353,7 +353,7 @@ Runs `go install` (from the current checkout if you're in one, else `@latest`),
 seeds `~/.config/docgraph/`, and prints where the binary landed. Or directly:
 
 ```bash
-go install github.com/lockyc/docgraph/v2@latest   # or, from a checkout: just install
+go install github.com/lockyc/docgraph/v3@latest   # or, from a checkout: just install
 ```
 
 Needs **Go** (the install is `go install`) and **git** on PATH (docgraph shells
