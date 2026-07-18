@@ -1031,6 +1031,69 @@ func TestGraphNotAGatedCheck(t *testing.T) {
 	}
 }
 
+// TestGraphRefOnBareRepo exercises `graph --ref` against a bare clone, where
+// there is no working tree for GitRoot's `rev-parse --show-toplevel` to
+// resolve — --ref must skip GitRoot entirely and read committed state via
+// BuildGraphViewAtRef instead.
+func TestGraphRefOnBareRepo(t *testing.T) {
+	dir := mkRepo(t)
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init")
+
+	bare := t.TempDir() + "/repo.git"
+	if out, err := exec.Command("git", "clone", "--bare", dir, bare).CombinedOutput(); err != nil {
+		t.Fatalf("clone --bare: %v\n%s", err, out)
+	}
+
+	restore := chdir(t, bare)
+	defer restore()
+
+	var out, errb bytes.Buffer
+	code := runGraph([]string{"--json", "--ref", "HEAD"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr=%s", code, errb.String())
+	}
+	var v map[string]any
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out.String())
+	}
+	if sv, ok := v["schemaVersion"].(float64); !ok || sv != audit.GraphSchemaVersion {
+		t.Fatalf("schemaVersion = %v, want %d", v["schemaVersion"], audit.GraphSchemaVersion)
+	}
+	if _, ok := v["nodes"]; !ok {
+		t.Fatal("missing nodes")
+	}
+}
+
+// TestGraphRefBadRefExitsNonZero confirms a nonexistent ref fails loudly
+// (non-zero exit, no partial JSON on stdout) rather than silently falling
+// back to the working tree.
+func TestGraphRefBadRefExitsNonZero(t *testing.T) {
+	dir := mkRepo(t)
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init")
+
+	restore := chdir(t, dir)
+	defer restore()
+
+	var out, errb bytes.Buffer
+	code := runGraph([]string{"--json", "--ref", "does-not-exist"}, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit for a bad ref; stdout=%s", out.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected no JSON on stdout for a bad ref, got: %s", out.String())
+	}
+}
+
 func TestPrintReportEdgesHeaderCountsCycles(t *testing.T) {
 	var buf bytes.Buffer
 	rep := audit.Report{EdgeCycles: [][]string{{"a.md", "b.md"}}}

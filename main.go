@@ -1058,15 +1058,25 @@ func runGraph(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&roots, "root", "extra root doc (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
 	asJSON := fs.Bool("json", false, "emit the graph as JSON (schemaVersion-stamped)")
+	ref := fs.String("ref", "", "read the graph from this git ref (e.g. HEAD, dev); works on a bare repo, reads committed state not the working tree")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	root, err := audit.GitRoot(".")
-	if err != nil {
-		fmt.Fprintln(stderr, "docgraph: not a git repository")
-		return 2
+
+	var v audit.GraphView
+	var err error
+	if *ref != "" {
+		// Ref mode: read from the object store at *ref via the cwd's git dir.
+		// Do NOT call GitRoot — rev-parse --show-toplevel fails on a bare repo.
+		v, err = audit.BuildGraphViewAtRef(".", *ref, roots, ignores)
+	} else {
+		root, gerr := audit.GitRoot(".")
+		if gerr != nil {
+			fmt.Fprintln(stderr, "docgraph: not a git repository")
+			return 2
+		}
+		v, err = audit.BuildGraphView(root, roots, ignores)
 	}
-	v, err := audit.BuildGraphView(root, roots, ignores)
 	if err != nil {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
