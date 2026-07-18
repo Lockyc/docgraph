@@ -30,12 +30,35 @@ func readFile(repoRoot, rel string) (string, error) {
 	return string(b), err
 }
 
-// BuildContentGraph reads each non-ignored tracked doc and records a directed
+// fileSource abstracts where docgraph reads the tracked doc set + their content
+// from: the working tree (git ls-files + os.ReadFile) or a git ref (git ls-tree +
+// git show). One graph computation, two sources — ref mode reuses the same
+// builders rather than forking a second graph, so the served graph can never
+// diverge by source.
+type fileSource interface {
+	tracked() ([]string, error)      // tracked "*.md" paths (slash-form)
+	read(rel string) (string, error) // content of one path
+	label() string                   // value stamped into GraphView.RepoRoot
+}
+
+// worktreeSource reads from a checkout: the current working-tree behavior.
+type worktreeSource struct{ root string }
+
+func (s worktreeSource) tracked() ([]string, error)      { return trackedMD(s.root) }
+func (s worktreeSource) read(rel string) (string, error) { return readFile(s.root, rel) }
+func (s worktreeSource) label() string                   { return s.root }
+
+// BuildContentGraph is the working-tree entry point (unchanged signature).
+func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[string]bool, globs []string) ContentGraph {
+	return buildContentGraph(worktreeSource{root: repoRoot}, tracked, trackedSet, roots, globs)
+}
+
+// buildContentGraph reads each non-ignored tracked doc and records a directed
 // edge for every markdown .md link and every path-mention to another tracked
 // doc. Self-edges (a doc referencing itself) are ignored. This is the single
 // content-edge computation — both the orphans check and the graph view consume
 // it, so the graph is never rebuilt a second way.
-func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[string]bool, globs []string) ContentGraph {
+func buildContentGraph(src fileSource, tracked []string, trackedSet, roots map[string]bool, globs []string) ContentGraph {
 	g := ContentGraph{roots: roots, inbound: map[string]int{}}
 	seen := map[ContentEdge]bool{}
 	add := func(from, to, kind string) {
@@ -57,7 +80,7 @@ func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[
 		g.Nodes = append(g.Nodes, f)
 	}
 	for _, f := range g.Nodes {
-		content, err := readFile(repoRoot, f)
+		content, err := src.read(f)
 		if err != nil {
 			continue
 		}

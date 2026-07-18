@@ -52,7 +52,11 @@ type GraphView struct {
 // the read-only counterpart to Audit: it never gates, and mirrors Audit's
 // root/ignore/trackedSet resolution so the served graph matches the gated one.
 func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, error) {
-	tracked, err := trackedMD(repoRoot)
+	return buildGraphViewFrom(worktreeSource{root: repoRoot}, extraRoots, ignores)
+}
+
+func buildGraphViewFrom(src fileSource, extraRoots, ignores []string) (GraphView, error) {
+	tracked, err := src.tracked()
 	if err != nil {
 		return GraphView{}, err
 	}
@@ -60,7 +64,7 @@ func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, e
 	for _, f := range tracked {
 		trackedSet[f] = true
 	}
-	globs, err := loadIgnores(repoRoot, ignores)
+	globs, err := loadIgnoresFrom(src, ignores)
 	if err != nil {
 		return GraphView{}, err
 	}
@@ -76,13 +80,13 @@ func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, e
 			roots[r] = true
 		}
 	}
-	docs, _ := parseDocs(repoRoot, tracked, globs)
-	cg := BuildContentGraph(repoRoot, tracked, trackedSet, roots, globs)
+	docs, _ := parseDocsFrom(src, tracked, globs)
+	cg := buildContentGraph(src, tracked, trackedSet, roots, globs)
 	mg := BuildMetadataGraph(docs, trackedSet)
 
 	v := GraphView{
 		SchemaVersion: GraphSchemaVersion,
-		RepoRoot:      repoRoot,
+		RepoRoot:      src.label(),
 		ContentEdges:  cg.Edges,
 		MetadataEdges: mg.Edges,
 		Islands:       GraphIslands{Content: cg.Islands(), Metadata: mg.Islands()},

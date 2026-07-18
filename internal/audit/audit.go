@@ -91,17 +91,21 @@ func mentionsPath(content, path string) bool {
 // findings: malformed YAML, a block present with no `type`, or (except any
 // README.md, matched by basename) no frontmatter block at all.
 func parseDocs(repoRoot string, tracked, globs []string) (map[string]*Doc, []FrontmatterFinding) {
+	return parseDocsFrom(worktreeSource{root: repoRoot}, tracked, globs)
+}
+
+func parseDocsFrom(src fileSource, tracked, globs []string) (map[string]*Doc, []FrontmatterFinding) {
 	docs := map[string]*Doc{}
 	var findings []FrontmatterFinding
 	for _, f := range tracked {
 		if matchesIgnore(f, globs) {
 			continue
 		}
-		content, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(f)))
+		content, err := src.read(f)
 		if err != nil {
 			continue
 		}
-		d, err := ParseFrontmatter(string(content))
+		d, err := ParseFrontmatter(content)
 		if err != nil {
 			findings = append(findings, FrontmatterFinding{File: f, Detail: "malformed frontmatter: " + err.Error()})
 			continue

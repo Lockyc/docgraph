@@ -1,8 +1,6 @@
 package audit
 
 import (
-	"bufio"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -45,19 +43,18 @@ func matchSegments(pat, name []string) bool {
 // loadIgnores returns the default ignore, patterns from .docgraphignore (if
 // present), then extra patterns — order preserved.
 func loadIgnores(root string, extra []string) ([]string, error) {
+	return loadIgnoresFrom(worktreeSource{root: root}, extra)
+}
+
+func loadIgnoresFrom(src fileSource, extra []string) ([]string, error) {
 	globs := append([]string{}, defaultIgnores...)
-	f, err := os.Open(filepath.Join(root, ".docgraphignore"))
-	if err == nil {
-		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			line := strings.TrimSpace(sc.Text())
+	if content, err := src.read(".docgraphignore"); err == nil {
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "#") {
 				globs = append(globs, line)
 			}
 		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
 	return append(globs, extra...), nil
 }
