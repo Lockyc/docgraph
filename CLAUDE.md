@@ -111,13 +111,18 @@ an advisory check is a pre-push rider instead.
   `README.md`; `leaks` scans tracked file *content* (code included) for
   configured leak patterns. All read the current tree, never git history.
 - **`footgun-drift`, `covers-drift` and `doc-drift` read a *diff*, not repo
-  state.** `footgun-drift` scans added markdown lines (like `leaks`, but
-  diff-scoped); `doc-drift` diffs tracked **code** (removed definitions, changed
-  constants) and greps the *docs* for stale references to what changed — the one
-  check that compares two different file types; `covers-drift` joins the same
-  code diff against the graph instead of a grep — `changedCode` against the
-  `covers` edges of the parsed doc set. The six `docgraph .` checks have no range
-  concept; the intro maps each mode's trigger and range.
+  state (the diff-scoped-subcommands invariant).** `footgun-drift` scans added
+  markdown lines (like `leaks`, but diff-scoped); `doc-drift` diffs tracked
+  **code** (removed definitions, changed constants) and greps the *docs* for stale
+  references to what changed — the one check that compares two different file
+  types; `covers-drift` joins the same code diff against the graph instead of a
+  grep — `changedCode` against the `covers` edges of the parsed doc set. They
+  share this check-what-changed model but stay **separate** subcommands because
+  their trigger and diff source differ: `doc-drift` a Stop hook over the
+  working-tree code diff, `footgun-drift` a pre-push subcommand over the pushed
+  range's markdown, `covers-drift` a pre-push subcommand over that same range's
+  code side. The six `docgraph .` checks have no range concept — reachability,
+  link existence and leak content are properties of the current tree, not a range.
 
 ## Frontmatter model
 
@@ -167,25 +172,20 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   its purpose.
 - **`footgun-drift` is diff-scoped ON PURPOSE — do NOT re-add `footguns` to
   `checkNames`.** A whole-state footgun check re-scanning every tracked `.md`
-  floods on the existing corpus: every already-accepted footgun note re-flags on
-  every unrelated push (worse now that the check flags *every* declaration, not
-  just un-rationalized ones). So the check is scoped to what's *new* —
-  declarations added in the pushed range; content already on the remote is never
-  re-scanned. `footgun-drift`, `covers-drift` and `doc-drift` share this
-  check-what-changed model but stay **separate** subcommands, because their
-  trigger and diff source differ: `doc-drift` is a Stop-hook driven by the
-  working-tree-inclusive **code** diff, `footgun-drift` a pre-push subcommand
-  driven by git's pushed-ref range diffing **markdown**, `covers-drift` a pre-push
-  subcommand reading that same range's **code** side. Do not merge them — and see
-  the Stop-hook dead-end footgun for why `covers-drift` cannot be folded into
-  `doc-drift` despite the shared diff. The six `docgraph .` checks stay whole-state:
-  reachability, link existence, and leak content have no meaningful "diff" version
-  — they're properties of the current tree, not of a range.
+  floods on the existing corpus: every already-accepted note re-flags on every
+  unrelated push (worse now it flags *every* declaration, not just un-rationalized
+  ones). Scoped to what's *new* — declarations added in the pushed range — it
+  stays quiet on content already on the remote. It shares the check-what-changed
+  model with `covers-drift`/`doc-drift` but stays a separate subcommand (the
+  diff-scoped-subcommands invariant above; see the Stop-hook footgun for why
+  `covers-drift` cannot fold into `doc-drift` despite the shared diff).
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates the owner's sensitive terms), and the footprint vocabulary is
-  identical across repos. The README's `leaks` section documents the TOML schema,
-  the `--leaks-config`→`$DOCGRAPH_LEAKS`→`$XDG_CONFIG_HOME` resolution (XDG, never
+  identical across repos. **The leaks config is the single control surface** — no
+  per-repo/inline override (referenced across the footguns below). The README's
+  `leaks` section documents the TOML schema, the
+  `--leaks-config`→`$DOCGRAPH_LEAKS`→`$XDG_CONFIG_HOME` resolution (XDG, never
   `os.UserConfigDir()` — wrong on macOS for a CLI), and the `leaks-rules` export.
   The load-bearing invariants:
   - **The config is the SOLE source of rules — NO hardcoded built-ins.** Generic
@@ -193,10 +193,9 @@ restating the vocabulary, so the schema and the checks can't drift apart.
     binary ships none. Rules hidden in a binary can't be seen or tuned — the config
     being the single visible source is the point. Do NOT reintroduce built-ins.
   - **Absent config is NOT fatal; malformed IS.** leaks runs by default (incl. CI,
-    which has no machine-local file), so an absent file is the normal state → no
-    rules, no-op, warn. A malformed config (bad TOML, a bad regexp, or a
-    non-absolute `[[dir]]` `path`) is a real bug → fatal (exit 2). Do NOT restore
-    hard-fail-on-absent — it would brick every CI/fresh-clone push.
+    which has no machine-local file), so an absent file → no rules, no-op, warn; a
+    malformed config → fatal exit 2 (`LeakConfig.compile`, `internal/audit/leaks.go`).
+    Do NOT restore hard-fail-on-absent — it would brick every CI/fresh-clone push.
   - **`leaks-rules` targets filter-repo's Python `re`, not Go/RE2.** A leading
     `(?-i)` is normalized to a plain case-sensitive rule (Python `re` rejects the
     bare flag-clear Go/RE2 accepts, which would abort the rewrite); other RE2-only
@@ -209,81 +208,68 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   Every check runs by default; `--skip <check[,check]>` is the only way to not run
   one. The removed `--checks` (include-list) flag could not enforce: a check added
   later is silently absent from every existing `--checks` list, so it enforces
-  nowhere until each repo edits its list — exactly how `leaks` first shipped,
-  invisible, under that model. With the exclude model a new check is enforced
-  everywhere the day it lands, and the generated hook runs a bare `docgraph .` for
-  the same reason. `run` and `install-hook` reject a stray `--checks` with a
-  migration message (exit 2). Do NOT reintroduce an include-list default.
+  nowhere until each repo edits its list. With the exclude model a new check is
+  enforced everywhere the day it lands, and the generated hook runs a bare
+  `docgraph .` for the same reason. `run` and `install-hook` reject a stray
+  `--checks` with a migration message (exit 2). Do NOT reintroduce an include-list
+  default.
 - **`leaks` scope is git tracking, not the doc-graph ignore layers.** `LeakScan`
-  scans every file `git ls-files` returns — so `.gitignore` governs what's
-  in-scope — and honors only the explicit `--ignore` CLI globs as a per-run
-  escape hatch. It does **not** apply `defaultIgnores` or `.docgraphignore`: a
-  tracked file ships publicly regardless of the doc-graph scope, so a tracked
-  `.claude/` config (excluded from orphans/broken/untracked because it isn't
-  documentation) is exactly where owner-specific strings hide and must stay
-  in-scope for the leak pass.
-- **Dir-scoped exclusions are keyed by ABSOLUTE path and are local-only.**
-  `[[dir]]` sections match a scanned file by absolute-path containment, so they
-  only take effect where the global config lives (your machine). CI / fresh
-  clones have no config → no rules → the scan is a no-op there. So a repo whose
-  own tracked fixtures would trip its owner's rules is silenced *in the config*
-  with a `[[dir]] ignore` for that repo (e.g. docgraph's own config entry ignores
-  `**/*_test.go`) — the config is the single control surface, not a per-repo
-  `--skip`/`--ignore` or an inline marker (see next).
+  scans every file `git ls-files` returns (`.gitignore` governs scope), honoring
+  only `--ignore` CLI globs — **not** `defaultIgnores`/`.docgraphignore`. A tracked
+  file ships publicly regardless of doc-graph scope, so a tracked `.claude/` config
+  (excluded from orphans/broken/untracked as non-documentation) is exactly where
+  owner-specific strings hide and must stay in leak scope.
+- **`[[dir]]` exclusions are keyed by ABSOLUTE path and local-only** — they take
+  effect only where the global config lives, so CI/fresh clones (no config → no
+  rules → no-op) never apply them (`expandDirPath` rejects a non-absolute path,
+  `internal/audit/leaks.go`). A repo whose own tracked fixtures trip its owner's
+  rules is silenced *in the config* with a `[[dir]] ignore` (docgraph's own entry
+  ignores `**/*_test.go`) — the leaks config is the single control surface, not a
+  per-repo `--skip`/`--ignore` or an inline marker (see next).
 - **No inline suppression markers — every control is config or CLI.** docgraph
   never parses a suppression comment/pragma out of the files it audits.
   Suppression is *only* `.docgraphignore`/`--ignore`/`--skip` (doc-graph scope)
   and the leaks config's `allow`/`allow_regex`/`[[dir]]` (leak scope);
-  `footgun-drift`, `covers-drift` and `doc-drift` have no in-file escape at all,
-  opted out only whole-check via `DOCGRAPH_FOOTGUN_OFF=1` / `--no-footgun-drift`,
-  `DOCGRAPH_COVERS_OFF=1` / `--no-covers-drift`, and `DOC_DRIFT_OFF=1`
-  respectively. This is deliberate: an inline marker committed
-  to a public repo would be a visible "here be a secret" annotation (same reason
-  the leaks deny-list stays out of the repo), and a per-file override is exactly
-  what the config-as-single-source-of-truth model exists to avoid — a line-level
-  comment scanner would also have to read file content just to honor
-  self-referential annotations, silently un-nagging whatever it's placed on. A
-  flagged `footgun-drift`/`doc-drift` reference is a situation-based judgment call
-  — reconcile the doc, or confirm it's intentional framed history and move on —
-  de-duped only by doc-drift's once-per-HEAD loop-guard. `covers-drift` needs no
-  suppression surface at all: it only fires on a doc the change set left
-  untouched, so editing that doc *is* the escape hatch.
-- **Code-block links are skipped deliberately.** `extractLinks` ignores fenced
-  (```` ``` ````/`~~~`) and inline (`` `...` ``) code so template/example paths
-  in docs (e.g. a `[docs](services/name.md)` template row) don't register as real
-  *links*. Asymmetry: the orphan **reachability** pass, `mentionsPath`, *does*
-  read inline-code path mentions — that's how an agent follows a bare
-  `` `docs/x.md` `` reference. Link-extraction and reachability answer different
-  questions; don't unify them.
-- **Two graphs, not one union (v3 pivot).** Reachability was once a single union
-  of markdown links ∪ path-mentions ∪ frontmatter-doc-edges. v3 splits this into
-  two independently-enforced graphs: the **content graph** (links ∪ path-mentions)
-  enforces *findability* via an island rule (a non-root doc with zero inbound
-  content edges is an `orphans` finding), and the **metadata graph** (frontmatter
-  doc→doc edges) enforces *structural placement* via its own island rule (a
-  frontmatter doc participating in zero doc→doc edges either direction is a
-  `disconnected` finding). Do NOT re-merge them into one union check — they answer
-  different questions (findability is inbound-only; placement is either-direction)
-  and root-reachability is deliberately no longer enforced (the generated `graph`
-  view provides findability, not a hand-curated index chain).
-  - **`covers`/`source` edges don't count toward metadata placement.**
-    `isMetadataEdge` (`internal/audit/graph.go`) excludes `covers` (code
-    ownership) and `source` (external provenance) even when the target is a
-    tracked `.md` — they point *out* of the doc→doc structure, not within it. So
-    a doc whose *only* frontmatter edges are `covers`→code (this very file was
-    one) is a **metadata island** and trips `disconnected`. The fix is a real
-    doc→doc edge — a `part-of` up to the entry doc, or a `see-also` across — not
-    demoting the `covers` edge. Dogfood instance: `docs/FOLLOWUPS.md` gained a
-    `part-of: CLAUDE.md` edge, which connects *both* (FOLLOWUPS gets outbound
-    degree, CLAUDE.md gets inbound), clearing both islands at once.
+  `footgun-drift`/`covers-drift`/`doc-drift` have no in-file escape, opted out only
+  whole-check via `DOCGRAPH_FOOTGUN_OFF=1`/`--no-footgun-drift`,
+  `DOCGRAPH_COVERS_OFF=1`/`--no-covers-drift`, and `DOC_DRIFT_OFF=1`. Deliberate: an
+  inline marker committed to a public repo is itself a visible "here be a secret"
+  annotation (same reason the leaks deny-list stays out of the repo), and a
+  per-file override is what the single-control-surface model exists to avoid — a
+  comment scanner would also have to read file content to honor self-referential
+  annotations, silently un-nagging whatever it's placed on. A flagged
+  `footgun-drift`/`doc-drift` reference is a judgment call — reconcile the doc or
+  confirm it's intentional framed history — de-duped only by doc-drift's
+  once-per-HEAD loop-guard; `covers-drift` needs no suppression surface (it fires
+  only on a doc the change set left untouched, so editing that doc *is* the escape).
+- **Code-block links are skipped deliberately.** `extractLinks`
+  (`internal/audit/links.go`) ignores fenced and inline code so template/example
+  paths don't register as real *links*. Asymmetry: the orphan **reachability**
+  pass, `mentionsPath`, *does* read inline-code path mentions — that's how an agent
+  follows a bare `` `docs/x.md` `` reference. Link-extraction and reachability
+  answer different questions; don't unify them.
+- **Two graphs, not one union — do NOT re-merge them.** The **content graph**
+  (markdown links ∪ path-mentions over doc bodies) enforces *findability* via an
+  inbound-only island rule (a non-root doc with zero inbound content edges is an
+  `orphans` finding); the **metadata graph** (frontmatter doc→doc edges) enforces
+  *structural placement* via an either-direction island rule (a frontmatter doc
+  with zero doc→doc edges is a `disconnected` finding). They answer different
+  questions (findability is inbound-only; placement is either-direction) and
+  root-reachability is deliberately not enforced — the generated `graph` view
+  provides findability, not a hand-curated index chain.
+  - **`covers`/`source` edges don't count toward metadata placement** —
+    `isMetadataEdge` (`internal/audit/graph.go`) excludes them even when the target
+    is a tracked `.md`, since they point *out* of the doc→doc structure. So a doc
+    whose *only* frontmatter edges are `covers`→code (this very file) is a metadata
+    island that trips `disconnected`; the fix is a real doc→doc edge (a `part-of`
+    up to the entry doc, or a `see-also` across), not demoting the `covers` edge.
 - **Exclude tooling, not real docs — don't re-narrow to `docs/`.** Orphan
   candidates are *all* tracked `.md` except the `defaultIgnores` (`.claude/**`
-  and `.agents/**` agent skill/config files, which aren't documentation, and
+  and `.agents/**` agent skill/config files, which aren't documentation, plus
   untracked scratch). A real doc outside `docs/` (a config-dir README, e.g. a
-  `monitoring/README.md`) **is** a document and must be audited — an earlier
-  `docs/`-only scope wrongly made such docs invisible (neither flagged nor
-  checked). `.claude/**` and `.agents/**` files are runtime tooling; a config-dir
-  README is not. Keep that distinction.
+  `monitoring/README.md`) **is** a document and must be audited. `.claude/**` and
+  `.agents/**` files are runtime tooling; a config-dir README is not — keep that
+  distinction.
 - **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** One JSONL
   record per run under `$XDG_STATE_HOME/docgraph/usage.jsonl` (XDG *state*, not
   config), only when a global `config.toml` `[log]` table opts in (the README's
@@ -295,10 +281,10 @@ restating the vocabulary, so the schema and the checks can't drift apart.
     leaks is an enforced protection, logging is auxiliary, so a log-config typo must
     never block a push. Absent config → silently off (no warning; the normal
     CI/clone/fresh state). Do NOT make either fatal.
-  - **Level gates leak exposure.** L1 counts only, L2 adds paths (`file:line`), L3
-    adds full findings **including leak match text**. Levels 1–2 must NEVER write a
-    leak `Match` — the log must not become the sensitive-string sink the `leaks`
-    check exists to prevent. Only L3 (a documented, trusted-machine opt-in) does.
+  - **Level gates leak exposure.** L1 counts only, L2 adds paths, L3 adds full
+    findings **including leak match text** — levels 1–2 must NEVER write a leak
+    `Match` (`BuildRecord`, `internal/audit/usage.go`); only L3 (a documented,
+    trusted-machine opt-in) does.
   - **Best-effort, never fails the run.** `maybeLog` swallows every error; the exit
     code is decided by findings alone. `DOCGRAPH_NO_LOG=1` is the one-off kill switch
     (mirrors `DOC_DRIFT_OFF`).
@@ -307,36 +293,31 @@ restating the vocabulary, so the schema and the checks can't drift apart.
     *same* record shape — trends span both. Keep the field when adding a subcommand.
 - **`footgun-drift` is a nag, not a judge — so it flags EVERY added
   declaration.** It detects a footgun *declaration* (a line-leading `Footgun:` or a
-  bolded mid-line footgun lead — introducing one, not a cross-reference or a bare
-  container heading with no delimiter) and reports it, full stop. It deliberately
-  does **not** detect a rationale: docgraph is a deterministic scanner and can't
-  rank whether a stated "why" is real — rationale detection would just reward
-  typing "because". So it nags and prints the two-question test (is this a real
-  footgun; is it at the right doc level — the `doc-and-audit-rigor` skill's test),
-  leaving that judgment to the pusher. Because it judges nothing, it does not
-  block. Do NOT reintroduce rationale detection to "reduce noise" — an honest nag
-  beats a fake judge.
-- **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'` —
-  not the doc-graph ignore layers, and not the leaks git-tracking scope
-  either.** Any `.md` file the diff touches is in scope, including a
-  `.claude/**` skill file that `orphans`/`broken`/`untracked` exclude as
-  non-documentation: a footgun declaration added inside agent tooling is just
-  as undocumented as one in `CLAUDE.md`, so narrowing to the doc-graph roots
-  would blind the check to exactly the files most likely to accumulate
-  footgun notes over time. Do not apply `defaultIgnores` or `.docgraphignore` here.
+  bolded mid-line footgun lead, not a cross-reference or bare container heading)
+  and reports it, doing **no** rationale detection
+  (`scanDeclarations`/`isFootgunDeclaration`, `internal/audit/footguns.go`): a
+  deterministic scanner can't rank whether a stated "why" is real — that would just
+  reward typing "because". It prints the two-question test (is this a real footgun;
+  is it at the right doc level — the `doc-and-audit-rigor` skill's test) and leaves
+  the judgment to the pusher. Judging nothing, it does not block (the
+  advisory-can't-block invariant, Stop-hook footgun below). Do NOT reintroduce
+  rationale detection to "reduce noise" — an honest nag beats a fake judge.
+- **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'`** —
+  not the doc-graph ignore layers, and not the leaks git-tracking scope. Any `.md`
+  the diff touches is in scope, including a `.claude/**` skill file that
+  `orphans`/`broken`/`untracked` exclude as non-documentation — a footgun
+  declaration added inside agent tooling is just as undocumented as one in
+  `CLAUDE.md`. Do not apply `defaultIgnores`/`.docgraphignore` here.
 - **An advisory check can NEVER be a Stop hook — that's why `covers-drift` is
-  pre-push.** A Stop hook has no channel that is both advisory and agent-visible.
-  Exit-0 stdout reaches only the debug log (the agent never sees it); exit-2
-  stderr, `decision:"block"`/`reason`, and `hookSpecificOutput.additionalContext`
-  all reach the agent but all stop the turn from ending — `additionalContext` is
-  documented as keeping "the conversation going through the same loop protections
-  as `decision: block`", differing from a hard block only in that the transcript
-  labels it feedback rather than an error. That is structural, not a gap: a Stop
-  hook exists to decide whether Claude stops. So the tempting "move `covers-drift`
-  into `doc-drift`, they share a diff source" refactor cannot work — at Stop time
-  the only way to be heard is to block, and this check judges nothing so it must
-  not block. `doc-drift` blocks because its findings are mechanical facts; that is
-  what earns it the Stop hook.
+  pre-push (the advisory-can't-block invariant).** A Stop hook has no channel that
+  is both advisory and agent-visible: exit-0 stdout reaches only the debug log (the
+  agent never sees it); exit-2 stderr, `decision:"block"`/`reason`, and
+  `hookSpecificOutput.additionalContext` all reach the agent but all stop the turn
+  from ending. That is structural — a Stop hook exists to decide whether Claude
+  stops — so the tempting "fold `covers-drift` into `doc-drift`, they share a diff
+  source" refactor cannot work: at Stop time the only way to be heard is to block,
+  and `covers-drift` judges nothing so it must not. `doc-drift` blocks because its
+  findings are mechanical facts; that is what earns it the Stop hook.
 
 ## Doc models (why `--skip` exists)
 
@@ -534,35 +515,30 @@ docs/" with zero config.
 ## Footgun — a major bump must move the module path, or the release is invisible
 
 Go **ignores every `vN` tag (N≥2) on a module whose path lacks the matching `/vN`
-suffix**. Tagging `v2.0.0` while `go.mod` said `module github.com/lockyc/docgraph`
-made the proxy reject it outright (`invalid version: module path must match major
-version`), so `@latest` silently resolved to the newest **v1** tag instead — which
-still carried the pre-rename `docaudit` path, and `go install` then hard-failed with
-`module declares its path as … but was required as …`. Net effect: the published
-install command in the README, `install.sh`, `SKILL.md` and **the fail-closed hook's
-own "install it:" message** could not install anything, for anyone, for a week.
+suffix** — the proxy rejects the tag (`invalid version: module path must match major
+version`) and `@latest` silently resolves to the newest lower-major tag, so the
+published install command in the README, `install.sh`, `SKILL.md` and the fail-closed
+hook's own "install it:" message can all stop installing anything, for everyone,
+silently.
 
-**Why it survived a week undetected — this is the part that generalizes.** Every
-path this repo exercises bypasses module resolution: `just install` is `go install .`
-(local build, no proxy), and CI is `checkout` + `vet` + `test` (also local). A green
-gate and a working local binary say *nothing* about whether a consumer can install
-the thing. Only a fresh `go install <module>@latest` tests that, and nothing here
-runs one.
+It hides because every path this repo exercises bypasses module resolution:
+`just install` is `go install .` (local, no proxy) and CI is `checkout`+`vet`+`test`
+(also local). A green gate and a working local binary say *nothing* about whether a
+consumer can install the thing — only a fresh `go install <module>@latest` does.
 
 So: **after any release that moves the module path or major version, verify from
 outside the repo** — `GOPATH=$(mktemp -d) go install github.com/lockyc/docgraph/v3@latest`
-in a temp dir. Do not infer it from a green gate. And never "fix" a rejected major tag
-by dropping back to a lower major — the tags are public; move the module path forward to
+in a temp dir; do not infer it from a green gate. And never "fix" a rejected major tag
+by dropping to a lower major — the tags are public; move the module path forward to
 match instead.
 
-The pre-push hook `hookScript` generates must resolve docgraph via PATH **and**
-the Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone. Git
-runs hooks with the caller's PATH; GUI clients and sandboxed agent harnesses push
-with a bare PATH that omits `~/go/bin`. With a `command -v`-only lookup the
-fail-closed gate then *blocks the push because it can't see an installed binary*
-— tool present, but invisible — which reads as "docgraph is broken" and trains
-agents to reach for `--no-verify`. The Go-bin fallback (guarded by a test in
-`main_test.go`) is load-bearing; do not narrow it back to `command -v`.
+The pre-push hook `hookScript` generates must resolve docgraph via PATH **and** the
+Go bin dir (`$GOBIN`/`$GOPATH/bin`/`~/go/bin`), not `command -v` alone
+(`docgraphBinFunc`, `main.go`; guarded by `main_test.go`). GUI clients and sandboxed
+agent harnesses push with a bare PATH that omits `~/go/bin`, so a `command -v`-only
+lookup fail-closes the gate on a *present-but-invisible* binary — which reads as
+"docgraph is broken" and trains agents to reach for `--no-verify`. Do not narrow the
+Go-bin fallback back to `command -v`.
 
 ## v1 gaps (documented, not silent)
 
