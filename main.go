@@ -782,8 +782,9 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	for _, f := range fs {
 		fmt.Fprintf(w, "  %s:%d → %s\n", f.File, f.Line, echoLine(f.Text))
 	}
-	fmt.Fprintln(w, "Reword any note-just-in-case as a plain note, or drop it — a follow-up commit is")
-	fmt.Fprintln(w, "fine, docgraph did not hold the push.")
+	fmt.Fprintln(w, "A bug you just fixed is not a footgun: its story belongs in the commit message,")
+	fmt.Fprintln(w, "and the doc keeps at most the surviving rule. Reword any note-just-in-case as a")
+	fmt.Fprintln(w, "plain note, or drop it — a follow-up commit is fine, docgraph did not hold the push.")
 	fmt.Fprintln(w, bar)
 }
 
@@ -1039,7 +1040,10 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 		}
 	}
 	fmt.Fprintln(w, "doc-drift: this branch changed code that tracked docs still describe the old way.")
-	fmt.Fprintln(w, "Reconcile in THIS change set, or confirm each is intentional history:")
+	fmt.Fprintln(w, "Fix each in THIS change set by the smallest edit that makes the doc true again —")
+	fmt.Fprintln(w, "swap the value, rename the symbol, or DELETE the sentence that now describes")
+	fmt.Fprintln(w, "nothing — or confirm it is intentional history. Never add an account of what")
+	fmt.Fprintln(w, "changed or why: that belongs in the commit message, not the doc.")
 	if len(dangling) > 0 {
 		fmt.Fprintln(w, "  Dangling references (symbol deleted, doc still names it):")
 		for _, f := range dangling {
@@ -1069,14 +1073,16 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 func coversDriftMessage(fs []audit.CoversFinding) string {
 	var b strings.Builder
 	b.WriteString("COVERS-DRIFT: this push changes code that a doc declares it covers,\n")
-	b.WriteString("but the doc itself is untouched. Reconcile it, or confirm it is still accurate:\n")
+	b.WriteString("but the doc itself is untouched. Read each against the change:\n")
 	for _, f := range fs {
 		fmt.Fprintf(&b, "  • %s covers:\n", f.Doc)
 		for _, p := range f.Paths {
 			fmt.Fprintf(&b, "      %s\n", p)
 		}
 	}
-	b.WriteString("Advisory — the push is not blocked. Editing the doc silences it.\n")
+	b.WriteString("Still accurate → do nothing; an edit made only to quiet this is doc bloat.\n")
+	b.WriteString("Falsified → correct or cut the falsified lines, nothing more. What changed and\n")
+	b.WriteString("why goes in the commit message, not the doc. Advisory — the push is not blocked.\n")
 	return b.String()
 }
 

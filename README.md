@@ -267,7 +267,9 @@ rank whether a stated "why" is good — that's a judgment call it doesn't preten
 to make. On a finding it asks two questions — (1) is this a real footgun (a trap
 you hit, a tempting-but-wrong approach, a re-litigated decision)? (2) is it at
 the right doc level (invariant → `CLAUDE.md`, rationale → `docs/`, human prose →
-`README`)? Fix or leave it in a follow-up; nothing was blocked.
+`README`)? It also names the commonest false footgun: a bug you just fixed, whose
+story belongs in the commit message while the doc keeps at most the surviving
+rule. Fix or leave it in a follow-up; nothing was blocked.
 
 `DOCGRAPH_FOOTGUN_OFF=1` silences it outright (for a repo that doesn't use the
 `Footgun:` convention); `docgraph install-hook --no-footgun-drift` generates a
@@ -299,8 +301,11 @@ unlike `doc-drift`'s doc-grep which also matches `.mdx`; "code" is every other
 tracked path except the prose formats `.txt`/`.rst`/`.adoc`/`.markdown`. An
 `.mdx` file is therefore neither: a `covers` edge declared in one never fires.
 
-**Editing the doc silences it** — a doc the change set touched never fires, so
-there's nothing to suppress and no in-file marker exists. A repo with no `covers`
+**A still-accurate doc wants no edit, and the nag says so** — a doc nobody needed
+to change is the normal outcome, and an edit made only to quiet the advisory is
+doc bloat. A falsified doc is corrected or cut, nothing more; what changed and why
+goes in the commit message. A doc the change set touched never fires, so there's
+nothing to suppress and no in-file marker exists. A repo with no `covers`
 edges never sees it at all. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
 it.
@@ -344,8 +349,11 @@ judgment calls belong in the advisory pre-push riders instead.
 `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
 doesn't use the anchored-symbol-and-value convention it relies on. There is no
 other suppression surface (no `.docgraphignore`, no per-finding flag, no inline
-marker): a flagged reference is a judgment call — reconcile the doc, or confirm
-it's intentional framed history.
+marker): a flagged reference is a judgment call — fix the doc, or confirm it's
+intentional framed history. The fix the message asks for is the smallest edit
+that makes the doc true again (swap the value, rename the symbol, or delete the
+sentence that now describes nothing), never an account of what changed — that is
+the commit message's job.
 
 Scope limits worth knowing:
 

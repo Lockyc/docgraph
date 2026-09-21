@@ -251,10 +251,16 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   per-file override is what the single-control-surface model exists to avoid — a
   comment scanner would also have to read file content to honor self-referential
   annotations, silently un-nagging whatever it's placed on. A flagged
-  `footgun-drift`/`doc-drift` reference is a judgment call — reconcile the doc or
+  `footgun-drift`/`doc-drift` reference is a judgment call — fix the doc or
   confirm it's intentional framed history — de-duped only by doc-drift's
   once-per-HEAD loop-guard; `covers-drift` needs no suppression surface (it fires
-  only on a doc the change set left untouched, so editing that doc *is* the escape).
+  only on a doc the change set left untouched, and a still-accurate doc wants no edit).
+- **Every hook message steers toward the smallest true edit, and sends the story to
+  the commit message.** A nag an agent reads as "touch the doc" gets answered with an
+  appended paragraph about the change, and a repo's docs grow by one per push. So
+  `printDocDrift`, `coversDriftMessage` and `printFootgunDrift` each say: cut or
+  correct, never narrate; still accurate → do nothing. Keep that in any reworded or
+  new message — never tell the reader that editing a doc is what quiets a check.
 - **Code-block links are skipped deliberately.** `extractLinks`
   (`internal/audit/links.go`) ignores fenced and inline code so template/example
   paths don't register as real *links*. Asymmetry: the orphan **reachability**
