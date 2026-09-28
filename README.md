@@ -1,9 +1,9 @@
 # docgraph
 
-[![Release](https://img.shields.io/github/v/release/Lockyc/docgraph?sort=semver&label=release)](https://github.com/lockyc/docgraph/releases/latest)
+[![Release](https://img.shields.io/github/v/release/lockyc/docgraph?sort=semver&label=release)](https://github.com/lockyc/docgraph/releases/latest)
 [![CI](https://github.com/lockyc/docgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/lockyc/docgraph/actions/workflows/ci.yml)
 ![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
-[![License](https://img.shields.io/github/license/Lockyc/docgraph)](LICENSE)
+[![License](https://img.shields.io/github/license/lockyc/docgraph)](LICENSE)
 
 Audits a repo's **agent-facing documentation graph** — the docs an AI agent
 navigates by grep and by following `[x](y.md)` links, not the rendered site a
@@ -141,11 +141,22 @@ deny/allow list would itself enumerate your sensitive terms. Resolution:
 `--leaks-config <path>` → `$DOCGRAPH_LEAKS` →
 `$XDG_CONFIG_HOME/docgraph/leaks.toml` (default `~/.config/docgraph/leaks.toml`).
 
+| Level | Key | Default | What it does |
+|---|---|---|---|
+| top | `terms` | `[]` | Literal deny strings (the `default` group) |
+| top | `regex` | `[]` | Regexp deny patterns (the `default` group) |
+| top | `allow` | `[]` | Literal strings that suppress a deny match, everywhere |
+| top | `allow_regex` | `[]` | Regexps that suppress a deny match, everywhere |
+| `[[group]]` | `name` | *required* | Named deny list; unique, never `default` |
+| `[[group]]` | `terms` / `regex` | `[]` | The group's deny rules (at least one required) |
+| `[[dir]]` | `path` | *required* | Absolute directory the exceptions apply under (`~/` expanded) |
+| `[[dir]]` | `ignore` | `[]` | Globs (relative to `path`) whose files skip the silenced groups |
+| `[[dir]]` | `ignore_groups` | `["default"]` | Which groups `ignore` silences (replaces the default) |
+| `[[dir]]` | `allow` / `allow_regex` | `[]` | Allow rules scoped to this subtree |
+
 `terms` match literally and case-insensitively; `regex` / `allow_regex` are Go
 regexps, also case-insensitive unless you opt out per-pattern with a leading
-`(?-i)`. `allow` / `allow_regex` suppress a deny match they cover. `[[dir]]`
-sections scope exceptions to files under an absolute `path` (a leading `~/` is
-expanded; a non-absolute `path` is a fatal config error).
+`(?-i)`. A non-absolute `[[dir]].path` is a fatal config error.
 
     terms       = ["acme-host", "you@example.com", "/Users/you"]
     regex       = ['10\.0\.0\.\d+']
@@ -213,7 +224,7 @@ and the scan is a no-op there — it stays a **local** pre-push gate. Handling:
   this path — fix the config rather than leaning on the skip, since it also
   turns off the check.
 
-**Known gaps:** no git-history *detection* (use the manual leak-audit skill);
+**Known gaps:** no git-history *detection* (use a history scanner such as gitleaks);
 *scrubbing* a known leak from history is `docgraph leaks-rules` below. No
 per-rule messages.
 
@@ -310,10 +321,8 @@ edges never sees it at all. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
 it.
 
-> **Already have a hook installed?** The `covers-drift` invocation is only
-> written into `.githooks/pre-push` at hook-*generation* time, so a hook
-> generated before this rider existed reads this section but never runs it.
-> Regenerate with `docgraph install-hook --force` to pick it up.
+Riders are written into `.githooks/pre-push` at hook-generation time;
+regenerate with `docgraph install-hook --force` to pick up new ones.
 
 ## `docgraph doc-drift` — the Stop-hook staleness gate
 
@@ -427,7 +436,8 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   entirely from the git object store — so it also runs inside a **bare** repo (no
   checkout). On a clean checkout `--ref HEAD` matches the default output exactly; it
   diverges only by ignoring uncommitted/untracked changes to tracked docs, which is
-  what "at a ref" means. This is the mode a scanner (e.g. Mycelium) uses to read a
+  what "at a ref" means. This is the mode a scanner (e.g.
+[Mycelium](https://github.com/lockyc/mycelium)) uses to read a
   bare repo store without materializing a work-tree.
 
 ## Install
@@ -476,6 +486,10 @@ core.hooksPath .githooks`). It refuses to clobber an existing hook (pass
 missing `docgraph` blocks the push, because a gate that skips when its tool is
 absent is a false green.
 
+The generated hook resolves docgraph via PATH **and** the Go bin dir (`$GOBIN` /
+`$GOPATH/bin` / `~/go/bin`), because git runs hooks with the caller's PATH and GUI
+clients / sandboxed agents often push with a bare PATH that omits `~/go/bin`.
+
 ## Usage
 
 ```bash
@@ -486,6 +500,8 @@ docgraph --ignore 'vendor/**'       # exclude a glob from checks (repeatable)
 docgraph --skip orphans             # exclude a check (comma-separated)
 docgraph --leaks-config <path>      # override the global leak rules file
 docgraph --config <path>            # override the global config.toml (usage logging)
+docgraph install-hook               # write .githooks/pre-push and set core.hooksPath
+docgraph leaks-rules                # print the leak rules as a git-filter-repo replace list
 docgraph footgun-drift              # advisory: reads pre-push ref lines from stdin
 docgraph covers-drift               # advisory: docs covering the code a push changes
 docgraph doc-drift                  # Stop-hook: working-tree-inclusive diff
@@ -517,20 +533,6 @@ finding does the output turn self-describing — a banner, the sections that
 actually have findings, and a footer explaining what docgraph is, why the
 non-zero exit aborts the push, and how to remediate each category — so a failed
 push doesn't have to be reverse-engineered.
-
-> **v3 breaking changes:** (1) `orphans` is now the **content-graph island** rule
-> (a non-root doc with zero inbound links/mentions) — frontmatter edges no longer
-> make a doc "reachable". (2) A new `disconnected` check flags **metadata-graph
-> islands** (a frontmatter doc with no doc→doc edge). (3) Frontmatter is now
-> **required** on every doc except `README.md`. A model-A repo may see new
-> `frontmatter`/`disconnected` findings on `@latest` — conform (add a `type:`
-> block and a `part-of`/`see-also` edge) rather than `--skip`. The module path
-> moved to `github.com/lockyc/docgraph/v3`; reinstall from the `/v3` path.
->
-> **v2 breaking change:** the `--checks` (include) flag was removed. docgraph now
-> enforces every check by default; use `--skip` to exclude one, and regenerate any
-> installed hook with `docgraph install-hook --force`. A stray `--checks` prints a
-> migration message and exits 2.
 
 ### Entry points (roots)
 
@@ -621,6 +623,12 @@ level   = 1                                   # 1 counts · 2 +paths · 3 +findi
 # path  = "~/.local/state/docgraph/usage.jsonl"   # optional; this is the default
 ```
 
+| Key | Default | What it does |
+|---|---|---|
+| `[log].enabled` | `false` | Turn logging on |
+| `[log].level` | `1` | Detail tier, 1–3 (below) |
+| `[log].path` | `$XDG_STATE_HOME/docgraph/usage.jsonl` | Where records are appended |
+
 Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
 `~/.local/state/docgraph/usage.jsonl`), overridable via `[log].path` or
 `DOCGRAPH_LOG`. A level-1 record:
@@ -670,22 +678,4 @@ just install # go install . -> ~/go/bin/docgraph
 just gate    # gofmt check + vet + tests (pre-release gate)
 ```
 
-Work lands on the `dev` integration branch; `main` is the release branch and only
-fast-forwards to a tagged release. Branch feature/fix work off `dev`, run `just
-gate` before merging. Releases follow [semver](https://semver.org): the root
-`VERSION` file is the single source of truth (embedded via `go:embed`), and `just
-release` tags `v<VERSION>` and publishes the GitHub release. Consumers `go install
-…@latest`, so a release moves everyone's pinned tool — keep `main` releasable.
-
-The installed binary must be reachable when a hook fires: the generated pre-push
-hook resolves docgraph via PATH **and** the Go bin dir (`$GOBIN` / `$GOPATH/bin` /
-`~/go/bin`), because git runs hooks with the caller's PATH and GUI clients /
-sandboxed agents often push with a bare PATH that omits `~/go/bin`.
-
-Layout: `main.go` is a thin CLI (flags → audit → report → exit code);
-`internal/audit/` holds the logic (link parsing, glob-ignore, git wrappers plus
-diff helpers, the whole-state `Audit` orchestrator, the two graphs
-`BuildContentGraph`/`BuildMetadataGraph` and the `BuildGraphView` seam behind the
-`graph` view, the leak scanner, the diff-scoped `FootgunDrift` and `CoversDrift`,
-and the `DocDrift` orchestrator that diffs code and greps docs). See `CLAUDE.md`
-for design invariants.
+Branch model, release process and layout: [`CLAUDE.md`](CLAUDE.md).
