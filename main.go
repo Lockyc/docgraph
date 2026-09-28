@@ -399,7 +399,8 @@ func resolveConfig(flagVal string) (string, error) {
 
 // loadLogConfig decodes the [log] table of config.toml. An absent file returns
 // os.ErrNotExist (the caller treats it as silently-off); a malformed file returns a
-// decode error the caller warns on without failing the run.
+// decode error the caller warns on without failing the run. An absent `level`
+// defaults to 1 (counts only), so `enabled = true` alone logs at the safe tier.
 func loadLogConfig(path string) (audit.LogConfig, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return audit.LogConfig{}, err
@@ -407,6 +408,7 @@ func loadLogConfig(path string) (audit.LogConfig, error) {
 	var fc struct {
 		Log audit.LogConfig `toml:"log"`
 	}
+	fc.Log.Level = 1
 	_, err := toml.DecodeFile(path, &fc)
 	return fc.Log, err
 }

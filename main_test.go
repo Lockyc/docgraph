@@ -1302,3 +1302,17 @@ func TestRunBrokenWorktreePointerNamesGitCause(t *testing.T) {
 		t.Errorf("stderr does not carry git's own cause:\n%s", errb.String())
 	}
 }
+
+func TestLoadLogConfigDefaultsLevelToOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[log]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadLogConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Level != 1 || !cfg.Active() {
+		t.Fatalf("level = %d, active = %v; want 1, true", cfg.Level, cfg.Active())
+	}
+}
