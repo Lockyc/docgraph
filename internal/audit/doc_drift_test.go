@@ -262,3 +262,29 @@ func TestDocDriftIncludesUncommittedWorkingTree(t *testing.T) {
 		t.Fatalf("uncommitted removal must be flagged, got %+v", got)
 	}
 }
+
+// A .docgraphignore'd tree is invisible to doc-drift on both sides: a definition
+// removed from ignored seed data is not code drift, and a frozen archive naming
+// it is not a stale doc.
+func TestDocDriftHonoursDocgraphignore(t *testing.T) {
+	dir, base, _ := commitRepo(t,
+		map[string]string{
+			".docgraphignore":      "seed/**\n",
+			"seed/build/page.json": `{"src": "const LABEL_NORESPONSE = 1"}` + "\n",
+			"seed/archive/page.md": "const LABEL_NORESPONSE = 'No Response';\n",
+			"x.go":                 "type OldWidget struct{}\n",
+			"CLAUDE.md":            "We use OldWidget.\n",
+		},
+		map[string]string{
+			"seed/build/page.json": "{}\n",
+			"x.go":                 "package x\n",
+		},
+	)
+	got, err := DocDrift(dir, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Symbol != "OldWidget" {
+		t.Fatalf("want only the unignored OldWidget finding, got %+v", got)
+	}
+}

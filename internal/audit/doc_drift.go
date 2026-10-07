@@ -128,12 +128,29 @@ type DocHit struct {
 // which scans *.md/*.mdx directly, on purpose.
 var nonCodePathspec = []string{".", ":!*.md", ":!*.mdx", ":!*.txt", ":!*.rst", ":!*.adoc", ":!*.markdown"}
 
+// ignoreExcludes turns the repo's doc-graph ignore layers (defaultIgnores +
+// .docgraphignore) into git exclude pathspecs, appended to BOTH sides of
+// doc-drift: an ignored tree is declared not agent-facing (frozen archives, seed
+// data, generated exports), so it is neither a doc that can go stale nor code
+// whose removed definitions a doc should stop describing.
+func ignoreExcludes(root string) ([]string, error) {
+	globs, err := loadIgnores(root, nil)
+	if err != nil {
+		return nil, err
+	}
+	excl := make([]string, len(globs))
+	for i, g := range globs {
+		excl[i] = ":(exclude,glob)" + g
+	}
+	return excl, nil
+}
+
 // gitDiff returns the unified diff of the CODE side of `git diff <spec>`, scoped
 // by nonCodePathspec. spec may be a base SHA (diffs base vs the WORKING TREE —
 // committed and uncommitted), "HEAD" (uncommitted only), or "base..head"
 // (committed only).
-func gitDiff(root, spec string) (string, error) {
-	args := append([]string{"-C", root, "diff", spec, "--"}, nonCodePathspec...)
+func gitDiff(root, spec string, excl ...string) (string, error) {
+	args := append(append([]string{"-C", root, "diff", spec, "--"}, nonCodePathspec...), excl...)
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return "", err
@@ -145,8 +162,8 @@ func gitDiff(root, spec string) (string, error) {
 // code — the same non-prose file set gitDiff scans (nonCodePathspec). A
 // fixed-string word match; a regex alternation backtracks catastrophically on a
 // large tree.
-func stillDefinedInCode(root, sym string) bool {
-	args := append([]string{"-C", root, "grep", "-qwF", "--", sym, "--"}, nonCodePathspec...)
+func stillDefinedInCode(root, sym string, excl ...string) bool {
+	args := append(append([]string{"-C", root, "grep", "-qwF", "--", sym, "--"}, nonCodePathspec...), excl...)
 	return exec.Command("git", args...).Run() == nil
 }
 
@@ -192,15 +209,15 @@ func gitGrepHits(root string, pathspec []string, needle string, max int) ([]DocH
 }
 
 // docGrepSymbol returns up to 5 doc locations naming sym.
-func docGrepSymbol(root, sym string) ([]DocHit, error) {
-	return gitGrepHits(root, []string{"*.md", "*.mdx"}, sym, 5)
+func docGrepSymbol(root, sym string, excl ...string) ([]DocHit, error) {
+	return gitGrepHits(root, append([]string{"*.md", "*.mdx"}, excl...), sym, 5)
 }
 
 // docGrepValue returns up to 5 doc locations that carry old, but only within docs
 // that also NAME the symbol (word match) — the anchored-drift signature.
-func docGrepValue(root, name, old string) ([]DocHit, error) {
-	named, err := exec.Command("git", "-C", root, "grep", "-l", "-F", "-w", "--", name,
-		"--", "*.md", "*.mdx").Output()
+func docGrepValue(root, name, old string, excl ...string) ([]DocHit, error) {
+	args := append([]string{"-C", root, "grep", "-l", "-F", "-w", "--", name, "--", "*.md", "*.mdx"}, excl...)
+	named, err := exec.Command("git", args...).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return nil, nil
@@ -247,7 +264,11 @@ type DocDriftFinding struct {
 // constants whose value changed while a doc still names the symbol and shows the
 // old literal. spec is passed straight to `git diff` (see gitDiff).
 func DocDrift(root, spec string) ([]DocDriftFinding, error) {
-	diff, err := gitDiff(root, spec)
+	excl, err := ignoreExcludes(root)
+	if err != nil {
+		return nil, err
+	}
+	diff, err := gitDiff(root, spec, excl...)
 	if err != nil {
 		return nil, err
 	}
@@ -259,13 +280,13 @@ func DocDrift(root, spec string) ([]DocDriftFinding, error) {
 	// (A) dangling references
 	n := 0
 	for _, sym := range removedNotReadded(diff) {
-		if !looksLikeSymbol(sym) || stillDefinedInCode(root, sym) {
+		if !looksLikeSymbol(sym) || stillDefinedInCode(root, sym, excl...) {
 			continue
 		}
 		if n++; n > 40 {
 			break
 		}
-		hits, err := docGrepSymbol(root, sym)
+		hits, err := docGrepSymbol(root, sym, excl...)
 		if err != nil {
 			return nil, err
 		}
@@ -283,7 +304,7 @@ func DocDrift(root, spec string) ([]DocDriftFinding, error) {
 		if m++; m > 40 {
 			break
 		}
-		hits, err := docGrepValue(root, c.Name, c.Old)
+		hits, err := docGrepValue(root, c.Name, c.Old, excl...)
 		if err != nil {
 			return nil, err
 		}

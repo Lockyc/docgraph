@@ -356,8 +356,10 @@ A finding in either class **blocks** — prints to **stderr**, exits **2**. Both
 are mechanical facts, which is what earns them a hook that can stop a turn;
 judgment calls belong in the advisory pre-push riders instead.
 `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
-doesn't use the anchored-symbol-and-value convention it relies on. There is no
-other suppression surface (no `.docgraphignore`, no per-finding flag, no inline
+doesn't use the anchored-symbol-and-value convention it relies on. Paths the
+doc-graph ignore layers exclude (defaults + `.docgraphignore`) are out of scope on
+both sides — neither scanned as code nor grepped as docs. There is no
+other suppression surface (no per-finding flag, no inline
 marker): a flagged reference is a judgment call — fix the doc, or confirm it's
 intentional framed history. The fix the message asks for is the smallest edit
 that makes the doc true again (swap the value, rename the symbol, or delete the
@@ -544,7 +546,7 @@ a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 `**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for the
 doc-graph checks (untracked scratch, and agent skill/config tooling that's never
-part of the doc graph). Add more via `.docgraphignore` (gitignore syntax) or
+part of the doc graph), and by `doc-drift`. Add more via `.docgraphignore` (gitignore syntax) or
 repeatable `--ignore` globs (`**`, `*`, `?`). The leak scan honors only `--ignore`,
 not the default/`.docgraphignore` layers — see [`leaks`](#leaks--the-content-scan).
 
