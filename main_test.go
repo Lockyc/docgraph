@@ -978,6 +978,44 @@ func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
 	}
 }
 
+// TestDocDriftLoopGuardNagsOncePerFinding pins that a new HEAD carrying only
+// findings the last nag already raised stays silent, and that a NEW finding
+// blocks again — a long-lived branch's distant merge-base must not re-block
+// every later commit on a finding already judged.
+func TestDocDriftLoopGuardNagsOncePerFinding(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := setupRepoMain(t, map[string]string{
+		"x.go": "type OldWidget struct{}\ntype OtherWidget struct{}\n", "CLAUDE.md": "OldWidget and OtherWidget.\n",
+	})
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	commit := func(msg string) { git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", msg) }
+	commit("base")
+	git("branch", "dev") // integration branch -> base is the merge-base, as on a long-lived trunk
+	git("checkout", "-qb", "feature")
+	run := func() int { return runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard) }
+
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("type OtherWidget struct{}\n"), 0o644)
+	commit("drop OldWidget")
+	if code := run(); code != 2 {
+		t.Fatalf("first nag must block -> want 2, got %d", code)
+	}
+	os.WriteFile(filepath.Join(dir, "y.go"), []byte("package x\n"), 0o644)
+	git("add", "y.go")
+	commit("unrelated")
+	if code := run(); code != 0 {
+		t.Fatalf("new HEAD, same finding -> want 0, got %d", code)
+	}
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("package x\n"), 0o644)
+	commit("drop OtherWidget")
+	if code := run(); code != 2 {
+		t.Fatalf("a new finding must block -> want 2, got %d", code)
+	}
+}
+
 // setupDriftRepoMain builds a committed repo whose working tree has removed a
 // symbol a doc still names — i.e. a bare doc-drift run finds drift. Returns the
 // repo dir and the root as audit.GitRoot resolves it (macOS symlinks /var ->

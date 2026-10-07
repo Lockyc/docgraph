@@ -861,7 +861,7 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 // anchored value drift over the branch's working-tree-inclusive diff, and BLOCKS
 // the Stop (exit 2, message on stderr) on any finding. Contrast footgun-drift,
 // which is advisory. Bare invocation resolves the diff base and applies the
-// once-per-HEAD loop-guard; --range runs a deterministic, guard-free check for
+// once-per-finding loop-guard; --range runs a deterministic, guard-free check for
 // manual use.
 func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOC_DRIFT_OFF") != "" {
@@ -919,7 +919,11 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if guard {
-		docDriftRecordNag(root, head)
+		seen := docDriftNaggedKeys(root)
+		docDriftRecordNag(root, head, findings)
+		if docDriftAllSeen(findings, seen) {
+			return 0
+		}
 	}
 	printDocDrift(stderr, findings)
 	return 2
@@ -989,31 +993,75 @@ func writeDocDriftBase(root, head, spec string) {
 	_ = os.WriteFile(p, []byte(head+" "+spec), 0o644)
 }
 
-// docDriftNaggedAt returns the HEAD this repo was last nagged at, or "" for
-// never (including an unresolvable state dir, which must never suppress).
-func docDriftNaggedAt(root string) string {
+// docDriftNagLines returns the nag marker's lines — the HEAD last nagged at,
+// then one docDriftKey per finding that nag carried — or nil for never
+// (including an unresolvable state dir, which must never suppress).
+func docDriftNagLines(root string) []string {
 	p := docDriftStatePath(root, "")
 	if p == "" {
-		return ""
+		return nil
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return ""
+		return nil
 	}
-	return strings.TrimSpace(string(b))
+	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 }
 
-// docDriftRecordNag records head as nagged, so the repo is nagged at most once
-// per (repo, HEAD). Each commit moves HEAD, re-arming — so a blocked Stop can be
-// resolved by committing, or by simply stopping again once the finding has been
-// judged intentional.
-func docDriftRecordNag(root, head string) {
+// docDriftNaggedAt returns the HEAD this repo was last nagged at, or "" for never.
+func docDriftNaggedAt(root string) string {
+	if l := docDriftNagLines(root); len(l) > 0 {
+		return l[0]
+	}
+	return ""
+}
+
+// docDriftNaggedKeys returns the findings the last nag carried.
+func docDriftNaggedKeys(root string) map[string]bool {
+	seen := map[string]bool{}
+	if l := docDriftNagLines(root); len(l) > 1 {
+		for _, k := range l[1:] {
+			seen[k] = true
+		}
+	}
+	return seen
+}
+
+// docDriftKey identifies a finding across commits: the symbol and what went
+// stale about it, never a line number, which any unrelated edit shifts.
+func docDriftKey(f audit.DocDriftFinding) string {
+	return fmt.Sprintf("%d\t%s\t%s", f.Kind, f.Symbol, f.Old)
+}
+
+// docDriftAllSeen reports whether every finding was already in the last nag.
+// A long-lived branch diffs against a distant merge-base, so a finding one
+// agent judged intentional would otherwise re-block every later commit's agent;
+// only a finding the last nag did not carry blocks again.
+func docDriftAllSeen(fs []audit.DocDriftFinding, seen map[string]bool) bool {
+	for _, f := range fs {
+		if !seen[docDriftKey(f)] {
+			return false
+		}
+	}
+	return true
+}
+
+// docDriftRecordNag records head and the findings as nagged. The HEAD line makes
+// a repeat Stop at the same HEAD a no-op without scanning; the finding keys let
+// a later HEAD stay silent when it carries nothing new (docDriftAllSeen). The
+// keys are replaced, not accumulated, so a finding that is fixed and later
+// recurs blocks again.
+func docDriftRecordNag(root, head string, fs []audit.DocDriftFinding) {
 	p := docDriftStatePath(root, "")
 	if p == "" {
 		return
 	}
+	lines := []string{head}
+	for _, f := range fs {
+		lines = append(lines, docDriftKey(f))
+	}
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	_ = os.WriteFile(p, []byte(head), 0o644)
+	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 // docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
@@ -1067,8 +1115,8 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 	fmt.Fprintln(w, "This catches only anchored/symbol cases — for paraphrased values or reversed")
 	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing: `docgraph covers <path>`")
 	fmt.Fprintln(w, "names the docs that govern a file you changed, including ones no symbol drift")
-	fmt.Fprintln(w, "points at. Already reconciled, or is it framed history? Stop again — you won't")
-	fmt.Fprintln(w, "be re-prompted for this HEAD.")
+	fmt.Fprintln(w, "points at. Already reconciled, or is it framed history? Stop again — these")
+	fmt.Fprintln(w, "findings won't block again; only a new one will.")
 }
 
 // coversDriftMessage renders the advisory covers-drift nag.

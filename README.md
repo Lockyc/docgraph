@@ -347,10 +347,12 @@ docgraph doc-drift                        # bare: resolves the base itself, appl
 docgraph doc-drift --range base..head     # explicit range — bypasses the loop-guard
 ```
 
-Bare invocation applies a **once-per-HEAD loop-guard**: after it nags for a given
-`HEAD`, a repeat at the same `HEAD` is silent, so an agent that keeps ending its
-turn without acting isn't nagged every Stop. The next commit moves `HEAD` and
-re-arms it. This de-dupes the *nag*, it doesn't suppress the *finding*.
+Bare invocation applies a **once-per-finding loop-guard**: a finding blocks the
+first time it appears, then stays silent at that `HEAD` and every later one, so
+a long-lived branch's distant merge-base doesn't re-block each commit's agent on
+a finding already judged. A finding the last nag didn't carry blocks again (with
+the full list); one that is fixed and later recurs counts as new. This de-dupes
+the *nag*, it doesn't suppress the *finding*.
 
 A finding in either class **blocks** — prints to **stderr**, exits **2**. Both
 are mechanical facts, which is what earns them a hook that can stop a turn;

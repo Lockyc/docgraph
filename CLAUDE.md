@@ -253,7 +253,7 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   annotations, silently un-nagging whatever it's placed on. A flagged
   `footgun-drift`/`doc-drift` reference is a judgment call — fix the doc or
   confirm it's intentional framed history — de-duped only by doc-drift's
-  once-per-HEAD loop-guard; `covers-drift` needs no suppression surface (it fires
+  once-per-finding loop-guard; `covers-drift` needs no suppression surface (it fires
   only on a doc the change set left untouched, and a still-accurate doc wants no edit).
 - **Every hook message steers toward the smallest true edit, and sends the story to
   the commit message.** A nag an agent reads as "touch the doc" gets answered with an
@@ -426,10 +426,10 @@ docs/" with zero config.
   subcommand — checks `DOC_DRIFT_OFF`, resolves the diff spec via
   `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints via
   `printDocDrift` to stderr and returns 2, gated on bare invocation by a
-  once-per-HEAD nag marker under `docDriftStateDir()`
-  (`docDriftNaggedAt`/`docDriftRecordNag`) — checked *before* the diff, since a
-  HEAD already nagged exits 0 down every remaining path, so scanning it again is
-  pure waste on a per-turn hook. `docDriftDiffBase` memoizes its answer per
+  once-per-finding nag marker under `docDriftStateDir()` (HEAD + finding keys,
+  `docDriftRecordNag`; `docDriftAllSeen` decides) — its HEAD line is checked
+  *before* the diff, since a HEAD already nagged exits 0 down every remaining
+  path, so scanning it again is pure waste on a per-turn hook. `docDriftDiffBase` memoizes its answer per
   (repo, HEAD) beside that marker (`readDocDriftBase`/`writeDocDriftBase`, keyed
   via `docDriftStatePath`): `audit.ClosestBase` costs a dozen git subprocesses —
   ~85% of a warm run — to recompute a value that only moves when HEAD does. A
