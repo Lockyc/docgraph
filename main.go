@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -993,8 +994,10 @@ func readStopPayload(r io.Reader) stopPayload {
 // too, so fast-forwarding onto someone else's older commits never counts. A
 // branch-wide diff is the wrong scope: an integration branch can sit hundreds of
 // commits past its merge-base, and an agent committing as it goes leaves the
-// working tree empty by the time it stops. Without a session id (a manual run)
-// the change set is the working tree alone.
+// working tree empty by the time it stops. Concurrent sessions share the branch
+// and often the checkout, so a changed path counts only if one of this session's
+// tool calls (or its subagents') names it — see sessionToolInputs. Without a
+// session id (a manual run) the change set is the working tree alone, unfiltered.
 //
 // Each (doc, path) pair blocks once per session; the seen set accumulates, so a
 // file the agent keeps editing does not re-nag every turn.
@@ -1018,11 +1021,18 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 		return nil
 	}
 	findings := coversOf(root, code, md, nil, stderr)
+	var named []byte
+	if len(findings) > 0 && p.SessionID != "" {
+		named = sessionToolInputs(p.TranscriptPath)
+	}
 
 	var fresh []audit.CoversFinding
 	for _, f := range findings {
 		var paths []string
 		for _, path := range f.Paths {
+			if named != nil && !bytes.Contains(named, []byte(path)) {
+				continue // someone else's change: this session never named the file
+			}
 			if k := f.Doc + "\t" + path; !st.seen[k] {
 				st.seen[k] = true
 				paths = append(paths, path)
@@ -1055,6 +1065,55 @@ func sessionRevs(root, head string, st coversSession) []string {
 		return append(rev, head)
 	}
 	return nil
+}
+
+// sessionToolInputs returns the raw tool-call inputs of a session — its own
+// transcript and its subagents' — concatenated, or nil when the transcript can't
+// be read. A changed path no tool input names was changed by someone else
+// sharing the branch or the checkout (concurrent sessions commit inside the same
+// window), so it is not this session's to reconcile.
+func sessionToolInputs(transcript string) []byte {
+	files := []string{transcript}
+	sub, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(transcript, ".jsonl"), "subagents", "*.jsonl"))
+	files = append(files, sub...)
+	out := []byte{}
+	marker := []byte(`"type":"tool_use"`)
+	for i, name := range files {
+		f, err := os.Open(name)
+		if err != nil {
+			if i == 0 {
+				return nil
+			}
+			continue
+		}
+		r := bufio.NewReader(f)
+		for {
+			line, err := r.ReadBytes('\n')
+			if bytes.Contains(line, marker) {
+				var rec struct {
+					Message struct {
+						Content json.RawMessage `json:"content"`
+					} `json:"message"`
+				}
+				var items []struct {
+					Type  string          `json:"type"`
+					Input json.RawMessage `json:"input"`
+				}
+				if json.Unmarshal(line, &rec) == nil && json.Unmarshal(rec.Message.Content, &items) == nil {
+					for _, it := range items {
+						if it.Type == "tool_use" {
+							out = append(append(out, it.Input...), '\n')
+						}
+					}
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 // transcriptStart returns the first timestamp in a JSONL transcript, formatted
