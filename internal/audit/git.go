@@ -87,6 +87,65 @@ func changedCode(root, spec string) ([]string, error) {
 	return gitLines(root, args...)
 }
 
+// SpecChanges returns the code paths and markdown changed in one git-diff spec
+// ("A..B", or a single rev diffed against the working tree). The markdown side is
+// skipped when no code changed: nothing can drift without a code change.
+func SpecChanges(root, spec string) (code, md []string, err error) {
+	if code, err = changedCode(root, spec); err != nil || len(code) == 0 {
+		return code, nil, err
+	}
+	md, err = changedMarkdown(root, spec)
+	return code, md, err
+}
+
+// CommitChanges returns the code paths and markdown changed by the commits
+// `git log --first-parent --no-merges revArgs` selects, each against its own
+// parent. Merge commits are excluded so that merging a trunk in never imports
+// other people's changes, and first-parent keeps the merged side's commits out.
+func CommitChanges(root string, revArgs ...string) (code, md []string, err error) {
+	base := append([]string{"log", "--first-parent", "--no-merges", "--name-only", "--format="}, revArgs...)
+	if code, err = gitLines(root, append(append(append([]string{}, base...), "--"), nonCodePathspec...)...); err != nil || len(code) == 0 {
+		return dedupe(code), nil, err
+	}
+	md, err = gitLines(root, append(append([]string{}, base...), "--", "*.md")...)
+	return dedupe(code), dedupe(md), err
+}
+
+// WorktreeChanges returns the code paths and markdown that differ from HEAD in
+// the working tree: staged, unstaged, and untracked-but-not-ignored.
+func WorktreeChanges(root string) (code, md []string, err error) {
+	if code, err = changedCode(root, "HEAD"); err != nil {
+		return nil, nil, err
+	}
+	newCode, err := gitLines(root, append([]string{"ls-files", "--others", "--exclude-standard", "--"}, nonCodePathspec...)...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if code = append(code, newCode...); len(code) == 0 {
+		return nil, nil, nil
+	}
+	if md, err = changedMarkdown(root, "HEAD"); err != nil {
+		return nil, nil, err
+	}
+	newMD, err := untrackedMD(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	return dedupe(code), dedupe(append(md, newMD...)), nil
+}
+
+func dedupe(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // addedLines returns the set of new-file line numbers added to path in rng, by
 // parsing unified-diff hunk headers and counting '+' lines from the new start.
 func addedLines(root, rng, path string) (map[int]bool, error) {

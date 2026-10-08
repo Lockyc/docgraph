@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -858,11 +859,11 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 }
 
 // runDocDrift is the Stop-hook subcommand: it flags dangling doc references and
-// anchored value drift over the branch's working-tree-inclusive diff, and BLOCKS
-// the Stop (exit 2, message on stderr) on any finding. Contrast footgun-drift,
-// which is advisory. Bare invocation resolves the diff base and applies the
-// once-per-finding loop-guard; --range runs a deterministic, guard-free check for
-// manual use.
+// anchored value drift over the branch's working-tree-inclusive diff, plus covers
+// drift over what this session changed, and BLOCKS the Stop (exit 2, message on
+// stderr) on any finding not already raised. Contrast footgun-drift, which is
+// advisory. Bare invocation resolves the diff base and applies the once-per-finding
+// loop-guards; --range runs a deterministic, guard-free check over that one spec.
 func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOC_DRIFT_OFF") != "" {
 		return 0
@@ -877,56 +878,272 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(positional) > 0 {
 		path = positional[0]
 	}
-	// Drain the Stop payload (bare mode sends JSON on stdin); unused.
-	_, _ = io.Copy(io.Discard, stdin)
+	payload := readStopPayload(stdin)
 
 	root, err := audit.GitRoot(path)
 	if err != nil {
 		return 0 // not a work-tree (e.g. bare dotfiles repo) -> no-op
 	}
 
-	guard := *rangeFlag == ""
-	spec := *rangeFlag
-	var head string
-	if guard {
-		h, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if spec := *rangeFlag; spec != "" {
+		findings, err := audit.DocDrift(root, spec)
 		if err != nil {
-			// Unborn HEAD (a freshly `git init`'d repo, no commits yet): there is no
-			// commit to diff against, and `git diff HEAD` on one exits 128 — a real
-			// git error, not a doc-drift finding. Blocking the Stop on that would gate
-			// every turn during repo bootstrap. --range mode is unaffected: an
-			// explicit ref is the caller's responsibility.
-			return 0
+			fmt.Fprintf(stderr, "docgraph: %v\n", err)
+			return 2
 		}
-		head = strings.TrimSpace(string(h))
-		// Already nagged at this HEAD? Then EVERY path below ends in exit 0 (no
-		// findings -> 0; findings -> suppressed by the guard -> 0), so resolving the
-		// base and running the diff+greps is pure waste on a hook that fires once
-		// per turn. Short-circuit. Exit codes are unchanged by construction — this
-		// is the same decision, taken before the work instead of after it.
-		if docDriftNaggedAt(root) == head {
-			return 0
+		var covers []audit.CoversFinding
+		if os.Getenv("DOCGRAPH_COVERS_OFF") == "" {
+			code, md, err := audit.SpecChanges(root, spec)
+			covers = coversOf(root, code, md, err, stderr)
 		}
-		spec = docDriftDiffBase(root, head)
+		return reportDocDrift(stderr, findings, covers)
 	}
 
-	findings, err := audit.DocDrift(root, spec)
+	h, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {
-		fmt.Fprintf(stderr, "docgraph: %v\n", err)
-		return 2
-	}
-	if len(findings) == 0 {
+		// Unborn HEAD (a freshly `git init`'d repo, no commits yet): there is no
+		// commit to diff against, and `git diff HEAD` on one exits 128 — a real
+		// git error, not a doc-drift finding. Blocking the Stop on that would gate
+		// every turn during repo bootstrap. --range mode is unaffected: an
+		// explicit ref is the caller's responsibility.
 		return 0
 	}
-	if guard {
-		seen := docDriftNaggedKeys(root)
-		docDriftRecordNag(root, head, findings)
-		if docDriftAllSeen(findings, seen) {
-			return 0
+	head := strings.TrimSpace(string(h))
+
+	var fresh []audit.DocDriftFinding
+	// Already nagged at this HEAD? Then every symbol-scan finding is suppressed by
+	// the guard, so resolving the base and running the diff+greps is pure waste on
+	// a hook that fires once per turn. Skip it — the same decision, taken before
+	// the work instead of after it.
+	if docDriftNaggedAt(root) != head {
+		findings, err := audit.DocDrift(root, docDriftDiffBase(root, head))
+		if err != nil {
+			fmt.Fprintf(stderr, "docgraph: %v\n", err)
+			return 2
+		}
+		if len(findings) > 0 {
+			seen := docDriftNaggedKeys(root)
+			docDriftRecordNag(root, head, findings)
+			if !docDriftAllSeen(findings, seen) {
+				fresh = findings
+			}
 		}
 	}
-	printDocDrift(stderr, findings)
+	return reportDocDrift(stderr, fresh, sessionCoversDrift(root, head, payload, stderr))
+}
+
+// reportDocDrift prints whatever was found and returns the Stop hook's exit code.
+func reportDocDrift(w io.Writer, findings []audit.DocDriftFinding, covers []audit.CoversFinding) int {
+	if len(findings) == 0 && len(covers) == 0 {
+		return 0
+	}
+	if len(findings) > 0 {
+		printDocDrift(w, findings)
+	}
+	if len(covers) > 0 {
+		fmt.Fprint(w, coversDriftMessage(
+			"doc-drift: you changed code these docs declare they cover, and didn't touch the docs:\n",
+			"Read the parts of each doc that describe what you changed.\n",
+			"These won't block again — carry on.\n",
+			covers))
+	}
 	return 2
+}
+
+// coversOf joins a collected change set against the repo's covers edges. A
+// failure anywhere here is a docgraph or git problem, not drift: it is reported
+// and swallowed, because blocking on it would wedge every turn until fixed.
+func coversOf(root string, code, md []string, err error, stderr io.Writer) []audit.CoversFinding {
+	if err == nil && len(code) == 0 {
+		return nil
+	}
+	var docs map[string]*audit.Doc
+	if err == nil {
+		docs, err = audit.RepoDocs(root, nil)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: covers check skipped: %v\n", err)
+		return nil
+	}
+	return audit.CoversOfChanges(docs, code, md)
+}
+
+// stopPayload is the part of the Stop hook's stdin JSON doc-drift reads.
+type stopPayload struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+}
+
+// readStopPayload drains stdin and decodes it; anything unparseable (a manual
+// run, an empty pipe) is the zero payload.
+func readStopPayload(r io.Reader) stopPayload {
+	var p stopPayload
+	b, _ := io.ReadAll(r)
+	_ = json.Unmarshal(b, &p)
+	return p
+}
+
+// sessionCoversDrift returns the covers findings in what THIS session changed
+// that the session has not already been told about.
+//
+// The change set is the working tree plus the first-parent, non-merge commits
+// since the HEAD seen at this session's previous Stop. On a session's first Stop
+// there is no previous HEAD, so it is the commits since the session started (the
+// transcript's first timestamp); the commit date floor stays on for later Stops
+// too, so fast-forwarding onto someone else's older commits never counts. A
+// branch-wide diff is the wrong scope: an integration branch can sit hundreds of
+// commits past its merge-base, and an agent committing as it goes leaves the
+// working tree empty by the time it stops. Without a session id (a manual run)
+// the change set is the working tree alone.
+//
+// Each (doc, path) pair blocks once per session; the seen set accumulates, so a
+// file the agent keeps editing does not re-nag every turn.
+func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []audit.CoversFinding {
+	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
+		return nil
+	}
+	st, known := readCoversSession(root, p.SessionID)
+	if !known && p.SessionID != "" {
+		st.since = transcriptStart(p.TranscriptPath)
+	}
+	code, md, err := audit.WorktreeChanges(root)
+	if err == nil && p.SessionID != "" {
+		if rev := sessionRevs(root, head, st); rev != nil {
+			cc, cm, cerr := audit.CommitChanges(root, rev...)
+			code, md, err = append(code, cc...), append(md, cm...), cerr
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: covers check skipped: %v\n", err)
+		return nil
+	}
+	findings := coversOf(root, code, md, nil, stderr)
+
+	var fresh []audit.CoversFinding
+	for _, f := range findings {
+		var paths []string
+		for _, path := range f.Paths {
+			if k := f.Doc + "\t" + path; !st.seen[k] {
+				st.seen[k] = true
+				paths = append(paths, path)
+			}
+		}
+		if len(paths) > 0 {
+			fresh = append(fresh, audit.CoversFinding{Doc: f.Doc, Paths: paths})
+		}
+	}
+	st.head = head
+	writeCoversSession(root, p.SessionID, st, !known)
+	return fresh
+}
+
+// sessionRevs is the git-log selection for the session's commits since its last
+// Stop, or nil for none.
+func sessionRevs(root, head string, st coversSession) []string {
+	var rev []string
+	if st.since != "" {
+		rev = append(rev, "--since="+st.since)
+	}
+	switch {
+	case st.head == head:
+		return nil
+	case st.head != "" && exec.Command("git", "-C", root, "merge-base", "--is-ancestor", st.head, head).Run() == nil:
+		return append(rev, st.head+".."+head)
+	case st.since != "":
+		// First Stop, or HEAD moved off the previous one (rebase, branch switch):
+		// the date floor alone bounds the walk.
+		return append(rev, head)
+	}
+	return nil
+}
+
+// transcriptStart returns the first timestamp in a JSONL transcript, formatted
+// for git's --since, or "" when none is found.
+func transcriptStart(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	for i := 0; i < 50; i++ {
+		line, err := r.ReadBytes('\n')
+		var rec struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if json.Unmarshal(line, &rec) == nil && rec.Timestamp != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, rec.Timestamp); perr == nil {
+				return t.UTC().Format("2006-01-02 15:04:05 +0000")
+			}
+		}
+		if err != nil {
+			return ""
+		}
+	}
+	return ""
+}
+
+// coversSession is one session's covers-drift state in one repo.
+type coversSession struct {
+	head  string          // HEAD at the session's previous Stop
+	since string          // session start, git --since form; "" if unknown
+	seen  map[string]bool // "doc\tpath" pairs already raised
+}
+
+// coversSessionMaxAge bounds how long a session's state file outlives its last
+// write; a session idle this long is not coming back to the same HEAD.
+const coversSessionMaxAge = 14 * 24 * time.Hour
+
+func coversSessionPath(root, session string) string {
+	if session == "" {
+		session = "\x00no-session"
+	}
+	sum := sha256.Sum256([]byte(session))
+	return docDriftStatePath(root, ".session-"+hex.EncodeToString(sum[:])[:16])
+}
+
+func readCoversSession(root, session string) (coversSession, bool) {
+	st := coversSession{seen: map[string]bool{}}
+	p := coversSessionPath(root, session)
+	if p == "" {
+		return st, false
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return st, false
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	st.head, st.since, _ = strings.Cut(lines[0], "\t")
+	for _, k := range lines[1:] {
+		st.seen[k] = true
+	}
+	return st, true
+}
+
+// writeCoversSession persists st. Best-effort, like every doc-drift state write.
+// A session's first write also prunes state files no session has touched in
+// coversSessionMaxAge, so the directory does not grow without bound.
+func writeCoversSession(root, session string, st coversSession, first bool) {
+	p := coversSessionPath(root, session)
+	if p == "" {
+		return
+	}
+	dir := filepath.Dir(p)
+	_ = os.MkdirAll(dir, 0o755)
+	if first {
+		if ents, err := os.ReadDir(dir); err == nil {
+			for _, e := range ents {
+				if info, err := e.Info(); err == nil && strings.Contains(e.Name(), ".session-") && time.Since(info.ModTime()) > coversSessionMaxAge {
+					_ = os.Remove(filepath.Join(dir, e.Name()))
+				}
+			}
+		}
+	}
+	lines := []string{st.head + "\t" + st.since}
+	for k := range st.seen {
+		lines = append(lines, k)
+	}
+	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 // docDriftDiffBase resolves what to `git diff` against: the closest integration
@@ -1119,25 +1336,32 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 	fmt.Fprintln(w, "findings won't block again; only a new one will.")
 }
 
-// coversDriftMessage renders the advisory covers-drift nag.
-func coversDriftMessage(fs []audit.CoversFinding) string {
+// coversDriftMessage renders a covers-drift nag: lead names the occasion, read
+// says what to read, tail says what happens next. The guidance between them is
+// shared, so the pre-push and Stop-hook nags steer to the same smallest edit.
+func coversDriftMessage(lead, read, tail string, fs []audit.CoversFinding) string {
 	var b strings.Builder
-	b.WriteString("COVERS-DRIFT: this push changes code that a doc declares it covers,\n")
-	b.WriteString("but the doc itself is untouched. Read each against the change:\n")
+	b.WriteString(lead)
 	for _, f := range fs {
 		fmt.Fprintf(&b, "  • %s covers:\n", f.Doc)
 		for _, p := range f.Paths {
 			fmt.Fprintf(&b, "      %s\n", p)
 		}
 	}
-	b.WriteString("Still accurate → do nothing; an edit made only to quiet this is doc bloat.\n")
-	b.WriteString("Falsified → correct or cut the falsified lines, nothing more. What changed and\n")
-	b.WriteString("why goes in the commit message, not the doc. Advisory — the push is not blocked.\n")
+	b.WriteString(read)
+	b.WriteString("Now false → correct or cut the false lines, nothing more; what changed and why\n")
+	b.WriteString("goes in the commit message, not the doc. Still accurate → do nothing: an edit\n")
+	b.WriteString("made only to quiet this is doc bloat. ")
+	b.WriteString(tail)
 	return b.String()
 }
 
 func printCoversDrift(w io.Writer, fs []audit.CoversFinding) {
-	fmt.Fprint(w, coversDriftMessage(fs))
+	fmt.Fprint(w, coversDriftMessage(
+		"COVERS-DRIFT: this push changes code that a doc declares it covers,\nbut the doc itself is untouched:\n",
+		"Read each against the change.\n",
+		"Advisory — the push is not blocked.\n",
+		fs))
 }
 
 // runSchema prints the JSON Schema describing docgraph frontmatter, stamped with
