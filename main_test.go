@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/lockyc/docgraph/v3/internal/audit"
@@ -1352,5 +1353,194 @@ func TestLoadLogConfigDefaultsLevelToOne(t *testing.T) {
 	}
 	if cfg.Level != 1 || !cfg.Active() {
 		t.Fatalf("level = %d, active = %v; want 1, true", cfg.Level, cfg.Active())
+	}
+}
+
+// sessionRepo is a repo on a non-integration branch whose docs/auth.md covers
+// src/, with one commit dated well before any test session starts.
+type sessionRepo struct {
+	t          *testing.T
+	dir        string
+	transcript string
+}
+
+const srcCoversFM = "---\ntype: reference\nlinks:\n  - rel: covers\n    to: src\n---\n\n# Auth\n"
+
+func newSessionRepo(t *testing.T) *sessionRepo {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	r := &sessionRepo{t: t, dir: t.TempDir()}
+	r.git("init", "-q")
+	r.git("branch", "-M", "wip")
+	r.write("docs/auth.md", srcCoversFM)
+	r.write("src/base.go", "package src\n")
+	r.commitAt("2020-01-01T00:00:00Z", "base")
+	r.transcript = filepath.Join(t.TempDir(), "session.jsonl")
+	start := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	os.WriteFile(r.transcript, []byte(`{"type":"mode"}`+"\n"+`{"timestamp":"`+start+`"}`+"\n"), 0o644)
+	return r
+}
+
+func (r *sessionRepo) git(a ...string) {
+	r.t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", r.dir, "-c", "user.email=t@t", "-c", "user.name=t"}, a...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.t.Fatalf("git %v: %v\n%s", a, err, out)
+	}
+}
+
+func (r *sessionRepo) write(p, c string) {
+	full := filepath.Join(r.dir, filepath.FromSlash(p))
+	os.MkdirAll(filepath.Dir(full), 0o755)
+	os.WriteFile(full, []byte(c), 0o644)
+}
+
+// commitAt commits everything, dated at (RFC3339) or now when at is "".
+func (r *sessionRepo) commitAt(at, msg string) {
+	r.t.Helper()
+	r.git("add", "-A")
+	cmd := exec.Command("git", "-C", r.dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", msg)
+	cmd.Env = os.Environ()
+	if at != "" {
+		cmd.Env = append(cmd.Env, "GIT_AUTHOR_DATE="+at, "GIT_COMMITTER_DATE="+at)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.t.Fatalf("commit %s: %v\n%s", msg, err, out)
+	}
+}
+
+func (r *sessionRepo) change(p, msg string) {
+	r.write(p, "package src\n// "+msg+"\n")
+	r.commitAt("", msg)
+}
+
+// stop runs a bare doc-drift as the Stop hook would for session id.
+func (r *sessionRepo) stop(id string) (int, string) {
+	var errb bytes.Buffer
+	payload := ""
+	if id != "" {
+		payload = fmt.Sprintf(`{"session_id":%q,"transcript_path":%q}`, id, r.transcript)
+	}
+	code := runDocDrift([]string{r.dir}, strings.NewReader(payload), io.Discard, &errb)
+	return code, errb.String()
+}
+
+// A session's first Stop sees the commits made since the session started, and
+// not the branch's older ones — which here change covered code too.
+func TestDocDriftCoversFirstStopIsSessionScoped(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("src/old.go", "package src\n")
+	r.commitAt("2020-06-01T00:00:00Z", "before the session")
+	r.change("src/new.go", "in the session")
+
+	code, msg := r.stop("s1")
+	if code != 2 {
+		t.Fatalf("covered code changed this session -> want 2, got %d\n%s", code, msg)
+	}
+	if !strings.Contains(msg, "docs/auth.md covers") || !strings.Contains(msg, "src/new.go") {
+		t.Fatalf("want docs/auth.md and src/new.go named, got:\n%s", msg)
+	}
+	if strings.Contains(msg, "src/old.go") || strings.Contains(msg, "src/base.go") {
+		t.Fatalf("pre-session commits must not count, got:\n%s", msg)
+	}
+}
+
+// A later Stop sees only the commits since the previous Stop, and a pair already
+// raised never blocks the session again.
+func TestDocDriftCoversLaterStopSeesOnlyNewCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/a.go", "first")
+	if code, msg := r.stop("s1"); code != 2 {
+		t.Fatalf("first Stop -> want 2, got %d\n%s", code, msg)
+	}
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("nothing new -> want 0, got %d\n%s", code, msg)
+	}
+	r.change("src/b.go", "second")
+	code, msg := r.stop("s1")
+	if code != 2 || !strings.Contains(msg, "src/b.go") || strings.Contains(msg, "src/a.go") {
+		t.Fatalf("want a block naming only src/b.go, got %d:\n%s", code, msg)
+	}
+	r.change("src/b.go", "third")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("pair already raised this session -> want 0, got %d\n%s", code, msg)
+	}
+}
+
+// Merging another branch in brings its changes, not this session's: the merge
+// commit and the merged side's commits are both out of the change set.
+func TestDocDriftCoversExcludesMergeCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("no change yet -> want 0, got %d\n%s", code, msg)
+	}
+	r.git("checkout", "-qb", "trunk")
+	r.change("src/theirs.go", "someone else's work")
+	r.git("checkout", "-q", "wip")
+	r.git("merge", "-q", "--no-ff", "-m", "merge trunk", "trunk")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("a merged-in change is not this session's -> want 0, got %d\n%s", code, msg)
+	}
+}
+
+// The change set is judged whole: touching the doc in a later commit clears a
+// finding raised by an earlier one.
+func TestDocDriftCoversDocTouchedLaterClears(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/a.go", "change the code")
+	r.write("docs/auth.md", srcCoversFM+"\nUpdated.\n")
+	r.commitAt("", "reconcile the doc")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("doc touched in the change set -> want 0, got %d\n%s", code, msg)
+	}
+}
+
+// Without a payload there is no session, so only the working tree counts.
+func TestDocDriftCoversNoPayloadIsWorkingTree(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/committed.go", "committed")
+	if code, msg := r.stop(""); code != 0 {
+		t.Fatalf("no payload, clean tree -> want 0, got %d\n%s", code, msg)
+	}
+	r.write("src/dirty.go", "package src\n")
+	code, msg := r.stop("")
+	if code != 2 || !strings.Contains(msg, "src/dirty.go") || strings.Contains(msg, "src/committed.go") {
+		t.Fatalf("want a block naming only the uncommitted file, got %d:\n%s", code, msg)
+	}
+}
+
+// --range is the deterministic manual check: that spec, no state, every run.
+func TestDocDriftCoversRangeIsUnguarded(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/a.go", "change")
+	for i := 0; i < 2; i++ {
+		var errb bytes.Buffer
+		if code := runDocDrift([]string{"--range", "HEAD~1..HEAD", r.dir}, strings.NewReader(""), io.Discard, &errb); code != 2 {
+			t.Fatalf("run %d: want 2 every time, got %d\n%s", i, code, errb.String())
+		}
+	}
+}
+
+func TestDocDriftCoversOffSwitch(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/a.go", "change")
+	t.Setenv("DOCGRAPH_COVERS_OFF", "1")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("DOCGRAPH_COVERS_OFF -> want 0, got %d\n%s", code, msg)
+	}
+}
+
+// A doc edit from before the previous Stop does not clear code changed after it:
+// each Stop's change set starts at the HEAD the previous Stop saw.
+func TestDocDriftCoversEarlierDocEditDoesNotClearLaterCode(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("docs/auth.md", srcCoversFM+"\nEdited first.\n")
+	r.commitAt("", "doc edit")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("doc-only change -> want 0, got %d\n%s", code, msg)
+	}
+	r.change("src/b.go", "code after the doc edit")
+	if code, msg := r.stop("s1"); code != 2 || !strings.Contains(msg, "src/b.go") {
+		t.Fatalf("code changed after the doc edit -> want 2 naming src/b.go, got %d:\n%s", code, msg)
 	}
 }
