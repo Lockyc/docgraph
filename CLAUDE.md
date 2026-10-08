@@ -36,19 +36,18 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
 - **`docgraph covers-drift`** — a second **diff-scoped, advisory** pre-push
   subcommand, `footgun-drift`'s sibling: flags a doc that declares a frontmatter
   `covers` edge onto code the pushed range modified while the doc itself went
-  untouched, and **exits 0** — a nag, never a block. It is the graph join
-  `doc-drift` cannot do (a rewritten function whose doc describes the old
-  behaviour in prose leaves no removed symbol and no changed literal to grep),
-  but it judges nothing, so it must not gate. Editing the doc is the escape
-  hatch; a repo with no `covers` edges never sees it.
+  untouched, and **exits 0**. This is the graph join a symbol grep cannot do (a
+  rewritten function whose doc describes the old behaviour in prose leaves no
+  removed symbol and no changed literal); `doc-drift` runs the same join at Stop
+  over the session's own changes. A repo with no `covers` edges never sees it.
 - **`docgraph doc-drift`** — a **Stop-hook, blocking** subcommand: scans the
   branch's working-tree-inclusive diff (base→worktree, committed + uncommitted)
   for two mechanical staleness classes — a **dangling reference** (a symbol whose
   definition was removed but a tracked doc still names it) and **anchored value
   drift** (a constant whose numeric value changed while a doc still names the
-  symbol and shows the old literal) — and **exits 2** to block the Stop. Both
-  classes are mechanical facts, which is what earns it the Stop hook; it carries
-  no advisory findings at all (see the Stop-hook dead-end footgun).
+  symbol and shows the old literal) — plus **covers drift** over what *this
+  session* changed, and **exits 2** to block the Stop, once per finding (see the
+  Stop-hook footgun).
 - **`docgraph schema`** — read-only, no repo state read at all: emits the JSON
   Schema (draft 2020-12) describing the frontmatter vocabulary that
   `frontmatter`/`edges` enforce, so another consumer (an editor, a catalog
@@ -89,13 +88,10 @@ the push without a wrapper. `docgraph install-hook` writes a tracked
 each hook line ends `|| true` so not even an operational error can abort a push.
 Separately, `docgraph doc-drift` is meant to be wired as a **Stop hook** by the
 agent harness (e.g. a Claude Code `Stop` hook entry that runs `docgraph
-doc-drift`): it fires at the end of a turn, not at push time, so a dangling
-reference or stale anchored value is caught and blocked before the agent hands
-control back — see
+doc-drift`): it fires at the end of a turn, not at push time, so the agent hears
+about drift while it can still act — see
 [`doc-drift`](README.md#docgraph-doc-drift--the-stop-hook-staleness-gate) in
 `README.md`.
-Only blocking findings belong there; the Stop-hook dead-end footgun explains why
-an advisory check is a pre-push rider instead.
 
 ## What it is (and is not)
 
@@ -119,9 +115,9 @@ an advisory check is a pre-push rider instead.
   grep — `changedCode` against the `covers` edges of the parsed doc set. They
   share this check-what-changed model but stay **separate** subcommands because
   their trigger and diff source differ: `doc-drift` a Stop hook over the
-  working-tree code diff, `footgun-drift` a pre-push subcommand over the pushed
-  range's markdown, `covers-drift` a pre-push subcommand over that same range's
-  code side. The six `docgraph .` checks have no range concept — reachability,
+  working-tree code diff (and, for its covers join, the session's change set),
+  `footgun-drift` a pre-push subcommand over the pushed range's markdown,
+  `covers-drift` a pre-push subcommand over that same range's code side. The six `docgraph .` checks have no range concept — reachability,
   link existence and leak content are properties of the current tree, not a range.
 
 ## Frontmatter model
@@ -177,8 +173,7 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   ones). Scoped to what's *new* — declarations added in the pushed range — it
   stays quiet on content already on the remote. It shares the check-what-changed
   model with `covers-drift`/`doc-drift` but stays a separate subcommand (the
-  diff-scoped-subcommands invariant above; see the Stop-hook footgun for why
-  `covers-drift` cannot fold into `doc-drift` despite the shared diff).
+  diff-scoped-subcommands invariant above).
 - **`leaks` rules live in a GLOBAL file, never in the repo — on purpose.** A
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates the owner's sensitive terms), and the footprint vocabulary is
@@ -318,8 +313,7 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   deterministic scanner can't rank whether a stated "why" is real — that would just
   reward typing "because". It prints the two-question test (is this a real footgun;
   is it at the right doc level — the `doc-and-audit-rigor` skill's test) and leaves
-  the judgment to the pusher. Judging nothing, it does not block (the
-  advisory-can't-block invariant, Stop-hook footgun below). Do NOT reintroduce
+  the judgment to the pusher, so it does not block. Do NOT reintroduce
   rationale detection to "reduce noise" — an honest nag beats a fake judge.
 - **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'`** —
   not the doc-graph ignore layers, and not the leaks git-tracking scope. Any `.md`
@@ -327,16 +321,20 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   `orphans`/`broken`/`untracked` exclude as non-documentation — a footgun
   declaration added inside agent tooling is just as undocumented as one in
   `CLAUDE.md`. Do not apply `defaultIgnores`/`.docgraphignore` here.
-- **An advisory check can NEVER be a Stop hook — that's why `covers-drift` is
-  pre-push (the advisory-can't-block invariant).** A Stop hook has no channel that
-  is both advisory and agent-visible: exit-0 stdout reaches only the debug log (the
-  agent never sees it); exit-2 stderr, `decision:"block"`/`reason`, and
-  `hookSpecificOutput.additionalContext` all reach the agent but all stop the turn
-  from ending. That is structural — a Stop hook exists to decide whether Claude
-  stops — so the tempting "fold `covers-drift` into `doc-drift`, they share a diff
-  source" refactor cannot work: at Stop time the only way to be heard is to block,
-  and `covers-drift` judges nothing so it must not. `doc-drift` blocks because its
-  findings are mechanical facts; that is what earns it the Stop hook.
+- **A Stop hook is heard only by blocking — so `doc-drift` blocks once per
+  finding, and its covers join is scoped to the session or it is noise.** Exit-0
+  output reaches only the debug log; every channel the agent sees keeps the turn
+  from ending. A push-time advisory arrives after the work is done and goes
+  unread, so covers drift is raised at Stop: once per (doc, path) per session
+  (`sessionCoversDrift`), then the agent may stop. The tempting scopes are both
+  wrong: the branch diff `doc-drift`'s symbol scan uses sees hundreds of unrelated
+  files on a long-lived integration branch, and the working tree alone sees
+  nothing once the agent has committed. The change set is the first-parent,
+  non-merge commits since the HEAD at the session's previous Stop (first Stop:
+  since the transcript's first timestamp) plus the working tree, and a path counts
+  only if the session's own tool calls name it (`sessionToolInputs`) — concurrent
+  sessions commit to the same branch inside the same window. Widening any of
+  these makes the nag noise, and a noisy nag goes unread.
 
 ## Doc models (why `--skip` exists)
 
@@ -429,7 +427,9 @@ docs/" with zero config.
   once-per-finding nag marker under `docDriftStateDir()` (HEAD + finding keys,
   `docDriftRecordNag`; `docDriftAllSeen` decides) — its HEAD line is checked
   *before* the diff, since a HEAD already nagged exits 0 down every remaining
-  path, so scanning it again is pure waste on a per-turn hook. `docDriftDiffBase` memoizes its answer per
+  path for the symbol scan, so scanning it again is pure waste on a per-turn hook;
+  the covers join (`sessionCoversDrift`) keeps its own per-session state beside it.
+  `docDriftDiffBase` memoizes its answer per
   (repo, HEAD) beside that marker (`readDocDriftBase`/`writeDocDriftBase`, keyed
   via `docDriftStatePath`): `audit.ClosestBase` costs a dozen git subprocesses —
   ~85% of a warm run — to recompute a value that only moves when HEAD does. A
@@ -465,7 +465,8 @@ docs/" with zero config.
   default run. Only `graph` is ref-aware — the audit checks stay working-tree only.
 - `internal/audit/` — `links.go` (parse/resolve), `ignore.go` (`**` globs),
   `git.go` (`ls-files` wrappers **plus** the diff helpers `changedMarkdown`/
-  `changedCode`/`addedLines`/`fileAtRev`/`ClosestBase` that `footgun_drift.go`,
+  `changedCode`/`addedLines`/`fileAtRev`/`ClosestBase`, and the change-set
+  collectors `SpecChanges`/`CommitChanges`/`WorktreeChanges`, that `footgun_drift.go`,
   `doc_drift.go` and `covers_drift.go` use to read a range instead of a tree
   snapshot; `changedCode` shares `nonCodePathspec` with `gitDiff`/
   `stillDefinedInCode` so every code-side scan agrees on what "code" is),
@@ -484,7 +485,8 @@ docs/" with zero config.
   `covers_drift.go` (`CoversDrift` + `CoversFinding{Doc, Paths}`: joins
   `changedCode` against the `covers` edges of an already-parsed doc set —
   `RepoDocs` — via `CoversOf`, dropping any doc `changedMarkdown` says the
-  change set also touched, and deduping across ranges),
+  change set also touched, and deduping across ranges; `CoversOfChanges` is the
+  same join over a change set already collected),
   `audit.go` (`Audit` → `Report`, the whole-state orchestrator — builds both
   graphs via `graph.go` and sets `Report.Orphans`/`Report.Disconnected` from
   their `Islands()`; `parseDocs` also enforces the frontmatter-required-except-

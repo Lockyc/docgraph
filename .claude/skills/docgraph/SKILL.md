@@ -97,13 +97,14 @@ leave it out.
   edge still buys three things the auto-load doesn't: it's **gate-checked**, so a
   moved or renamed path breaks the push instead of rotting silently; a `note:` on
   the edge pins *what that doc holds about this path*, which having the doc in
-  context does not tell you; and it arms `covers-drift` (below).
+  context does not tell you; and it arms covers drift (below).
 
-**An edge buys reconciliation pressure, not just a query.** `docgraph covers-drift`
-is an advisory pre-push rider: when a push changes code a doc declares it `covers`
-and that doc is untouched, it names the doc and exits 0 — a nag, never a block.
-Editing the doc silences it. So a declared edge surfaces the doc at exactly the
-moment it might have gone stale; a repo with no `covers` edges never sees it.
+**An edge buys reconciliation pressure, not just a query.** When your session
+changes code a doc declares it `covers` and leaves the doc untouched, the
+`doc-drift` Stop hook blocks once to name the doc: read the parts describing what
+you changed, fix only what is now false, otherwise carry on. `covers-drift`
+repeats the check as an advisory pre-push nag. A repo with no `covers` edges never
+sees either.
 
 **Roots may carry frontmatter and edges** — docgraph's own `CLAUDE.md` covers
 `internal/audit` and `main.go`, each with a `note:`. Some repos (homelab, ops)

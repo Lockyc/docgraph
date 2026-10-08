@@ -794,18 +794,8 @@ func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 
 // runCoversDrift is the diff-scoped ADVISORY pre-push subcommand: it nags when a
 // pushed range changed code a doc declares it `covers` while that doc went
-// untouched. Always exits 0 on a finding — it judges nothing (it cannot tell
-// whether the doc actually needed reconciling), so it must not block. Contrast
-// doc-drift, which blocks on mechanical staleness.
-//
-// It lives at pre-push rather than in the doc-drift Stop hook because a Stop hook
-// has no channel that is both advisory and agent-visible: its exit-0 stdout
-// reaches only the debug log, while every channel that DOES reach the agent (a
-// blocking decision, or `hookSpecificOutput.additionalContext`) keeps the turn
-// from ending, under the same loop protections as `decision: block`. That is
-// structural — a Stop hook exists to decide whether to stop — so an advisory
-// check cannot live there. Pre-push is where advisory already works; it is how
-// footgun-drift operates.
+// untouched, and exits 0 on a finding. It is the push-time pass over the whole
+// pushed range; doc-drift raises the same join at Stop, scoped to the session.
 func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
 		return 0

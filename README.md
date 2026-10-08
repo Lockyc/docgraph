@@ -32,7 +32,7 @@ docgraph has four independent modes, each with its own trigger and scope:
 | **Whole-state checks** | `docgraph [path]` | the current tree | pre-push / CI | **yes** — exit 1 on any finding |
 | **`footgun-drift`** | `docgraph footgun-drift` | what a push *adds* | pre-push (advisory rider) | no — nags, always exit 0 |
 | **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
-| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted) | agent Stop hook | **yes** — exit 2 on any finding |
+| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted); the session's changes for covers drift | agent Stop hook | **yes** — exit 2, once per finding |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
 vocabulary), and the doc-graph **views** `covers` / `index` / `stale` / `graph`
@@ -298,12 +298,12 @@ docgraph covers-drift                       # reads git's pre-push ref lines fro
 docgraph covers-drift --range base..head    # explicit range, for manual use
 ```
 
-It's the graph join [`doc-drift`](#docgraph-doc-drift--the-stop-hook-staleness-gate)
-can't do: a rewritten function whose doc describes the old behaviour in prose
-leaves no removed symbol and no changed literal to grep for, but a `covers` edge
-already declares that doc the architecture of record for the code. What it can't
-do is *judge* — it has no way to know whether the doc actually needed
-reconciling, which is exactly why it never gates.
+A rewritten function whose doc describes the old behaviour in prose leaves no
+removed symbol and no changed literal to grep for, but a `covers` edge already
+declares that doc the architecture of record for the code. The same join runs at
+the end of each agent turn inside
+[`doc-drift`](#docgraph-doc-drift--the-stop-hook-staleness-gate), scoped to that
+session's changes; this rider is the push-time pass over the whole pushed range.
 
 With no `--range` it reads the ref lines git feeds a `pre-push` hook on stdin and
 derives `remotesha..localsha` per ref, deduping findings across refs. Docs are
@@ -312,12 +312,9 @@ unlike `doc-drift`'s doc-grep which also matches `.mdx`; "code" is every other
 tracked path except the prose formats `.txt`/`.rst`/`.adoc`/`.markdown`. An
 `.mdx` file is therefore neither: a `covers` edge declared in one never fires.
 
-**A still-accurate doc wants no edit, and the nag says so** — a doc nobody needed
-to change is the normal outcome, and an edit made only to quiet the advisory is
-doc bloat. A falsified doc is corrected or cut, nothing more; what changed and why
-goes in the commit message. A doc the change set touched never fires, so there's
-nothing to suppress and no in-file marker exists. A repo with no `covers`
-edges never sees it at all. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
+**A still-accurate doc wants no edit, and the nag says so**; a falsified one is
+corrected or cut, nothing more. A doc the change set touched never fires, so
+there's nothing to suppress. A repo with no `covers` edges never sees it. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
 it.
 
@@ -354,9 +351,20 @@ a finding already judged. A finding the last nag didn't carry blocks again (with
 the full list); one that is fixed and later recurs counts as new. This de-dupes
 the *nag*, it doesn't suppress the *finding*.
 
-A finding in either class **blocks** — prints to **stderr**, exits **2**. Both
-are mechanical facts, which is what earns them a hook that can stop a turn;
-judgment calls belong in the advisory pre-push riders instead.
+A finding in either class **blocks** — prints to **stderr**, exits **2**.
+
+It also raises **covers drift**: code this session changed that a doc declares it
+`covers`, where the session didn't touch the doc. The change set is the
+first-parent, non-merge commits since the `HEAD` at the session's previous Stop
+(on its first Stop, since the transcript's first timestamp) plus the working tree,
+keeping only paths the session's own tool calls name — so merging a trunk in, or
+another session committing to the same branch, never counts. It reads
+`session_id`/`transcript_path` from the Stop payload on stdin; without one it
+checks the working tree alone, and `--range` checks that spec. A doc touched
+anywhere in the set clears the finding. Each (doc, path) pair blocks once per
+session; the message asks the agent to read the parts of the doc describing
+what it changed and fix only what is now false. `DOCGRAPH_COVERS_OFF=1` turns
+this half off.
 `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
 doesn't use the anchored-symbol-and-value convention it relies on. Paths the
 doc-graph ignore layers exclude (defaults + `.docgraphignore`) are out of scope on
@@ -404,8 +412,8 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   (`covers: src/auth/` covers `src/auth/login.go`). `<path>` is
   **repo-root-relative** — frontmatter edges resolve against the repo root, unlike
   an inline markdown link. Prints nothing (exit `0`) if no doc covers it. The same
-  `covers` edges feed the
-  [`covers-drift`](#covers-drift--the-advisory-pre-push-rider) pre-push rider, so
+  `covers` edges feed covers drift (`doc-drift` at Stop,
+  [`covers-drift`](#covers-drift--the-advisory-pre-push-rider) at push), so
   declaring one both answers this query and gets the doc surfaced when its code
   changes.
 - **`index`** — prints a **generated** markdown index: every doc with
@@ -521,7 +529,7 @@ docgraph version                    # print version (also --version, -v)
 git repo / malformed leak config. `footgun-drift` and `covers-drift` are
 advisory: `0` regardless of findings (nag on stdout), `2` only on a git/usage
 error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
-dangling-reference or anchored-value finding (stderr) or on an error. `covers` /
+dangling-reference, anchored-value or covers finding (stderr) or on an error. `covers` /
 `index` / `stale` / `graph` are read-only: `0` always on success, `2` only on error.
 
 **Linked worktrees work** — docgraph shells out to `git -C`, which resolves a
