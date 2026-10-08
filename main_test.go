@@ -1410,6 +1410,7 @@ func (r *sessionRepo) commitAt(at, msg string) {
 }
 
 func (r *sessionRepo) change(p, msg string) {
+	r.named(p)
 	r.write(p, "package src\n// "+msg+"\n")
 	r.commitAt("", msg)
 }
@@ -1542,5 +1543,46 @@ func TestDocDriftCoversEarlierDocEditDoesNotClearLaterCode(t *testing.T) {
 	r.change("src/b.go", "code after the doc edit")
 	if code, msg := r.stop("s1"); code != 2 || !strings.Contains(msg, "src/b.go") {
 		t.Fatalf("code changed after the doc edit -> want 2 naming src/b.go, got %d:\n%s", code, msg)
+	}
+}
+
+// named records in the session transcript an Edit tool call on p, as the
+// harness would when this session edits the file.
+func (r *sessionRepo) named(p string) {
+	f, err := os.OpenFile(r.transcript, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer f.Close()
+	fmt.Fprintf(f, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":%q}}]}}`+"\n", filepath.Join(r.dir, p))
+}
+
+// A commit inside the session's window that this session's tool calls never
+// named — another session sharing the branch — is not this session's to reconcile.
+func TestDocDriftCoversIgnoresOtherSessionsCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("src/theirs.go", "package src\n")
+	r.commitAt("", "another session's commit")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("unnamed path -> want 0, got %d\n%s", code, msg)
+	}
+	r.change("src/mine.go", "this session's commit")
+	if code, msg := r.stop("s1"); code != 2 || strings.Contains(msg, "theirs.go") {
+		t.Fatalf("want a block naming only this session's file, got %d:\n%s", code, msg)
+	}
+}
+
+// Edits made by this session's subagents count as this session's.
+func TestDocDriftCoversCountsSubagentEdits(t *testing.T) {
+	r := newSessionRepo(t)
+	sub := filepath.Join(strings.TrimSuffix(r.transcript, ".jsonl"), "subagents")
+	os.MkdirAll(sub, 0o755)
+	parent := r.transcript
+	r.transcript = filepath.Join(sub, "agent-1.jsonl")
+	os.WriteFile(r.transcript, nil, 0o644)
+	r.change("src/sub.go", "a subagent's commit")
+	r.transcript = parent
+	if code, msg := r.stop("s1"); code != 2 || !strings.Contains(msg, "src/sub.go") {
+		t.Fatalf("subagent edit -> want 2 naming src/sub.go, got %d:\n%s", code, msg)
 	}
 }
