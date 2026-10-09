@@ -150,8 +150,8 @@ func ignoreExcludes(root string) ([]string, error) {
 // committed and uncommitted), "HEAD" (uncommitted only), or "base..head"
 // (committed only).
 func gitDiff(root, spec string, excl ...string) (string, error) {
-	args := append(append([]string{"-C", root, "diff", spec, "--"}, nonCodePathspec...), excl...)
-	out, err := exec.Command("git", args...).Output()
+	args := append(append([]string{"diff", spec, "--"}, nonCodePathspec...), excl...)
+	out, err := GitCmd(root, args...).Output()
 	if err != nil {
 		return "", err
 	}
@@ -159,19 +159,19 @@ func gitDiff(root, spec string, excl ...string) (string, error) {
 }
 
 // stillDefinedInCode reports whether sym appears (whole-word) anywhere in tracked
-// code — the same non-prose file set gitDiff scans (nonCodePathspec). A
-// fixed-string word match; a regex alternation backtracks catastrophically on a
-// large tree.
+// or untracked, non-ignored code — the file set the bare doc-drift diff covers,
+// scoped by nonCodePathspec. A fixed-string word match; a regex alternation
+// backtracks catastrophically on a large tree.
 func stillDefinedInCode(root, sym string, excl ...string) bool {
-	args := append(append([]string{"-C", root, "grep", "-qwF", "--", sym, "--"}, nonCodePathspec...), excl...)
-	return exec.Command("git", args...).Run() == nil
+	args := append(append([]string{"grep", "--untracked", "-qwF", "--", sym, "--"}, nonCodePathspec...), excl...)
+	return GitCmd(root, args...).Run() == nil
 }
 
 // gitGrepHits runs `git grep -n -F -w` with the given pathspec args and parses
 // file:line:text, capping at max. git grep exit 1 (no match) yields (nil, nil).
 func gitGrepHits(root string, pathspec []string, needle string, max int) ([]DocHit, error) {
-	args := append([]string{"-C", root, "grep", "-n", "-F", "-w", "--", needle, "--"}, pathspec...)
-	out, err := exec.Command("git", args...).Output()
+	args := append([]string{"grep", "-n", "-F", "-w", "--", needle, "--"}, pathspec...)
+	out, err := GitCmd(root, args...).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return nil, nil
@@ -216,8 +216,8 @@ func docGrepSymbol(root, sym string, excl ...string) ([]DocHit, error) {
 // docGrepValue returns up to 5 doc locations that carry old, but only within docs
 // that also NAME the symbol (word match) — the anchored-drift signature.
 func docGrepValue(root, name, old string, excl ...string) ([]DocHit, error) {
-	args := append([]string{"-C", root, "grep", "-l", "-F", "-w", "--", name, "--", "*.md", "*.mdx"}, excl...)
-	named, err := exec.Command("git", args...).Output()
+	args := append([]string{"grep", "-l", "-F", "-w", "--", name, "--", "*.md", "*.mdx"}, excl...)
+	named, err := GitCmd(root, args...).Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return nil, nil

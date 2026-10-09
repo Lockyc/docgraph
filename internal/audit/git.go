@@ -15,7 +15,7 @@ import (
 // resolves fails here and is otherwise indistinguishable from "not a repo" —
 // only git's message names the pointer target as the cause.
 func GitRoot(path string) (string, error) {
-	out, err := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel").Output()
+	out, err := GitCmd(path, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", gitError(err)
 	}
@@ -35,8 +35,15 @@ func gitError(err error) error {
 	return err
 }
 
+// GitCmd builds a git command run in dir. core.quotePath is off so a non-ASCII
+// path comes back verbatim: quoted ("caf\303\251.md") it names no file, and every
+// check that opens or matches it silently drops it.
+func GitCmd(dir string, args ...string) *exec.Cmd {
+	return exec.Command("git", append([]string{"-C", dir, "-c", "core.quotePath=false"}, args...)...)
+}
+
 func gitLines(root string, args ...string) ([]string, error) {
-	out, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+	out, err := GitCmd(root, args...).Output()
 	if err != nil {
 		return nil, gitError(err)
 	}
@@ -61,7 +68,7 @@ func untrackedMD(root string) ([]string, error) {
 // converting, or dropping empty lines — required for diff parsing where '+'/'-'
 // prefixes and blank added lines are significant.
 func gitRawLines(root string, args ...string) ([]string, error) {
-	out, err := exec.Command("git", append([]string{"-C", root}, args...)...).Output()
+	out, err := GitCmd(root, args...).Output()
 	if err != nil {
 		return nil, gitError(err)
 	}
@@ -155,8 +162,13 @@ func addedLines(root, rng, path string) (map[int]bool, error) {
 	}
 	added := map[int]bool{}
 	newLine := 0
+	inHunk := false // file headers (---/+++) come only before the first hunk
 	for _, l := range lines {
+		if !inHunk && !strings.HasPrefix(l, "@@") {
+			continue
+		}
 		if strings.HasPrefix(l, "@@") {
+			inHunk = true
 			// @@ -a,b +c,d @@
 			plus := strings.Index(l, "+")
 			if plus < 0 {
@@ -174,12 +186,13 @@ func addedLines(root, rng, path string) (map[int]bool, error) {
 			newLine = start
 			continue
 		}
-		if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+		switch {
+		case strings.HasPrefix(l, "+"):
 			added[newLine] = true
 			newLine++
-		} else if strings.HasPrefix(l, "-") && !strings.HasPrefix(l, "---") {
-			// deletion: new-file line does not advance
-		} else {
+		case strings.HasPrefix(l, "-"), strings.HasPrefix(l, `\`):
+			// deletion or "\ No newline at end of file": new-file line does not advance
+		default:
 			// context (none with --unified=0) advances new line
 			newLine++
 		}
@@ -192,7 +205,7 @@ func addedLines(root, rng, path string) (map[int]bool, error) {
 // ls-tree and filters to .md — the same effective set trackedMD's "*.md" pathspec
 // yields in a checkout, without depending on pathspec-glob semantics.
 func trackedAtRef(gitDir, ref string) ([]string, error) {
-	lines, err := gitLines(gitDir, "ls-tree", "-r", "--name-only", ref)
+	lines, err := gitLines(gitDir, "ls-tree", "-r", "--full-tree", "--name-only", ref)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +221,7 @@ func trackedAtRef(gitDir, ref string) ([]string, error) {
 
 // fileAtRev returns path's content at rev; ok=false if it doesn't exist there.
 func fileAtRev(root, rev, path string) (string, bool) {
-	out, err := exec.Command("git", "-C", root, "show", rev+":"+path).Output()
+	out, err := GitCmd(root, "show", rev+":"+path).Output()
 	if err != nil {
 		return "", false
 	}
@@ -220,7 +233,7 @@ func fileAtRev(root, rev, path string) (string, bool) {
 func ClosestBase(root, head string) (string, bool) {
 	best, bestCnt := "", -1
 	for _, cand := range []string{"origin/HEAD", "main", "master", "dev", "develop", "trunk"} {
-		mb, err := exec.Command("git", "-C", root, "merge-base", head, cand).Output()
+		mb, err := GitCmd(root, "merge-base", head, cand).Output()
 		if err != nil {
 			continue
 		}
@@ -228,7 +241,7 @@ func ClosestBase(root, head string) (string, bool) {
 		if base == "" {
 			continue
 		}
-		cntOut, err := exec.Command("git", "-C", root, "rev-list", "--count", base+".."+head).Output()
+		cntOut, err := GitCmd(root, "rev-list", "--count", base+".."+head).Output()
 		if err != nil {
 			continue
 		}

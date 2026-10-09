@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -135,7 +134,7 @@ func runInstallHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
-	if err := exec.Command("git", "-C", root, "config", "core.hooksPath", ".githooks").Run(); err != nil {
+	if err := audit.GitCmd(root, "config", "core.hooksPath", ".githooks").Run(); err != nil {
 		fmt.Fprintf(stderr, "docgraph: git config core.hooksPath failed: %v\n", err)
 		return 2
 	}
@@ -891,7 +890,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return reportDocDrift(stderr, findings, covers)
 	}
 
-	h, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	h, err := audit.GitCmd(root, "rev-parse", "HEAD").Output()
 	if err != nil {
 		// Unborn HEAD (a freshly `git init`'d repo, no commits yet): there is no
 		// commit to diff against, and `git diff HEAD` on one exits 128 — a real
@@ -1053,7 +1052,7 @@ func sessionRevs(root, head string, st coversSession) []string {
 	switch {
 	case st.head == head:
 		return nil
-	case st.head != "" && exec.Command("git", "-C", root, "merge-base", "--is-ancestor", st.head, head).Run() == nil:
+	case st.head != "" && audit.GitCmd(root, "merge-base", "--is-ancestor", st.head, head).Run() == nil:
 		return append(rev, st.head+".."+head)
 	case st.since != "":
 		// First Stop, or HEAD moved off the previous one (rebase, branch switch):
@@ -1139,7 +1138,7 @@ func readSessionWork(transcript string) (w sessionWork, ok bool) {
 func committedPaths(root string, shas []string) map[string]bool {
 	out := map[string]bool{}
 	for _, sha := range shas {
-		b, err := exec.Command("git", "-C", root, "show", "--no-renames", "--name-only", "--format=", sha+"^{commit}", "--").Output()
+		b, err := audit.GitCmd(root, "show", "--no-renames", "--name-only", "--format=", sha+"^{commit}", "--").Output()
 		if err != nil {
 			continue
 		}
@@ -1196,7 +1195,7 @@ func coversSessionPath(root, session string) string {
 	if session == "" {
 		session = "\x00no-session"
 	}
-	if b, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
+	if b, err := audit.GitCmd(root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
 		root = strings.TrimSpace(string(b))
 	}
 	sum := sha256.Sum256([]byte(session))

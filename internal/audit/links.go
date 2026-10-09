@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -65,10 +66,22 @@ func stripInlineCode(s string) string {
 	return b.String()
 }
 
-// cleanTarget strips any #anchor, ?query, or " title" suffix.
+// cleanTarget reduces a link destination to a path: it unwraps the <…> form
+// (which may hold spaces), strips any #anchor, ?query, or " title" suffix, and
+// percent-decodes, so docs/a%20b.md names the file "docs/a b.md" as GitHub does.
 func cleanTarget(target string) string {
-	if i := strings.IndexAny(target, "#? \t"); i >= 0 {
+	if rest, ok := strings.CutPrefix(target, "<"); ok {
+		if i := strings.IndexByte(rest, '>'); i >= 0 {
+			target = rest[:i]
+		}
+		if i := strings.IndexAny(target, "#?"); i >= 0 {
+			target = target[:i]
+		}
+	} else if i := strings.IndexAny(target, "#? \t"); i >= 0 {
 		target = target[:i]
+	}
+	if dec, err := url.PathUnescape(target); err == nil {
+		target = dec
 	}
 	return target
 }

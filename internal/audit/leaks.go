@@ -130,17 +130,19 @@ type compiledLeaks struct {
 // It must never be NARROWER than the rules it stands in for — a false negative
 // here is a missed leak, silently. Two guarantees keep it a superset: a literal
 // term is prefiltered by case-folded substring search only when it is pure ASCII
-// (where a byte-wise lowercase is exactly what (?i) does), and every other rule
-// is kept verbatim in an alternation of its own compiled pattern.
+// and the file holds neither non-ASCII rune that (?i) folds onto an ASCII letter
+// (U+017F ſ → s, U+212A Kelvin K → k), and every other rule is kept verbatim in a
+// multi-line alternation of its own compiled pattern; a rule anchored with \A or
+// \z, which per line means "line start/end", disables the regex prefilter.
 type scanFilter struct {
-	lits []string       // ASCII-lowercased literal terms
-	re   *regexp.Regexp // alternation of every remaining rule; nil when there are none
+	lits   []string       // ASCII-lowercased literal terms
+	re     *regexp.Regexp // alternation of every remaining rule; nil when there are none
+	always bool           // a rule the whole-file alternation can't stand in for
 }
 
 // newScanFilter splits a deny set into the two prefilter strategies. A rule whose
-// pattern fails to compile as part of the alternation is impossible here (each
-// already compiled alone), but a nil re degrades to "no regex prefilter", which
-// only ever makes the filter wider.
+// pattern compiles alone but not as part of the alternation (RE2 caps program
+// size) degrades to "always scan", which only ever makes the filter wider.
 func newScanFilter(deny []matcher) scanFilter {
 	var f scanFilter
 	var parts []string
@@ -149,10 +151,20 @@ func newScanFilter(deny []matcher) scanFilter {
 			f.lits = append(f.lits, d.lit)
 			continue
 		}
-		parts = append(parts, "(?:"+d.re.String()+")")
+		src := d.re.String()
+		if strings.Contains(src, `\A`) || strings.Contains(src, `\z`) {
+			f.always = true
+		}
+		parts = append(parts, "(?:"+src+")")
 	}
 	if len(parts) > 0 {
-		f.re, _ = regexp.Compile(strings.Join(parts, "|"))
+		// (?m): scanLine applies each rule to one line, so ^/$ anchor every line;
+		// across the whole file only multi-line mode keeps that superset.
+		re, err := regexp.Compile("(?m)" + strings.Join(parts, "|"))
+		if err != nil {
+			f.always = true // e.g. past RE2's program-size limit
+		}
+		f.re = re
 	}
 	return f
 }
@@ -160,7 +172,13 @@ func newScanFilter(deny []matcher) scanFilter {
 // mayMatch reports whether text could contain a deny match. False means no rule
 // can match anywhere in the file, so the per-line scan is skipped entirely.
 func (f scanFilter) mayMatch(text string) bool {
+	if f.always {
+		return true
+	}
 	if len(f.lits) > 0 {
+		if strings.ContainsAny(text, "\u017f\u212a") {
+			return true
+		}
 		low := strings.ToLower(text)
 		for _, l := range f.lits {
 			if strings.Contains(low, l) {

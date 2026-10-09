@@ -155,14 +155,22 @@ func (v GraphView) Markdown() string {
 		}
 	}
 	sort.Strings(roots)
+	onPath := map[string]bool{} // a part-of cycle (an `edges` finding) must not recurse forever
 	var walk func(p string, depth int)
 	walk = func(p string, depth int) {
-		fmt.Fprintf(&b, "%s- %s\n", strings.Repeat("  ", depth), p)
+		indent := strings.Repeat("  ", depth)
+		if onPath[p] {
+			fmt.Fprintf(&b, "%s- %s (cycle)\n", indent, p)
+			return
+		}
+		fmt.Fprintf(&b, "%s- %s\n", indent, p)
+		onPath[p] = true
 		kids := children[p]
 		sort.Strings(kids)
 		for _, k := range kids {
 			walk(k, depth+1)
 		}
+		onPath[p] = false
 	}
 	for _, r := range roots {
 		walk(r, 0)
