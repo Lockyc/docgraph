@@ -1654,3 +1654,46 @@ func TestDocDriftCoversOncePerSessionAcrossWorktrees(t *testing.T) {
 		t.Fatalf("pair already raised this session -> want 0, got %d\n%s", code, msg)
 	}
 }
+
+// A flag error used to fall through with the path argument dropped, auditing
+// the cwd instead and printing "clean" for a repo that was never checked.
+func TestBadFlagExits2WithoutRunning(t *testing.T) {
+	dir := mkRepo(t) // has a broken link: a real run exits 1
+	for name, f := range map[string]func([]string, io.Writer, io.Writer) int{
+		"run":           run,
+		"install-hook":  runInstallHook,
+		"footgun-drift": func(a []string, o, e io.Writer) int { return runFootgunDrift(a, o, e) },
+	} {
+		var out, errb bytes.Buffer
+		if code := f([]string{dir, "--skp", "leaks"}, &out, &errb); code != 2 {
+			t.Errorf("%s: bad flag want exit 2, got %d\nstdout: %s", name, code, out.String())
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"--help"}, &out, &errb); code != 0 || strings.Contains(out.String(), "BROKEN") {
+		t.Errorf("--help want exit 0 without an audit, got %d\n%s", code, out.String())
+	}
+}
+
+func TestInstallHookSkipWithSpaceStaysOneArgument(t *testing.T) {
+	dir := mkRepo(t)
+	var out, errb bytes.Buffer
+	if code := runInstallHook([]string{"--skip", "orphans, leaks", dir}, &out, &errb); code != 0 {
+		t.Fatalf("install-hook exit %d: %s", code, errb.String())
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".githooks", "pre-push"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"$bin" --skip leaks,orphans .`) && !strings.Contains(string(b), `"$bin" --skip orphans,leaks .`) {
+		t.Fatalf("skip value must be one comma-joined word:\n%s", b)
+	}
+}
+
+func TestPrePushZeroSHAAnyLength(t *testing.T) {
+	z := strings.Repeat("0", 64)
+	in := "refs/heads/gone " + z + " refs/heads/gone " + strings.Repeat("a", 64) + "\n"
+	if got := rangesFromPrePushStdin(strings.NewReader(in), t.TempDir()); len(got) != 0 {
+		t.Fatalf("a SHA-256 deletion must be skipped, got %+v", got)
+	}
+}
