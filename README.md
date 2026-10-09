@@ -358,8 +358,8 @@ It also raises **covers drift**: code this session changed that a doc declares i
 first-parent, non-merge commits since the `HEAD` at the session's previous Stop
 (on its first Stop, since the transcript's first timestamp) plus the working tree,
 keeping only paths the session edited with an edit tool or committed itself — so
-reading a file, merging a trunk in, or
-another session committing to the same branch, never counts. It reads
+reading a file, merging a trunk in, or another session committing to the same
+branch, never counts. It reads
 `session_id`/`transcript_path` from the Stop payload on stdin; without one it
 checks the working tree alone, and `--range` checks that spec. A doc touched
 anywhere in the set clears the finding. Each (doc, path) pair blocks once per
