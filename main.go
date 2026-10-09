@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -985,9 +986,10 @@ func readStopPayload(r io.Reader) stopPayload {
 // branch-wide diff is the wrong scope: an integration branch can sit hundreds of
 // commits past its merge-base, and an agent committing as it goes leaves the
 // working tree empty by the time it stops. Concurrent sessions share the branch
-// and often the checkout, so a changed path counts only if one of this session's
-// tool calls (or its subagents') names it — see sessionToolInputs. Without a
-// session id (a manual run) the change set is the working tree alone, unfiltered.
+// and often the checkout, so a changed path counts only if this session (or one of
+// its subagents) edited it with an edit tool or committed it — see
+// readSessionWork. Without a session id (a manual run) the change set is the
+// working tree alone, unfiltered.
 //
 // Each (doc, path) pair blocks once per session; the seen set accumulates, so a
 // file the agent keeps editing does not re-nag every turn.
@@ -1011,17 +1013,21 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 		return nil
 	}
 	findings := coversOf(root, code, md, nil, stderr)
-	var named []byte
+	var work sessionWork
+	var mine map[string]bool
+	filtered := false
 	if len(findings) > 0 && p.SessionID != "" {
-		named = sessionToolInputs(p.TranscriptPath)
+		if w, ok := readSessionWork(p.TranscriptPath); ok {
+			work, mine, filtered = w, committedPaths(root, w.commits), true
+		}
 	}
 
 	var fresh []audit.CoversFinding
 	for _, f := range findings {
 		var paths []string
 		for _, path := range f.Paths {
-			if named != nil && !bytes.Contains(named, []byte(path)) {
-				continue // someone else's change: this session never named the file
+			if filtered && !mine[path] && !bytes.Contains(work.edited, []byte("/"+path+"\n")) {
+				continue // someone else's change: this session neither edited nor committed it
 			}
 			if k := f.Doc + "\t" + path; !st.seen[k] {
 				st.seen[k] = true
@@ -1057,42 +1063,64 @@ func sessionRevs(root, head string, st coversSession) []string {
 	return nil
 }
 
-// sessionToolInputs returns the raw tool-call inputs of a session — its own
-// transcript and its subagents' — concatenated, or nil when the transcript can't
-// be read. A changed path no tool input names was changed by someone else
-// sharing the branch or the checkout (concurrent sessions commit inside the same
-// window), so it is not this session's to reconcile.
-func sessionToolInputs(transcript string) []byte {
+// sessionWork is what a session's transcript says it changed itself: the raw
+// path inputs of its edit-tool calls, and the commits its tool output shows it
+// making. Reading, grepping or prompting about a file is not changing it.
+type sessionWork struct {
+	edited  []byte   // edit-tool file_path/notebook_path inputs, newline-joined
+	commits []string // shas from `git commit`-style "[branch sha] subject" output
+}
+
+// editTools are the tool calls whose path input is a file the session wrote.
+var editTools = map[string]bool{"Edit": true, "MultiEdit": true, "Write": true, "NotebookEdit": true}
+
+// commitLine matches the summary line `git commit`, `cherry-pick` and `revert`
+// print for a commit they create: "[branch sha] subject" or "[branch (root-commit) sha]".
+var commitLine = regexp.MustCompile(`\[[^\]\s"\\]+(?: \([a-z-]+\))? ([0-9a-f]{7,40})\] `)
+
+// readSessionWork reads a session's own transcript and its subagents', or
+// returns ok=false when the transcript can't be read. A changed path the
+// session neither edited nor committed was changed by someone else sharing the
+// branch or the checkout, so it is not this session's to reconcile.
+func readSessionWork(transcript string) (w sessionWork, ok bool) {
 	files := []string{transcript}
 	sub, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(transcript, ".jsonl"), "subagents", "*.jsonl"))
 	files = append(files, sub...)
-	out := []byte{}
-	marker := []byte(`"type":"tool_use"`)
+	useMarker, resultMarker := []byte(`"type":"tool_use"`), []byte(`"type":"tool_result"`)
 	for i, name := range files {
 		f, err := os.Open(name)
 		if err != nil {
 			if i == 0 {
-				return nil
+				return w, false
 			}
 			continue
 		}
 		r := bufio.NewReader(f)
 		for {
 			line, err := r.ReadBytes('\n')
-			if bytes.Contains(line, marker) {
+			if bytes.Contains(line, resultMarker) {
+				for _, m := range commitLine.FindAllSubmatch(line, -1) {
+					w.commits = append(w.commits, string(m[1]))
+				}
+			}
+			if bytes.Contains(line, useMarker) {
 				var rec struct {
 					Message struct {
 						Content json.RawMessage `json:"content"`
 					} `json:"message"`
 				}
 				var items []struct {
-					Type  string          `json:"type"`
-					Input json.RawMessage `json:"input"`
+					Type  string `json:"type"`
+					Name  string `json:"name"`
+					Input struct {
+						FilePath     string `json:"file_path"`
+						NotebookPath string `json:"notebook_path"`
+					} `json:"input"`
 				}
 				if json.Unmarshal(line, &rec) == nil && json.Unmarshal(rec.Message.Content, &items) == nil {
 					for _, it := range items {
-						if it.Type == "tool_use" {
-							out = append(append(out, it.Input...), '\n')
+						if it.Type == "tool_use" && editTools[it.Name] {
+							w.edited = append(w.edited, it.Input.FilePath+"\n"+it.Input.NotebookPath+"\n"...)
 						}
 					}
 				}
@@ -1102,6 +1130,24 @@ func sessionToolInputs(transcript string) []byte {
 			}
 		}
 		f.Close()
+	}
+	return w, true
+}
+
+// committedPaths returns the paths the given commits changed. A sha the repo
+// doesn't know (another repo's commit, or one rewritten since) is skipped.
+func committedPaths(root string, shas []string) map[string]bool {
+	out := map[string]bool{}
+	for _, sha := range shas {
+		b, err := exec.Command("git", "-C", root, "show", "--no-renames", "--name-only", "--format=", sha+"^{commit}", "--").Output()
+		if err != nil {
+			continue
+		}
+		for _, p := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if p != "" {
+				out[p] = true
+			}
+		}
 	}
 	return out
 }
@@ -1143,9 +1189,15 @@ type coversSession struct {
 // write; a session idle this long is not coming back to the same HEAD.
 const coversSessionMaxAge = 14 * 24 * time.Hour
 
+// coversSessionPath keys a session's state by the repo's shared git dir, not the
+// worktree root: a session that moves into a linked worktree is still one
+// session, and a pair raised in the main checkout must not block again there.
 func coversSessionPath(root, session string) string {
 	if session == "" {
 		session = "\x00no-session"
+	}
+	if b, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
+		root = strings.TrimSpace(string(b))
 	}
 	sum := sha256.Sum256([]byte(session))
 	return docDriftStatePath(root, ".session-"+hex.EncodeToString(sum[:])[:16])

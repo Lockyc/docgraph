@@ -1586,3 +1586,71 @@ func TestDocDriftCoversCountsSubagentEdits(t *testing.T) {
 		t.Fatalf("subagent edit -> want 2 naming src/sub.go, got %d:\n%s", code, msg)
 	}
 }
+
+// toolUse records in the session transcript a tool call with the given input.
+func (r *sessionRepo) toolUse(name, input string) {
+	r.appendTranscript(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","input":` + input + `}]}}`)
+}
+
+// toolResult records in the session transcript a tool result carrying out.
+func (r *sessionRepo) toolResult(out string) {
+	b, _ := json.Marshal(out)
+	r.appendTranscript(`{"type":"user","message":{"content":[{"type":"tool_result","content":` + string(b) + `}]}}`)
+}
+
+func (r *sessionRepo) appendTranscript(line string) {
+	f, err := os.OpenFile(r.transcript, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer f.Close()
+	fmt.Fprintln(f, line)
+}
+
+// Reading or grepping a file another session changed does not make its change
+// this session's.
+func TestDocDriftCoversIgnoresReadOnlyMentions(t *testing.T) {
+	r := newSessionRepo(t)
+	abs := filepath.Join(r.dir, "src/theirs.go")
+	r.toolUse("Bash", fmt.Sprintf(`{"command":%q}`, "grep -n foo src/theirs.go"))
+	r.toolUse("Read", fmt.Sprintf(`{"file_path":%q}`, abs))
+	r.toolUse("Agent", fmt.Sprintf(`{"prompt":%q}`, "look at src/theirs.go"))
+	r.write("src/theirs.go", "package src\n")
+	r.commitAt("", "another session's commit")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("only read-only mentions -> want 0, got %d\n%s", code, msg)
+	}
+}
+
+// A file this session changed from the shell, never through an edit tool, is
+// still its own once the session commits it.
+func TestDocDriftCoversCountsSessionCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("src/sed.go", "package src\n")
+	r.commitAt("", "edited with sed")
+	out, _ := exec.Command("git", "-C", r.dir, "rev-parse", "--short", "HEAD").Output()
+	r.toolResult(fmt.Sprintf("[wip %s] edited with sed\n 1 file changed", strings.TrimSpace(string(out))))
+	if code, msg := r.stop("s1"); code != 2 || !strings.Contains(msg, "src/sed.go") {
+		t.Fatalf("this session's commit -> want 2 naming src/sed.go, got %d:\n%s", code, msg)
+	}
+}
+
+// A session that moves into a linked worktree of the same repo is still one
+// session: a pair raised in the main checkout does not block again there.
+func TestDocDriftCoversOncePerSessionAcrossWorktrees(t *testing.T) {
+	r := newSessionRepo(t)
+	r.change("src/a.go", "change")
+	if code, msg := r.stop("s1"); code != 2 {
+		t.Fatalf("first Stop -> want 2, got %d\n%s", code, msg)
+	}
+	wt := filepath.Join(t.TempDir(), "wt")
+	r.git("worktree", "add", "-q", "-b", "feature", wt)
+	main := r.dir
+	r.dir = wt
+	r.change("src/a.go", "change again in the worktree")
+	code, msg := r.stop("s1")
+	r.dir = main
+	if code != 0 {
+		t.Fatalf("pair already raised this session -> want 0, got %d\n%s", code, msg)
+	}
+}
