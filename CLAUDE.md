@@ -595,10 +595,9 @@ look safe to tighten:
   narrowing it is a *silently missed leak* — no finding, green gate, exit 0. That
   is why an ASCII literal gets the fast case-folded substring path but a
   non-ASCII one keeps its regexp (byte-wise lowercase is not Unicode folding),
-  and why an uncompilable alternation degrades to "no regex prefilter" rather
-  than to "no match". `TestLeakScanLiteralDenySurvivesPrefilterCasing`,
-  `TestLeakScanNonASCIILiteralDenyStillMatches` and
-  `TestLeakScanMatchBeyondBinaryProbeWindow` are what stop this regressing.
+  and why whatever the whole-file alternation can't stand in for forces the
+  scan (`scanFilter`'s docblock lists the cases). The `TestLeakScan*` tests are
+  what stop this regressing.
 - **`readTextFile` decides binary-ness from a `binaryProbeBytes` prefix, then
   reads the rest.** Dropping the second read to "just scan the head" would look
   like a further win and would silently stop scanning past the first 8000 bytes

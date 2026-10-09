@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -178,5 +179,29 @@ func TestClosestBaseFailsOpenWithNoIntegrationBranch(t *testing.T) {
 	got, ok := ClosestBase(dir, "wip")
 	if ok || got != "" {
 		t.Fatalf(`no integration branch → want ("", false), got %q %v`, got, ok)
+	}
+}
+
+// Every git call goes through GitCmd: one built any other way gets git's quoted
+// non-ASCII paths back, and the file silently drops out of whichever check
+// asked. Test helpers build fixtures and are exempt.
+func TestGitCallsGoThroughGitCmd(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	files = append(files, "../../main.go")
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := strings.Count(string(b), `exec.Command("git"`)
+		if f == "git.go" {
+			n-- // GitCmd itself
+		}
+		if n != 0 {
+			t.Errorf("%s: %d git call(s) built without GitCmd", f, n)
+		}
 	}
 }
