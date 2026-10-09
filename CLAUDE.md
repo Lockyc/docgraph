@@ -332,8 +332,10 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   nothing once the agent has committed. The change set is the first-parent,
   non-merge commits since the HEAD at the session's previous Stop (first Stop:
   since the transcript's first timestamp) plus the working tree, and a path counts
-  only if the session's own tool calls name it (`sessionToolInputs`) — concurrent
-  sessions commit to the same branch inside the same window. Widening any of
+  only if the session edited it with an edit tool or committed it
+  (`readSessionWork`) — concurrent sessions commit to the same branch inside the
+  same window, and merely reading or grepping a file is not changing it. The seen
+  set is per repo (git common dir), not per worktree. Widening any of
   these makes the nag noise, and a noisy nag goes unread.
 
 ## Doc models (why `--skip` exists)
