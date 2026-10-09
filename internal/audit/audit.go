@@ -153,38 +153,14 @@ func brokenEdges(repoRoot string, docs map[string]*Doc) []BrokenEdge {
 }
 
 func Audit(repoRoot string, opts Options) (Report, error) {
-	tracked, err := trackedMD(repoRoot)
+	in, err := resolveGraphInputs(worktreeSource{root: repoRoot}, opts.ExtraRoots, opts.Ignores)
 	if err != nil {
 		return Report{}, err
 	}
-	trackedSet := make(map[string]bool, len(tracked))
-	for _, f := range tracked {
-		trackedSet[f] = true
-	}
-	globs, err := loadIgnores(repoRoot, opts.Ignores)
-	if err != nil {
-		return Report{}, err
-	}
-
-	var roots []string
-	for _, r := range rootCandidates {
-		if trackedSet[r] {
-			roots = append(roots, r)
-		}
-	}
-	for _, r := range opts.ExtraRoots {
-		r = filepath.ToSlash(filepath.Clean(r))
-		if trackedSet[r] {
-			roots = append(roots, r)
-		}
-	}
+	tracked, trackedSet, roots, rootSet, globs := in.tracked, in.trackedSet, in.roots, in.rootSet, in.globs
 
 	docs, fmFindings := parseDocs(repoRoot, tracked, globs)
 
-	rootSet := map[string]bool{}
-	for _, r := range roots {
-		rootSet[r] = true
-	}
 	cg := BuildContentGraph(repoRoot, tracked, trackedSet, rootSet, globs)
 	orphans := cg.Islands()
 

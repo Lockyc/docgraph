@@ -89,25 +89,11 @@ func ParseFrontmatter(content string) (*Doc, error) {
 
 // firstHeading returns the text of the body's first ATX H1 (`# Title`), or "" if
 // there is none. Fenced blocks are skipped so a shell comment (`# install`) in a
-// code sample is never mistaken for the title — the same fence model
-// extractLinks uses. Deliberately strict: the line must begin with "# " (no
-// indent, exactly one #), because an indented line is a code block and a
-// setext heading is out of scope.
+// code sample is never mistaken for the title (proseLines). Deliberately strict:
+// the line must begin with "# " (no indent, exactly one #), because an indented
+// line is a code block and a setext heading is out of scope.
 func firstHeading(body string) string {
-	var inFence bool
-	var fenceChar byte
-	for _, raw := range strings.Split(body, "\n") {
-		if m := fenceRe.FindString(strings.TrimSpace(raw)); m != "" {
-			if !inFence {
-				inFence, fenceChar = true, m[0]
-			} else if m[0] == fenceChar {
-				inFence = false
-			}
-			continue
-		}
-		if inFence {
-			continue
-		}
+	for _, raw := range proseLines(body) {
 		if strings.HasPrefix(raw, "# ") {
 			return strings.TrimSpace(raw[2:])
 		}

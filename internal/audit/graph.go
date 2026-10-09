@@ -219,3 +219,44 @@ func (g MetadataGraph) Islands() []string {
 	sort.Strings(out)
 	return out
 }
+
+// graphInputs is what every graph build starts from: the tracked doc set, the
+// roots among it (rootCandidates + extra roots, in that order, deduped), and the
+// ignore globs. Audit and the served view both resolve it here, so the gated
+// graph and the served graph cannot disagree about scope.
+type graphInputs struct {
+	tracked    []string
+	trackedSet map[string]bool
+	roots      []string
+	rootSet    map[string]bool
+	globs      []string
+}
+
+func resolveGraphInputs(src fileSource, extraRoots, ignores []string) (graphInputs, error) {
+	var in graphInputs
+	var err error
+	if in.tracked, err = src.tracked(); err != nil {
+		return in, err
+	}
+	in.trackedSet = make(map[string]bool, len(in.tracked))
+	for _, f := range in.tracked {
+		in.trackedSet[f] = true
+	}
+	if in.globs, err = loadIgnoresFrom(src, ignores); err != nil {
+		return in, err
+	}
+	in.rootSet = map[string]bool{}
+	add := func(r string) {
+		if in.trackedSet[r] && !in.rootSet[r] {
+			in.rootSet[r] = true
+			in.roots = append(in.roots, r)
+		}
+	}
+	for _, r := range rootCandidates {
+		add(r)
+	}
+	for _, r := range extraRoots {
+		add(filepath.ToSlash(filepath.Clean(r)))
+	}
+	return in, nil
+}

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"iter"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -16,26 +17,36 @@ var inlineLinkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
 var refLinkRe = regexp.MustCompile(`^\s*\[[^\]]+\]:\s+(\S+)`)
 var fenceRe = regexp.MustCompile("^([`~]{3,})")
 
+// proseLines yields each line outside fenced code blocks with its 0-based index.
+// A fence closes only on its own opening character, so ``` inside a ~~~ block is
+// content, not a close.
+func proseLines(content string) iter.Seq2[int, string] {
+	return func(yield func(int, string) bool) {
+		inFence := false
+		var fenceChar byte
+		for i, raw := range strings.Split(content, "\n") {
+			if m := fenceRe.FindString(strings.TrimSpace(raw)); m != "" {
+				if !inFence {
+					inFence, fenceChar = true, m[0]
+				} else if m[0] == fenceChar {
+					inFence = false
+				}
+				continue
+			}
+			if !inFence && !yield(i, raw) {
+				return
+			}
+		}
+	}
+}
+
 // extractLinks returns every markdown link target with its 1-based line number,
 // covering inline [x](target) and reference-style [label]: target. Links inside
 // fenced code blocks (``` / ~~~) and inline code spans (`...`) are skipped, so
 // illustrative/template paths in examples don't count as real links.
 func extractLinks(content string) []Link {
 	var links []Link
-	inFence := false
-	var fenceChar byte
-	for i, raw := range strings.Split(content, "\n") {
-		if m := fenceRe.FindString(strings.TrimSpace(raw)); m != "" {
-			if !inFence {
-				inFence, fenceChar = true, m[0]
-			} else if m[0] == fenceChar {
-				inFence = false
-			}
-			continue
-		}
-		if inFence {
-			continue
-		}
+	for i, raw := range proseLines(content) {
 		line := stripInlineCode(raw)
 		for _, m := range inlineLinkRe.FindAllStringSubmatch(line, -1) {
 			links = append(links, Link{Line: i + 1, Target: m[1]})

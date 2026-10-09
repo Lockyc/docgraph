@@ -3,7 +3,6 @@ package audit
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -49,8 +48,8 @@ type GraphView struct {
 }
 
 // BuildGraphView builds both graphs once and assembles the served view. It is
-// the read-only counterpart to Audit: it never gates, and mirrors Audit's
-// root/ignore/trackedSet resolution so the served graph matches the gated one.
+// the read-only counterpart to Audit: it never gates, and shares Audit's
+// resolveGraphInputs so the served graph matches the gated one.
 func BuildGraphView(repoRoot string, extraRoots, ignores []string) (GraphView, error) {
 	return buildGraphViewFrom(worktreeSource{root: repoRoot}, extraRoots, ignores)
 }
@@ -64,32 +63,13 @@ func BuildGraphViewAtRef(gitDir, ref string, extraRoots, ignores []string) (Grap
 }
 
 func buildGraphViewFrom(src fileSource, extraRoots, ignores []string) (GraphView, error) {
-	tracked, err := src.tracked()
+	in, err := resolveGraphInputs(src, extraRoots, ignores)
 	if err != nil {
 		return GraphView{}, err
 	}
-	trackedSet := make(map[string]bool, len(tracked))
-	for _, f := range tracked {
-		trackedSet[f] = true
-	}
-	globs, err := loadIgnoresFrom(src, ignores)
-	if err != nil {
-		return GraphView{}, err
-	}
-	roots := map[string]bool{}
-	for _, r := range rootCandidates {
-		if trackedSet[r] {
-			roots[r] = true
-		}
-	}
-	for _, r := range extraRoots {
-		r = filepath.ToSlash(filepath.Clean(r))
-		if trackedSet[r] {
-			roots[r] = true
-		}
-	}
-	docs, _ := parseDocsFrom(src, tracked, globs)
-	cg := buildContentGraph(src, tracked, trackedSet, roots, globs)
+	tracked, trackedSet := in.tracked, in.trackedSet
+	docs, _ := parseDocsFrom(src, tracked, in.globs)
+	cg := buildContentGraph(src, tracked, trackedSet, in.rootSet, in.globs)
 	mg := BuildMetadataGraph(docs, trackedSet)
 
 	v := GraphView{
