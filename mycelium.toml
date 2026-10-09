@@ -1,5 +1,5 @@
 name    = "docgraph"
-summary = "Audits a repo's agent-facing documentation graph — orphans, broken links, untracked markdown — plus content leak scan and diff-scoped footgun-drift pre-push check"
+summary = "Pre-push gate for agent-facing repo docs — content/metadata graph islands, broken links, frontmatter, untracked markdown, leak scan — plus diff-scoped drift checks (footgun, covers, Stop-hook doc-drift) and read-only doc-graph views"
 kind    = "tool"
 status  = "active"
 tags    = ["docs", "linting", "ci", "git-hooks", "agents"]

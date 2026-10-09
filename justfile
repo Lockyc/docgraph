@@ -42,11 +42,9 @@ gate:
 
 # cut the release for the current VERSION: fast-forward main → tag v<VERSION> → GitHub release.
 # run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
-# NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). `gh
-# --generate-notes` used to fill this in and was removed: it summarises MERGED PRs, and this
-# repo integrates directly on the trunk, so it only ever emitted a bare "Full Changelog"
-# link — a release with no notes, which the release model forbids. Write them; don't
-# reintroduce the flag.
+# NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). Not `gh
+# --generate-notes`: it summarises MERGED PRs, and this repo integrates on the trunk, so it
+# emits only a bare "Full Changelog" link — a release with no notes.
 release notes="RELEASE_NOTES.md":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -72,14 +70,13 @@ release notes="RELEASE_NOTES.md":
     fi
     just gate
     git push origin dev
-    # main only ever fast-forwards to a release commit. Assert it hasn't diverged
-    # (an out-of-band commit on main) so we fail loud here instead of silently
-    # rewinding main and losing that commit at the next release.
-    if ! git merge-base --is-ancestor main dev; then
+    # main only ever fast-forwards to a release commit. Both ref updates are
+    # ff-only, so a diverged main (local or remote) fails here instead of being
+    # rewound and losing its out-of-band commit.
+    if ! git fetch -q origin main:main || ! git fetch -q . dev:main; then
       echo "✗ main is not an ancestor of dev — it diverged; back-merge main into dev first" >&2
       exit 1
     fi
-    git branch -f main dev
     git push origin main
     git tag -a "${tag}" -m "${tag}" main
     git push origin "${tag}"

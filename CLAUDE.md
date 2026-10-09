@@ -81,7 +81,7 @@ file carries the invariants and footguns.
 ## Intended use
 
 docgraph is built to run as a **pre-push documentation gate** (and in CI): the
-six whole-state checks exit non-zero on a finding so a broken doc-graph blocks
+seven whole-state checks exit non-zero on a finding so a broken doc-graph blocks
 the push without a wrapper. `docgraph install-hook` writes a tracked
 `.githooks/pre-push` for that; the generated hook also runs `footgun-drift` and
 `covers-drift` as **advisory** riders — each prints its nag but never blocks, and
@@ -117,7 +117,7 @@ about drift while it can still act — see
   their trigger and diff source differ: `doc-drift` a Stop hook over the
   working-tree code diff (and, for its covers join, the session's change set),
   `footgun-drift` a pre-push subcommand over the pushed range's markdown,
-  `covers-drift` a pre-push subcommand over that same range's code side. The six `docgraph .` checks have no range concept — reachability,
+  `covers-drift` a pre-push subcommand over that same range's code side. The seven `docgraph .` checks have no range concept — reachability,
   link existence and leak content are properties of the current tree, not a range.
 
 ## Frontmatter model
@@ -578,7 +578,7 @@ Go-bin fallback back to `command -v`.
 ## Footgun — the leaks scan is ~95% of the runtime, and its prefilter must only ever widen
 
 The doc-graph work is not the cost. On a 9.7k-file repo (~14M tracked lines,
-~1GB tracked) the seven whole-state checks measure **~0.3s combined**, while
+~1GB tracked) the six doc-graph checks measure **~0.3s combined**, while
 `leaks` measured **~25s** — because `scanLine` runs one `FindAllStringIndex` per
 rule per line, over every tracked non-binary file. So the profile is inverted
 from where the interesting code is: an optimisation aimed at `BuildContentGraph`
