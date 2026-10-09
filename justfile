@@ -74,7 +74,8 @@ release notes="RELEASE_NOTES.md":
     # ff-only, so a diverged main (local or remote) fails here instead of being
     # rewound and losing its out-of-band commit.
     if ! git fetch -q origin main:main || ! git fetch -q . dev:main; then
-      echo "✗ main is not an ancestor of dev — it diverged; back-merge main into dev first" >&2
+      echo "✗ main is checked out here, or diverged from dev — release from a dev checkout;" >&2
+      echo "  if diverged: git merge origin/main on dev, then re-run the release." >&2
       exit 1
     fi
     git push origin main
