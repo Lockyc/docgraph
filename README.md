@@ -558,8 +558,11 @@ a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 `**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for the
 doc-graph checks (untracked scratch, and agent skill/config tooling that's never
-part of the doc graph), and by `doc-drift`. Add more via `.docgraphignore` (gitignore syntax) or
-repeatable `--ignore` globs (`**`, `*`, `?`). The leak scan honors only `--ignore`,
+part of the doc graph), and by `doc-drift`. Add more via `.docgraphignore` (one glob per
+line, `#` comments) or repeatable `--ignore` globs. These are repo-root-relative globs, not
+gitignore syntax: `*` and `?` match within one path segment, `**` matches any number of
+segments, and there is no negation — exclude a directory with `dir/**`, and a file at any
+depth with `**/name.md`. The leak scan honors only `--ignore`,
 not the default/`.docgraphignore` layers — see [`leaks`](#leaks--the-content-scan).
 
 **No inline markers.** Every suppression lives in config or on the command line —
