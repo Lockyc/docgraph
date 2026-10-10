@@ -13,7 +13,7 @@ import (
 type EdgeKind int
 
 const (
-	EdgeDoc       EdgeKind = iota // internal .md doc — existence-checked AND feeds reachability
+	EdgeDoc       EdgeKind = iota // internal .md doc — existence-checked; a metadata-graph edge (isMetadataEdge)
 	EdgeCode                      // internal non-.md path — existence-checked only
 	EdgeExternal                  // URL / mailto — not checked
 	EdgeCrossRepo                 // owner/repo:path — deferred (never a finding)
