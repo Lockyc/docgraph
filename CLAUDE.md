@@ -424,12 +424,12 @@ docs/" with zero config.
   exit 2 is reserved for a usage/git error, which is a tool bug rather than a
   finding), `runDocDrift(args, stdin, stdout, stderr) int` (the Stop-hook
   subcommand — checks `DOC_DRIFT_OFF`, resolves the diff spec via
-  `docDriftDiffBase`, calls `audit.DocDrift`, and on a finding prints via
+  `docDriftDiffBase`, calls `audit.DocDriftDiff`, and on a finding prints via
   `printDocDrift` to stderr and returns 2, gated on bare invocation by a
-  once-per-finding nag marker under `docDriftStateDir()` (HEAD + finding keys,
-  `docDriftRecordNag`; `docDriftAllSeen` decides) — its HEAD line is checked
-  *before* the diff, since a HEAD already nagged exits 0 down every remaining
-  path for the symbol scan, so scanning it again is pure waste on a per-turn hook;
+  once-per-finding nag marker under `docDriftStateDir()` (scan key + finding keys,
+  `docDriftRecordNag`; `docDriftAllSeen` decides) — the scan key is HEAD plus a
+  digest of the code diff (`docDriftScanKey`), checked *before* the doc greps, so
+  a Stop over an already-nagged HEAD and diff skips them on a per-turn hook;
   the covers join (`sessionCoversDrift`) keeps its own per-session state beside it.
   `docDriftDiffBase` memoizes its answer per
   (repo, HEAD) beside that marker (`readDocDriftBase`/`writeDocDriftBase`, keyed

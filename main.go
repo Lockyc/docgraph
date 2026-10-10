@@ -933,20 +933,25 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	head := strings.TrimSpace(string(h))
 
+	diff, err := audit.DocDriftDiff(root, docDriftDiffBase(root, head))
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
 	var fresh []audit.DocDriftFinding
-	// Already nagged at this HEAD? Then every symbol-scan finding is suppressed by
-	// the guard, so resolving the base and running the diff+greps is pure waste on
-	// a hook that fires once per turn. Skip it — the same decision, taken before
-	// the work instead of after it.
-	if docDriftNaggedAt(root) != head {
-		findings, err := audit.DocDrift(root, docDriftDiffBase(root, head))
+	// Already nagged over this exact diff at this HEAD? Then the greps would
+	// return the findings that nag carried and the guard would suppress them all,
+	// so skip them on a hook that fires once per turn. Any change to the code
+	// diff — committed or not — scans again, and docDriftAllSeen decides.
+	if scanned := docDriftScanKey(head, diff.Text); docDriftNaggedAt(root) != scanned {
+		findings, err := diff.Findings()
 		if err != nil {
 			fmt.Fprintf(stderr, "docgraph: %v\n", err)
 			return 2
 		}
 		if len(findings) > 0 {
 			seen := docDriftNaggedKeys(root)
-			docDriftRecordNag(root, head, findings)
+			docDriftRecordNag(root, scanned, findings)
 			if !docDriftAllSeen(findings, seen) {
 				fresh = findings
 			}
@@ -1342,8 +1347,8 @@ func writeDocDriftBase(root, head, spec string) {
 	_ = os.WriteFile(p, []byte(head+" "+spec), 0o644)
 }
 
-// docDriftNagLines returns the nag marker's lines — the HEAD last nagged at,
-// then one docDriftKey per finding that nag carried — or nil for never
+// docDriftNagLines returns the nag marker's lines — the scan key last nagged
+// at, then one docDriftKey per finding that nag carried — or nil for never
 // (including an unresolvable state dir, which must never suppress).
 func docDriftNagLines(root string) []string {
 	p := docDriftStatePath(root, "")
@@ -1357,7 +1362,16 @@ func docDriftNagLines(root string) []string {
 	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 }
 
-// docDriftNaggedAt returns the HEAD this repo was last nagged at, or "" for never.
+// docDriftScanKey identifies what a bare doc-drift run scanned: HEAD plus a
+// digest of the code diff, so an uncommitted change at an already-nagged HEAD
+// is still scanned.
+func docDriftScanKey(head, diff string) string {
+	sum := sha256.Sum256([]byte(diff))
+	return head + " " + hex.EncodeToString(sum[:])[:16]
+}
+
+// docDriftNaggedAt returns the scan key (docDriftScanKey) this repo was last
+// nagged at, or "" for never.
 func docDriftNaggedAt(root string) string {
 	if l := docDriftNagLines(root); len(l) > 0 {
 		return l[0]
@@ -1395,17 +1409,17 @@ func docDriftAllSeen(fs []audit.DocDriftFinding, seen map[string]bool) bool {
 	return true
 }
 
-// docDriftRecordNag records head and the findings as nagged. The HEAD line makes
-// a repeat Stop at the same HEAD a no-op without scanning; the finding keys let
-// a later HEAD stay silent when it carries nothing new (docDriftAllSeen). The
-// keys are replaced, not accumulated, so a finding that is fixed and later
-// recurs blocks again.
-func docDriftRecordNag(root, head string, fs []audit.DocDriftFinding) {
+// docDriftRecordNag records the scan key and the findings as nagged. The key
+// line makes a repeat Stop over the same HEAD and diff skip the greps; the
+// finding keys let a later scan stay silent when it carries nothing new
+// (docDriftAllSeen). The keys are replaced, not accumulated, so a finding that is
+// fixed and later recurs blocks again.
+func docDriftRecordNag(root, scanned string, fs []audit.DocDriftFinding) {
 	p := docDriftStatePath(root, "")
 	if p == "" {
 		return
 	}
-	lines := []string{head}
+	lines := []string{scanned}
 	for _, f := range fs {
 		lines = append(lines, docDriftKey(f))
 	}

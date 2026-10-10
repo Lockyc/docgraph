@@ -264,14 +264,38 @@ type DocDriftFinding struct {
 // constants whose value changed while a doc still names the symbol and shows the
 // old literal. spec is passed straight to `git diff` (see gitDiff).
 func DocDrift(root, spec string) ([]DocDriftFinding, error) {
-	excl, err := ignoreExcludes(root)
+	d, err := DocDriftDiff(root, spec)
 	if err != nil {
 		return nil, err
+	}
+	return d.Findings()
+}
+
+// CodeDiff is the code-side diff doc-drift scans, held so a caller can decide
+// from Text whether the doc greps are worth running before it runs them.
+type CodeDiff struct {
+	Text string
+	root string
+	excl []string
+}
+
+// DocDriftDiff collects the code-side `git diff <spec>`, scoped by
+// nonCodePathspec and the repo's ignore layers.
+func DocDriftDiff(root, spec string) (CodeDiff, error) {
+	excl, err := ignoreExcludes(root)
+	if err != nil {
+		return CodeDiff{}, err
 	}
 	diff, err := gitDiff(root, spec, excl...)
 	if err != nil {
-		return nil, err
+		return CodeDiff{}, err
 	}
+	return CodeDiff{Text: diff, root: root, excl: excl}, nil
+}
+
+// Findings runs DocDrift's two scans over the collected diff.
+func (d CodeDiff) Findings() ([]DocDriftFinding, error) {
+	root, excl, diff := d.root, d.excl, d.Text
 	if diff == "" {
 		return nil, nil
 	}

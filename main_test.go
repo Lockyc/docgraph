@@ -1043,21 +1043,30 @@ func setupDriftRepoMain(t *testing.T) (dir, root, head string) {
 	return dir, root, head
 }
 
-// TestDocDriftAlreadyNaggedSkipsScan pins the loop-guard SHORT-CIRCUIT: once a
-// HEAD has been nagged, every remaining path returns 0, so the base resolution
-// and the diff must not run at all. Asserted structurally rather than by timing:
-// the memoized base is poisoned with an unresolvable ref between the two runs,
-// which would make a still-scanning second run exit 2 on the git error.
-func TestDocDriftAlreadyNaggedSkipsScan(t *testing.T) {
+// TestDocDriftSameHeadNewFindingBlocks pins that the same-HEAD shortcut is keyed
+// on what was scanned, not on HEAD alone: an uncommitted removal made after a nag
+// at the same HEAD must block, or on a trunk the next commit empties the
+// worktree diff and the finding is never raised.
+func TestDocDriftSameHeadNewFindingBlocks(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	dir, root, head := setupDriftRepoMain(t)
-
-	if code := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard); code != 2 {
-		t.Fatalf("first bare run must block -> want exit 2, got %d", code)
+	dir := setupRepoMain(t, map[string]string{
+		"x.go": "type OldWidget struct{}\ntype OtherWidget struct{}\n", "CLAUDE.md": "OldWidget and OtherWidget.\n",
+	})
+	if out, err := exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base").CombinedOutput(); err != nil {
+		t.Fatalf("commit: %v\n%s", err, out)
 	}
-	writeDocDriftBase(root, head, "definitely-not-a-ref")
-	if code := runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard); code != 0 {
-		t.Fatalf("already nagged -> want exit 0 without scanning, got %d", code)
+	run := func() int { return runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard) }
+
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("type OtherWidget struct{}\n"), 0o644)
+	if code := run(); code != 2 {
+		t.Fatalf("first nag must block -> want 2, got %d", code)
+	}
+	if code := run(); code != 0 {
+		t.Fatalf("same HEAD, same diff -> want 0, got %d", code)
+	}
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("package x\n"), 0o644)
+	if code := run(); code != 2 {
+		t.Fatalf("same HEAD, new uncommitted finding -> want 2, got %d", code)
 	}
 }
 
