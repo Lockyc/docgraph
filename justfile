@@ -68,6 +68,11 @@ release notes="RELEASE_NOTES.md":
       echo "✗ tag ${tag} already exists — bump VERSION before releasing" >&2
       exit 1
     fi
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse dev)" ]; then
+      echo "✗ HEAD is not dev — VERSION is read from this checkout but dev is what ships;" >&2
+      echo "  release from an up-to-date dev checkout." >&2
+      exit 1
+    fi
     just gate
     git push origin dev
     # main only ever fast-forwards to a release commit. Both ref updates are
