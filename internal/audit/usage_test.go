@@ -160,6 +160,22 @@ func TestLogRunAppendsJSONL(t *testing.T) {
 	}
 }
 
+// The log can hold leak match text (level 3), so it is created owner-only.
+func TestLogRunCreatesOwnerOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.jsonl")
+	rec := BuildRecord("run", "/a", "2.1.0", 1, sampleReport, sampleLeaks, allChecks(), 3, time.Now())
+	if err := LogRun(path, rec); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("usage log mode = %o, want 600", perm)
+	}
+}
+
 func TestLogRunBadPathErrsButDoesNotPanic(t *testing.T) {
 	// Parent is a regular file, so MkdirAll under it must fail — LogRun returns the
 	// error (the caller swallows it; a gate never fails because the log is unwritable).
