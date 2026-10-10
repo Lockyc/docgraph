@@ -1025,7 +1025,7 @@ func readStopPayload(r io.Reader) stopPayload {
 // and often the checkout, so a changed path counts only if this session (or one of
 // its subagents) edited it with an edit tool or committed it — see
 // readSessionWork. Without a session id (a manual run) the change set is the
-// working tree alone, unfiltered.
+// working tree alone, unfiltered, and nothing is remembered between runs.
 //
 // Each (doc, path) pair blocks once per session; the seen set accumulates, so a
 // file the agent keeps editing does not re-nag every turn.
@@ -1228,9 +1228,10 @@ const coversSessionMaxAge = 14 * 24 * time.Hour
 // coversSessionPath keys a session's state by the repo's shared git dir, not the
 // worktree root: a session that moves into a linked worktree is still one
 // session, and a pair raised in the main checkout must not block again there.
+// No session (a manual run) has no state: "" reports every finding, like --range.
 func coversSessionPath(root, session string) string {
 	if session == "" {
-		session = "\x00no-session"
+		return ""
 	}
 	if b, err := audit.GitCmd(root, "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
 		root = strings.TrimSpace(string(b))

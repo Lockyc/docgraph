@@ -1517,6 +1517,10 @@ func TestDocDriftCoversNoPayloadIsWorkingTree(t *testing.T) {
 	if code != 2 || !strings.Contains(msg, "src/dirty.go") || strings.Contains(msg, "src/committed.go") {
 		t.Fatalf("want a block naming only the uncommitted file, got %d:\n%s", code, msg)
 	}
+	// A manual run keeps no seen set: the same finding is reported every run.
+	if code, msg := r.stop(""); code != 2 || !strings.Contains(msg, "src/dirty.go") {
+		t.Fatalf("no payload, second run -> want the same block again, got %d:\n%s", code, msg)
+	}
 }
 
 // --range is the deterministic manual check: that spec, no state, every run.
