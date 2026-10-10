@@ -11,11 +11,10 @@
 # job (a non-interactive curl|bash must not silently edit global config). Never uses `just`.
 set -e
 
-# The /v2 suffix is Go's semantic import versioning, not decoration: a module at
-# major >=2 MUST declare it, or the proxy rejects every v2 tag and `@latest`
-# silently falls back to the newest v1 — which is how the published install path
-# broke once already. It is also the go.mod module line verbatim, so the IN_REPO
-# grep below and the @latest install stay one source.
+# The /vN suffix is Go's semantic import versioning: a module at major >=2 must
+# declare it, or the proxy rejects its tags and `@latest` falls back to the newest
+# lower major. It is also the go.mod module line verbatim, so the IN_REPO grep
+# below and the @latest install stay one source.
 MODULE="github.com/lockyc/docgraph/v3"
 
 command -v go >/dev/null 2>&1 || {
