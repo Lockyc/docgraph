@@ -96,8 +96,8 @@ func mkOrphanRepo(t *testing.T) string {
 		os.MkdirAll(filepath.Dir(full), 0o755)
 		os.WriteFile(full, []byte(c), 0o644)
 	}
-	// CLAUDE.md and docs/orphan.md now each need a frontmatter block (Task 5's
-	// mandatory rule), which would otherwise make both metadata islands too — give
+	// CLAUDE.md and docs/orphan.md each need a frontmatter block (it is
+	// mandatory), which would otherwise make both metadata islands too — give
 	// them a mutual frontmatter `see-also` edge to stay clean on that check. A
 	// frontmatter edge doesn't feed content-graph reachability (stripped before link
 	// scanning), so docs/orphan.md stays a genuine content-graph orphan below.
@@ -146,7 +146,7 @@ func mkMetadataIslandRepo(t *testing.T) string {
 		os.MkdirAll(filepath.Dir(full), 0o755)
 		os.WriteFile(full, []byte(c), 0o644)
 	}
-	// CLAUDE.md now needs a frontmatter block itself (Task 5's mandatory rule), which
+	// CLAUDE.md needs a frontmatter block itself (it is mandatory), which
 	// would make IT a second metadata island too unless it carries a real doc->doc
 	// edge. Point that edge at README.md (frontmatter-exempt by basename, so it
 	// doesn't need its own block) rather than at docs/a.md, so the island under test

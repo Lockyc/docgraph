@@ -63,7 +63,7 @@ func (s refSource) read(rel string) (string, error) {
 }
 func (s refSource) label() string { return s.gitDir }
 
-// BuildContentGraph is the working-tree entry point (unchanged signature).
+// BuildContentGraph is the working-tree entry point.
 func BuildContentGraph(repoRoot string, tracked []string, trackedSet, roots map[string]bool, globs []string) ContentGraph {
 	return buildContentGraph(worktreeSource{root: repoRoot}, tracked, trackedSet, roots, globs)
 }
@@ -101,7 +101,7 @@ func buildContentGraph(src fileSource, tracked []string, trackedSet, roots map[s
 		}
 		// Content-graph edges are prose references only — strip any leading
 		// frontmatter block before scanning so a frontmatter doc->doc edge
-		// (metadata graph, Task 4) never leaks in as a link or mention here.
+		// (metadata graph) never leaks in as a link or mention here.
 		_, body, _ := SplitFrontmatter(content)
 		for _, link := range extractLinks(body) {
 			if !isLocalMd(link.Target) {
@@ -144,9 +144,9 @@ func (g ContentGraph) Islands() []string {
 // isMetadataEdge reports whether e joins two docs structurally. It is an edge to
 // a tracked doc (EdgeDoc) whose rel is neither `covers` (code ownership) nor
 // `source` (external provenance) — the two rels that by nature point outside the
-// doc→doc structure. This operationalizes the spec's part-of/supersedes/
-// see-also/depends-on set while also admitting runbook-for and custom doc→doc
-// rels, and excluding covers/source even when they happen to target a .md.
+// doc→doc structure. So part-of, supersedes, see-also, depends-on, runbook-for
+// and custom doc→doc rels all count, and covers/source never do, even when they
+// happen to target a .md.
 func isMetadataEdge(e Edge) bool {
 	if ClassifyTarget(e.To) != EdgeDoc {
 		return false

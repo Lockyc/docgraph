@@ -32,21 +32,19 @@ func TestContentGraphIslands(t *testing.T) {
 	}
 }
 
-// TestContentGraphFrontmatterEdgeNotMention asserts the Task 3 pivot invariant
+// TestContentGraphFrontmatterEdgeNotMention asserts the two-graphs invariant
 // directly at the BuildContentGraph level (graph_test.go's peers exercise the
 // function directly rather than through Audit): a.md's ONLY reference to
 // docs/target.md is a bare (no "./") frontmatter doc->doc edge
-// ("to: docs/target.md"); a.md's body has no prose reference at all. Before
-// the Task 3 fix, BuildContentGraph scans the doc's whole raw content —
-// frontmatter included — with mentionsPath, and the raw YAML text
-// "to: docs/target.md" satisfies mentionsPath's word-boundary check (the byte
-// before "docs/target.md" is a space, not a path-word byte), so it wrongly
-// creates a "mention" content edge and docs/target.md is not an island. This
+// ("to: docs/target.md"); a.md's body has no prose reference at all. Scanning
+// the doc's whole raw content — frontmatter included — with mentionsPath would
+// match the raw YAML text "to: docs/target.md" (the byte before
+// "docs/target.md" is a space, not a path-word byte), wrongly creating a
+// "mention" content edge so docs/target.md is not an island. This
 // is the bare-target case TestFrontmatterEdgeAloneIsIsland (audit_test.go)
 // deliberately does NOT cover: that test uses "./docs/leaf.md" specifically so
-// the preceding "/" defeats the same word-boundary check, which means it
-// passes on the unfixed code too and doesn't discriminate the bug this test
-// targets.
+// the preceding "/" defeats the same word-boundary check, so it would pass
+// even with frontmatter scanned and doesn't discriminate this case.
 func TestContentGraphFrontmatterEdgeNotMention(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		"README.md":      "root\n[a](docs/a.md)\n",

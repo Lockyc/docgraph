@@ -100,7 +100,7 @@ func TestFrontmatterFindings(t *testing.T) {
 		t.Fatalf("Audit: %v", err)
 	}
 	// Expect: bad.md (missing type) + broke.md (malformed) + plain.md (no block at
-	// all, non-README — required under the Task 5 rule). good.md is clean; CLAUDE.md
+	// all, non-README — the block is required). good.md is clean; CLAUDE.md
 	// carries a real block so it isn't incidental noise in a test about the other cases.
 	got := map[string]string{}
 	for _, f := range rep.FrontmatterFindings {
@@ -120,8 +120,8 @@ func TestFrontmatterFindings(t *testing.T) {
 	}
 }
 
-// TestFrontmatterRequiredExceptReadme is the Task 5 pivot: a frontmatter block
-// is now required on every tracked, non-ignored doc EXCEPT a README.md (any
+// TestFrontmatterRequiredExceptReadme pins that a frontmatter block is
+// required on every tracked, non-ignored doc EXCEPT a README.md (any
 // directory, matched by basename) — GitHub renders leading YAML as a metadata
 // table in every directory view, so READMEs stay exempt everywhere.
 func TestFrontmatterRequiredExceptReadme(t *testing.T) {
@@ -192,16 +192,12 @@ func TestAuditReportsCycle(t *testing.T) {
 	}
 }
 
-// TestFrontmatterEdgeAloneIsIsland asserts the Task 3 pivot invariant: a
+// TestFrontmatterEdgeAloneIsIsland asserts the two-graphs invariant: a
 // frontmatter typed edge (`links: [{rel: ..., to: ...}]`) is NOT a content
 // edge. hub.md is root-reachable; leaf.md is linked nowhere by markdown link
 // or path-mention — only referenced via hub.md's frontmatter see-also edge —
 // so under the content-graph island rule leaf.md has zero inbound content
-// edges and must be an orphan. (Superseded from a pre-pivot pair of tests
-// that asserted the opposite — that a frontmatter edge alone made a doc
-// reachable, back when reachability was one union BFS over links, mentions,
-// AND frontmatter edges. Frontmatter edges now feed the metadata graph
-// instead, Task 4.)
+// edges and must be an orphan; frontmatter edges feed the metadata graph.
 //
 // The "./" prefix on the edge target is deliberate, not cosmetic: without it,
 // the raw "to: docs/leaf.md" YAML text in the frontmatter block itself would
