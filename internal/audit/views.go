@@ -30,7 +30,7 @@ func RepoDocs(repoRoot string, ignores []string) (map[string]*Doc, error) {
 // CoversOf returns the docs (sorted, repo-relative) that declare a `covers` edge
 // resolving to target, or to a directory that contains target. target is
 // normalized repo-root-relative; a doc covering a directory covers every path
-// under it.
+// under it, and one covering `.` covers the whole repo.
 func CoversOf(docs map[string]*Doc, target string) []string {
 	want := filepath.ToSlash(filepath.Clean(strings.TrimSpace(target)))
 	var out []string
@@ -43,7 +43,7 @@ func CoversOf(docs map[string]*Doc, target string) []string {
 				continue
 			}
 			cov := ResolveEdgeTarget(e.To)
-			if cov == want || strings.HasPrefix(want, cov+"/") {
+			if cov == "." || cov == want || strings.HasPrefix(want, cov+"/") {
 				out = append(out, src)
 				break
 			}

@@ -40,6 +40,19 @@ func TestCoversOf(t *testing.T) {
 	}
 }
 
+// A covers edge to the repo root (`.` or `./`) covers every path in the repo.
+func TestCoversOfRepoRoot(t *testing.T) {
+	docs := map[string]*Doc{
+		"CLAUDE.md": {Links: []Edge{{Rel: "covers", To: "."}}},
+		"docs/a.md": {Links: []Edge{{Rel: "covers", To: "./"}}},
+	}
+	for _, target := range []string{"main.go", "src/auth/login.go"} {
+		if got := CoversOf(docs, target); !reflect.DeepEqual(got, []string{"CLAUDE.md", "docs/a.md"}) {
+			t.Errorf("CoversOf(%s) = %v, want [CLAUDE.md docs/a.md]", target, got)
+		}
+	}
+}
+
 func TestIndexMarkdown(t *testing.T) {
 	docs := map[string]*Doc{
 		"docs/run.md": {Type: "runbook", Title: "Restore", Description: "recover it"},
