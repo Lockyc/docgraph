@@ -246,7 +246,7 @@ func hookScript(skip string, ignores []string, noFootgun, noCovers bool) string 
 		args += " --skip " + skip
 	}
 	for _, g := range ignores {
-		args += " --ignore '" + g + "'"
+		args += " --ignore " + shellQuote(g)
 	}
 	stateLine := `"$bin"` + args + ` .`
 	footgun := ""
@@ -281,6 +281,12 @@ if ! bin="$(docgraph_bin)"; then
 fi
 ` + stateLine + footgun + covers + `
 `
+}
+
+// shellQuote single-quotes s for bash, closing and reopening the quotes around
+// each embedded `'`, so a glob lands in the generated hook as one literal word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 var checkNames = []string{"orphans", "broken", "untracked", "leaks", "frontmatter", "edges", "disconnected"}

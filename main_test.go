@@ -410,6 +410,22 @@ func TestHookScriptRunsBothChecks(t *testing.T) {
 	}
 }
 
+// An --ignore glob is written into a tracked hook: one containing a quote must
+// stay a single literal word, never a syntax error or an injected command.
+func TestHookScriptQuotesIgnoreGlobs(t *testing.T) {
+	globs := []string{"it's/**", "x'; touch PWNED; '"}
+	s := hookScript("", globs, false, false)
+	if out, err := exec.Command("bash", "-n", "-c", s).CombinedOutput(); err != nil {
+		t.Fatalf("generated hook is not valid bash: %v\n%s", err, out)
+	}
+	for _, g := range globs {
+		out, err := exec.Command("bash", "-c", "printf '%s' "+shellQuote(g)).Output()
+		if err != nil || string(out) != g {
+			t.Fatalf("shellQuote(%q) round-trips as %q (err %v)", g, out, err)
+		}
+	}
+}
+
 func TestHookScriptNoFootgunDrift(t *testing.T) {
 	s := hookScript("", nil, true, false)
 	if strings.Contains(s, "footgun-drift") {
