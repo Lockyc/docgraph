@@ -26,8 +26,8 @@ func (c LogConfig) Active() bool { return c.Enabled && c.Level >= 1 && c.Level <
 
 // UsageRecord is one JSONL line per docgraph run. Level gates the optional detail:
 // Files (paths, level ≥2) and Findings (paths + broken targets + leak MATCH TEXT,
-// level 3) are the escalating tiers. Cmd is the seam for a future `docgraph drift`
-// run to log through the same file with the same shape.
+// level 3) are the escalating tiers. Cmd names the subcommand; only `run` logs
+// today, and one that starts logging uses the same file and shape.
 type UsageRecord struct {
 	TS       string              `json:"ts"`
 	Version  string              `json:"version"`

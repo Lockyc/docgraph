@@ -302,9 +302,9 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   - **Best-effort, never fails the run.** `maybeLog` swallows every error; the exit
     code is decided by findings alone. `DOCGRAPH_NO_LOG=1` is the one-off kill switch
     (mirrors `DOC_DRIFT_OFF`).
-  - **`cmd` is a seam, not decoration.** Each record carries `"cmd":"run"`. It exists
-    so a future `docgraph drift` subcommand logs through the *same* file with the
-    *same* record shape — trends span both. Keep the field when adding a subcommand.
+  - **`cmd` is a seam, not decoration.** Every record carries `cmd`; only `run` logs
+    today. A subcommand that starts logging uses the *same* file and record shape, so
+    trends span commands — keep the field.
 - **`footgun-drift` is a nag, not a judge — so it flags EVERY added
   declaration.** It detects a footgun *declaration* (a line-leading `Footgun:` or a
   bolded mid-line footgun lead, not a cross-reference or bare container heading)
