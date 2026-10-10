@@ -1585,6 +1585,19 @@ func TestDocDriftCoversIgnoresOtherSessionsCommits(t *testing.T) {
 	}
 }
 
+// An edit to a same-named file elsewhere — another repo, another directory —
+// does not make another session's change to this repo's path this session's.
+func TestDocDriftCoversEditMatchesWholePath(t *testing.T) {
+	r := newSessionRepo(t)
+	r.toolUse("Edit", fmt.Sprintf(`{"file_path":%q}`, filepath.Join(t.TempDir(), "src/theirs.go")))
+	r.toolUse("Edit", fmt.Sprintf(`{"file_path":%q}`, filepath.Join(r.dir, "vendor/src/theirs.go")))
+	r.write("src/theirs.go", "package src\n")
+	r.commitAt("", "another session's commit")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("only same-suffix edits elsewhere -> want 0, got %d\n%s", code, msg)
+	}
+}
+
 // Edits made by this session's subagents count as this session's.
 func TestDocDriftCoversCountsSubagentEdits(t *testing.T) {
 	r := newSessionRepo(t)

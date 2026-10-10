@@ -1062,7 +1062,7 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 	for _, f := range findings {
 		var paths []string
 		for _, path := range f.Paths {
-			if filtered && !mine[path] && !bytes.Contains(work.edited, []byte("/"+path+"\n")) {
+			if filtered && !mine[path] && !work.edited[realPath(filepath.Join(root, path))] {
 				continue // someone else's change: this session neither edited nor committed it
 			}
 			if k := f.Doc + "\t" + path; !st.seen[k] {
@@ -1099,12 +1099,12 @@ func sessionRevs(root, head string, st coversSession) []string {
 	return nil
 }
 
-// sessionWork is what a session's transcript says it changed itself: the raw
-// path inputs of its edit-tool calls, and the commits its tool output shows it
+// sessionWork is what a session's transcript says it changed itself: the files
+// its edit-tool calls wrote, and the commits its tool output shows it
 // making. Reading, grepping or prompting about a file is not changing it.
 type sessionWork struct {
-	edited  []byte   // edit-tool file_path/notebook_path inputs, newline-joined
-	commits []string // shas from `git commit`-style "[branch sha] subject" output
+	edited  map[string]bool // edit-tool file_path/notebook_path inputs, as realPath
+	commits []string        // shas from `git commit`-style "[branch sha] subject" output
 }
 
 // editTools are the tool calls whose path input is a file the session wrote.
@@ -1119,6 +1119,7 @@ var commitLine = regexp.MustCompile(`\[[^\]\s"\\]+(?: \([a-z-]+\))? ([0-9a-f]{7,
 // session neither edited nor committed was changed by someone else sharing the
 // branch or the checkout, so it is not this session's to reconcile.
 func readSessionWork(transcript string) (w sessionWork, ok bool) {
+	w.edited = map[string]bool{}
 	files := []string{transcript}
 	sub, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(transcript, ".jsonl"), "subagents", "*.jsonl"))
 	files = append(files, sub...)
@@ -1156,7 +1157,11 @@ func readSessionWork(transcript string) (w sessionWork, ok bool) {
 				if json.Unmarshal(line, &rec) == nil && json.Unmarshal(rec.Message.Content, &items) == nil {
 					for _, it := range items {
 						if it.Type == "tool_use" && editTools[it.Name] {
-							w.edited = append(w.edited, it.Input.FilePath+"\n"+it.Input.NotebookPath+"\n"...)
+							for _, p := range []string{it.Input.FilePath, it.Input.NotebookPath} {
+								if p != "" {
+									w.edited[realPath(p)] = true
+								}
+							}
 						}
 					}
 				}
@@ -1168,6 +1173,20 @@ func readSessionWork(transcript string) (w sessionWork, ok bool) {
 		f.Close()
 	}
 	return w, true
+}
+
+// realPath canonicalizes an absolute path so an edit-tool path and a repo path
+// compare equal across symlinked prefixes (macOS /var vs /private/var). A path
+// that no longer exists (deleted since) resolves through its parent directory.
+func realPath(p string) string {
+	p = filepath.Clean(p)
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	if d, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+		return filepath.Join(d, filepath.Base(p))
+	}
+	return p
 }
 
 // committedPaths returns the paths the given commits changed. A sha the repo
