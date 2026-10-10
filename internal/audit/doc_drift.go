@@ -293,6 +293,29 @@ func DocDriftDiff(root, spec string) (CodeDiff, error) {
 	return CodeDiff{Text: diff, root: root, excl: excl}, nil
 }
 
+// SessionDocDriftDiff collects the code-side patches of the commits revArgs
+// selects — first-parent, non-merge, the same selection CommitChanges makes for
+// covers drift — followed by the uncommitted diff against HEAD. It is the trunk's
+// change set: there the merge-base is HEAD itself, so a plain diff would see only
+// what the session has not yet committed.
+func SessionDocDriftDiff(root string, revArgs []string) (CodeDiff, error) {
+	excl, err := ignoreExcludes(root)
+	if err != nil {
+		return CodeDiff{}, err
+	}
+	args := append([]string{"log", "--first-parent", "--no-merges", "-p", "--format="}, revArgs...)
+	args = append(append(append(args, "--"), nonCodePathspec...), excl...)
+	committed, err := GitCmd(root, args...).Output()
+	if err != nil {
+		return CodeDiff{}, err
+	}
+	worktree, err := gitDiff(root, "HEAD", excl...)
+	if err != nil {
+		return CodeDiff{}, err
+	}
+	return CodeDiff{Text: string(committed) + worktree, root: root, excl: excl}, nil
+}
+
 // Findings runs DocDrift's two scans over the collected diff.
 func (d CodeDiff) Findings() ([]DocDriftFinding, error) {
 	root, excl, diff := d.root, d.excl, d.Text

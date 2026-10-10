@@ -939,7 +939,12 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	head := strings.TrimSpace(string(h))
 
-	diff, err := audit.DocDriftDiff(root, docDriftDiffBase(root, head))
+	var diff audit.CodeDiff
+	if spec := docDriftDiffBase(root, head); spec == "HEAD" && payload.SessionID != "" {
+		diff, err = audit.SessionDocDriftDiff(root, trunkSessionRevs(root, head, payload))
+	} else {
+		diff, err = audit.DocDriftDiff(root, spec)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
@@ -964,6 +969,23 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	return reportDocDrift(stderr, fresh, sessionCoversDrift(root, head, payload, stderr))
+}
+
+// trunkSessionRevs selects the commits this session made since its previous
+// Stop — on its first Stop, since the transcript's first timestamp — for the
+// trunk's symbol scan. It reads the state sessionCoversDrift keeps and must run
+// before that function advances it. An empty selection (HEAD unmoved since the
+// last Stop) is returned as a range that selects nothing, leaving the working
+// tree alone.
+func trunkSessionRevs(root, head string, p stopPayload) []string {
+	st, known := readCoversSession(root, p.SessionID)
+	if !known {
+		st.since = transcriptStart(p.TranscriptPath)
+	}
+	if rev := sessionRevs(root, head, st); rev != nil {
+		return rev
+	}
+	return []string{head + ".." + head}
 }
 
 // reportDocDrift prints whatever was found and returns the Stop hook's exit code.
@@ -1311,7 +1333,8 @@ func writeCoversSession(root, session string, st coversSession, first bool) {
 
 // docDriftDiffBase resolves what to `git diff` against: the closest integration
 // branch's merge-base if this work sits ahead of it, else "HEAD" (on a trunk
-// branch the change set IS the working tree — uncommitted only). Memoized per
+// branch, where runDocDrift scans the session's commits plus the working tree
+// instead — see trunkSessionRevs). Memoized per
 // (repo, HEAD), because audit.ClosestBase costs a merge-base + a rev-list per
 // integration-branch candidate — a dozen git subprocesses, ~85% of a warm
 // doc-drift run, re-derived on every Stop hook to recompute an answer that only

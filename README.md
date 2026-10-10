@@ -32,7 +32,7 @@ docgraph has four independent modes, each with its own trigger and scope:
 | **Whole-state checks** | `docgraph [path]` | the current tree | pre-push / CI | **yes** — exit 1 on any finding |
 | **`footgun-drift`** | `docgraph footgun-drift` | what a push *adds* | pre-push (advisory rider) | no — nags, always exit 0 |
 | **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
-| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted); the session's changes for covers drift | agent Stop hook | **yes** — exit 2, once per finding |
+| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted), or on a trunk the session's commits + worktree; the session's changes for covers drift | agent Stop hook | **yes** — exit 2, once per finding |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
 vocabulary), and the doc-graph **views** `covers` / `index` / `stale` / `graph`
@@ -330,8 +330,10 @@ back.
 
 It scans a **working-tree-inclusive** range — base→worktree, covering committed
 *and* uncommitted changes, because it fires before a commit necessarily exists.
-On a trunk branch the base is `HEAD` (uncommitted-only); on a feature branch it's
-the closest integration branch's merge-base (the whole branch so far). It flags
+On a feature branch the base is the closest integration branch's merge-base (the
+whole branch so far). On a trunk branch it is the session's own change set — the
+commits since its previous Stop, as for covers drift below, plus the working tree;
+without a session (a manual run), the working tree alone. It flags
 two mechanical staleness classes, and both **block** the turn from ending:
 
 1. **Dangling reference** — a symbol whose *definition* was removed in the diff

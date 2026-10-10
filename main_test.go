@@ -1555,6 +1555,40 @@ func TestDocDriftCoversNoPayloadIsWorkingTree(t *testing.T) {
 	}
 }
 
+// On a trunk the symbol scan covers what the session committed since its last
+// Stop, not only the uncommitted tree — but never commits from before the session.
+func TestDocDriftTrunkScansSessionCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("src/w.go", "package src\n\ntype OldWidget struct{}\ntype NewWidget struct{}\ntype MidWidget struct{}\n")
+	r.write("docs/widgets.md", "---\ntype: reference\n---\n\nOldWidget, NewWidget, MidWidget and PreWidget.\n")
+	r.write("src/pre.go", "package src\n\ntype PreWidget struct{}\n")
+	r.commitAt("2020-01-02T00:00:00Z", "widgets")
+	r.write("src/pre.go", "package src\n")
+	r.commitAt("2020-01-03T00:00:00Z", "drop PreWidget before the session")
+
+	r.named("src/w.go")
+	r.write("src/w.go", "package src\n\ntype NewWidget struct{}\ntype MidWidget struct{}\n")
+	r.commitAt("", "drop OldWidget in the session")
+	code, msg := r.stop("s1")
+	if code != 2 || !strings.Contains(msg, "'OldWidget'") || strings.Contains(msg, "'PreWidget'") {
+		t.Fatalf("committed-this-session removal -> want 2 naming only OldWidget, got %d:\n%s", code, msg)
+	}
+
+	r.write("src/w.go", "package src\n\ntype MidWidget struct{}\n")
+	code, msg = r.stop("s1")
+	if code != 2 || !strings.Contains(msg, "'NewWidget'") || strings.Contains(msg, "'PreWidget'") {
+		t.Fatalf("uncommitted removal -> want 2 naming NewWidget, got %d:\n%s", code, msg)
+	}
+
+	r.commitAt("", "drop NewWidget")
+	r.write("src/w.go", "package src\n")
+	r.commitAt("", "drop MidWidget")
+	code, msg = r.stop("s1")
+	if code != 2 || !strings.Contains(msg, "'MidWidget'") || strings.Contains(msg, "'PreWidget'") {
+		t.Fatalf("commits since the last Stop -> want 2 naming MidWidget, got %d:\n%s", code, msg)
+	}
+}
+
 // --range is the deterministic manual check: that spec, no state, every run.
 func TestDocDriftCoversRangeIsUnguarded(t *testing.T) {
 	r := newSessionRepo(t)

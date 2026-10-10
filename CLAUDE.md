@@ -41,7 +41,8 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   removed symbol and no changed literal); `doc-drift` runs the same join at Stop
   over the session's own changes. A repo with no `covers` edges never sees it.
 - **`docgraph doc-drift`** — a **Stop-hook, blocking** subcommand: scans the
-  branch's working-tree-inclusive diff (base→worktree, committed + uncommitted)
+  branch's working-tree-inclusive diff (base→worktree, committed + uncommitted;
+  on a trunk, the session's commits since its last Stop + the worktree)
   for two mechanical staleness classes — a **dangling reference** (a symbol whose
   definition was removed but a tracked doc still names it) and **anchored value
   drift** (a constant whose numeric value changed while a doc still names the
