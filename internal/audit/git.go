@@ -229,7 +229,10 @@ func fileAtRev(root, rev, path string) (string, bool) {
 }
 
 // ClosestBase returns the merge-base of head with the nearest integration branch
-// (fewest commits in base..head). Used only for a new-branch push with no upstream.
+// (fewest commits in base..head). Two callers: the pre-push range for a new
+// branch with no upstream (rangesFromPrePushStdin), and doc-drift's diff base
+// (docDriftDiffBase), where returning head itself — on a trunk — narrows the
+// symbol scan to the uncommitted working tree.
 func ClosestBase(root, head string) (string, bool) {
 	best, bestCnt := "", -1
 	for _, cand := range []string{"origin/HEAD", "main", "master", "dev", "develop", "trunk"} {
