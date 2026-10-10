@@ -415,7 +415,7 @@ docs/" with zero config.
 ## Layout & commands
 
 - `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the seven
-  whole-state checks), `runFootgunDrift(args, stdout, stderr) int` and
+  whole-state checks), `runFootgunDrift(args, stdin, stdout, stderr) int` and
   `runCoversDrift(args, stdin, stdout, stderr) int` (the two diff-scoped
   advisory pre-push subcommands — `runCoversDrift` checks `DOCGRAPH_COVERS_OFF`,
   resolves ranges from `--range` or `rangesFromPrePushStdin`, calls

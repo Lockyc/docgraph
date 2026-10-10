@@ -746,12 +746,28 @@ func TestFootgunDriftSubcommandRangeIsAdvisory(t *testing.T) {
 		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
 	)
 	var out, errb bytes.Buffer
-	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
 	if code != 0 {
 		t.Fatalf("footgun-drift is advisory — want exit 0, got %d\n%s", code, out.String())
 	}
 	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
 		t.Fatalf("want a FOOTGUN finding naming the line, got:\n%s", out.String())
+	}
+}
+
+// Without --range the ranges come from the ref lines git feeds a pre-push hook.
+func TestFootgunDriftSubcommandReadsPrePushStdin(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"CLAUDE.md": "intro\n"},
+		map[string]string{"CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
+	)
+	stdin := strings.NewReader(fmt.Sprintf("refs/heads/dev %s refs/heads/dev %s\n", head, base))
+	var out, errb bytes.Buffer
+	if code := runFootgunDrift([]string{dir}, stdin, &out, &errb); code != 0 {
+		t.Fatalf("footgun-drift is advisory — want exit 0, got %d\n%s", code, errb.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
+		t.Fatalf("want a FOOTGUN finding from the stdin range, got:\n%s", out.String())
 	}
 }
 
@@ -762,7 +778,7 @@ func TestFootgunDriftSubcommandSilentWhenNoDeclaration(t *testing.T) {
 		map[string]string{"CLAUDE.md": "intro\n\njust some added prose, no declaration.\n"},
 	)
 	var out, errb bytes.Buffer
-	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, &out, &errb)
+	code := runFootgunDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d\n%s", code, out.String())
 	}
@@ -774,7 +790,7 @@ func TestFootgunDriftSubcommandSilentWhenNoDeclaration(t *testing.T) {
 func TestFootgunDriftOffEnv(t *testing.T) {
 	t.Setenv("DOCGRAPH_FOOTGUN_OFF", "1")
 	var out, errb bytes.Buffer
-	code := runFootgunDrift([]string{"--range", "x..y", "."}, &out, &errb)
+	code := runFootgunDrift([]string{"--range", "x..y", "."}, strings.NewReader(""), &out, &errb)
 	if code != 0 {
 		t.Fatalf("DOCGRAPH_FOOTGUN_OFF must short-circuit to 0, got %d", code)
 	}
@@ -1704,7 +1720,7 @@ func TestBadFlagExits2WithoutRunning(t *testing.T) {
 	for name, f := range map[string]func([]string, io.Writer, io.Writer) int{
 		"run":           run,
 		"install-hook":  runInstallHook,
-		"footgun-drift": func(a []string, o, e io.Writer) int { return runFootgunDrift(a, o, e) },
+		"footgun-drift": func(a []string, o, e io.Writer) int { return runFootgunDrift(a, strings.NewReader(""), o, e) },
 	} {
 		var out, errb bytes.Buffer
 		if code := f([]string{dir, "--skp", "leaks"}, &out, &errb); code != 2 {

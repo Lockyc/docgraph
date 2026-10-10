@@ -48,7 +48,7 @@ func main() {
 		case "leaks-rules":
 			os.Exit(runLeaksRules(args[1:], os.Stdout, os.Stderr))
 		case "footgun-drift":
-			os.Exit(runFootgunDrift(args[1:], os.Stdout, os.Stderr))
+			os.Exit(runFootgunDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "covers-drift":
 			os.Exit(runCoversDrift(args[1:], os.Stdin, os.Stdout, os.Stderr))
 		case "doc-drift":
@@ -696,7 +696,7 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 // --range it uses that range; otherwise it reads pre-push ref lines from stdin
 // (`<localref> <localsha> <remoteref> <remotesha>`), deriving remotesha..localsha
 // per ref (a new branch — zero remotesha — falls back to the closest base).
-func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
+func runFootgunDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if os.Getenv("DOCGRAPH_FOOTGUN_OFF") != "" {
 		return 0
 	}
@@ -724,7 +724,7 @@ func runFootgunDrift(args []string, stdout, stderr io.Writer) int {
 		}
 		ranges = []audit.RevRange{{Base: b, Head: h}}
 	} else {
-		ranges = rangesFromPrePushStdin(os.Stdin, root)
+		ranges = rangesFromPrePushStdin(stdin, root)
 	}
 	if len(ranges) == 0 {
 		return 0
