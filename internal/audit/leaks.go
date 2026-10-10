@@ -326,12 +326,12 @@ func (c LeakConfig) compile() (compiledLeaks, error) {
 	return cl, nil
 }
 
-// looksBinary reports whether a head chunk contains a NUL byte.
 // binaryProbeBytes is how much of a file decides whether it is binary. It is
 // also how much readTextFile reads before committing to the rest, so the two can
 // never disagree about which bytes the decision was made on.
 const binaryProbeBytes = 8000
 
+// looksBinary reports whether a head chunk contains a NUL byte.
 func looksBinary(b []byte) bool {
 	if len(b) > binaryProbeBytes {
 		b = b[:binaryProbeBytes]

@@ -433,19 +433,6 @@ func loadLogConfig(path string) (audit.LogConfig, error) {
 	return fc.Log, err
 }
 
-// parseSkip returns the set of checks to RUN: every check by default, minus the
-// comma-separated names in s. An unknown name is an error. Enforcement is the
-// default; skipping is the explicit, per-repo exception (e.g. a nav-driven MkDocs
-// repo skips orphans). A newly-added check is enforced everywhere automatically —
-// nobody has to remember to add it to a run-list.
-// parseArgs parses flags that appear ANYWHERE in args, returning the positional
-// arguments. Go's flag package stops at the first non-flag argument, so a plain
-// fs.Parse turns `docgraph . --skip leaks` into path="." plus two ignored
-// strings: the skip is silently dropped and the check it named runs anyway. A
-// gate flag that quietly does nothing is the exact failure this tool exists to
-// prevent, and it reads as "docgraph ignored me" rather than as a usage error.
-// Re-parsing what follows each positional lets flag itself decide which tokens
-// are flag values, so `--ignore x` is never mistaken for a positional.
 // flagExit is the exit code for a parseArgs error: 0 for -h/--help (the flag
 // package already printed usage), 2 for a bad flag. Either way the command must
 // not run — on error parseArgs drops the positionals, so running would audit the
@@ -457,6 +444,14 @@ func flagExit(err error) int {
 	return 2
 }
 
+// parseArgs parses flags that appear ANYWHERE in args, returning the positional
+// arguments. Go's flag package stops at the first non-flag argument, so a plain
+// fs.Parse turns `docgraph . --skip leaks` into path="." plus two ignored
+// strings: the skip is silently dropped and the check it named runs anyway. A
+// gate flag that quietly does nothing is the exact failure this tool exists to
+// prevent, and it reads as "docgraph ignored me" rather than as a usage error.
+// Re-parsing what follows each positional lets flag itself decide which tokens
+// are flag values, so `--ignore x` is never mistaken for a positional.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	rest := args
@@ -472,6 +467,11 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
+// parseSkip returns the set of checks to RUN: every check by default, minus the
+// comma-separated names in s. An unknown name is an error. Enforcement is the
+// default; skipping is the explicit, per-repo exception (e.g. a nav-driven MkDocs
+// repo skips orphans). A newly-added check is enforced everywhere automatically —
+// nobody has to remember to add it to a run-list.
 func parseSkip(s string) (map[string]bool, error) {
 	sel := map[string]bool{}
 	for _, name := range checkNames {
@@ -786,9 +786,6 @@ func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
 	return out
 }
 
-// printFootgunDrift renders findings with the two-question remediation. This is
-// advisory (the caller exits 0): the message exists to prompt a double-check, not
-// to justify a block.
 // footgunEchoRunes caps how much of a declaration line is echoed. The file:line
 // is what makes a finding actionable — you open the file to judge it, since no
 // terminal echo tells you whether a stated rationale is real. The line itself is
@@ -808,6 +805,9 @@ func echoLine(s string) string {
 	return string(r[:footgunEchoRunes]) + "…"
 }
 
+// printFootgunDrift renders findings with the two-question remediation. This is
+// advisory (the caller exits 0): the message exists to prompt a double-check, not
+// to justify a block.
 func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
 	bar := strings.Repeat("─", 82)
 	fmt.Fprintf(w, "FOOTGUNS (%d) added in this push — ADVISORY, the push was NOT blocked. Verify each\n", len(fs))
