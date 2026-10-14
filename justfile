@@ -5,17 +5,22 @@
 default:
     @if command -v perl >/dev/null 2>&1; then just --color always --list | perl -CS -Mutf8 -lpe 'BEGIN{($w)=`stty size 2>/dev/null </dev/tty`=~/ (\d+)/; $w||=100; $col=(-t STDOUT && !exists $ENV{NO_COLOR})} s/\e\[[0-9;]*m//g unless $col; (my $v=$_)=~s/\e\[[0-9;]*m//g; if(length($v)>$w){my($o,$n)=("",0); while(length && $n<$w-1){ if($col && s/^(\e\[[0-9;]*m)//){$o.=$1}else{s/^(.)//;$o.=$1;$n++} } $_=$o."…".($col?"\e[0m":"")}'; else just --list; fi
 
+# Build the docgraph binary
+[group("build")]
 build:
     go build -o docgraph .
 
+# Run the test suite
+[group("check")]
 test:
     go test ./...
 
-# install to the Go bin dir, then exec the new binary once.
-# That exec is LOAD-BEARING, not a smoke test — see the cold-exec footgun in CLAUDE.md:
+# The exec is LOAD-BEARING, not a smoke test — see the cold-exec footgun in CLAUDE.md:
 # a freshly written binary has a new cdhash, so its FIRST exec blocks in dyld for a live
 # code-signature assessment (~1s for this binary on macOS). Absorbing it here, where you
 # are already waiting on a build, keeps it off the next doc-drift Stop hook.
+# Install to the Go bin dir (on PATH), then exec the new binary once
+[group("build")]
 install:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -23,10 +28,13 @@ install:
     bin="$(go env GOBIN)"; [ -n "$bin" ] || bin="$(go env GOPATH)/bin"
     "$bin/docgraph" version
 
+# Format all Go files in place
+[group("check")]
 fmt:
     gofmt -w .
 
-# non-mutating pre-release gate: gofmt check + vet + tests
+# Non-mutating pre-release gate: gofmt check + vet + tests
+[group("check")]
 gate:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -40,11 +48,12 @@ gate:
     go test ./...
     echo "✓ gate passed"
 
-# cut the release for the current VERSION: fast-forward main → tag v<VERSION> → GitHub release.
-# run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
+# Run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
 # NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). Not `gh
 # --generate-notes`: it summarises MERGED PRs, and this repo integrates on the trunk, so it
 # emits only a bare "Full Changelog" link — a release with no notes.
+# Cut the release for the current VERSION: fast-forward main → tag v<VERSION> → GitHub release
+[group("release")]
 release notes="RELEASE_NOTES.md":
     #!/usr/bin/env bash
     set -euo pipefail
