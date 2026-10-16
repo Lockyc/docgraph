@@ -47,9 +47,8 @@ tracked files (see [`leaks`](#leaks--the-content-scan)).
 ## Whole-state checks
 
 Seven checks run by default on `docgraph [path]`. **Everything is enforced; you
-exclude explicitly** with `--skip <check[,check]>` — nothing is opt-in, so a
-check added in a later version gates everywhere the day it lands, with no
-run-list to update. (A nav-driven MkDocs repo, for instance, runs `--skip
+exclude explicitly** with `--skip <check[,check]>`; a check added in a later
+version is enforced automatically. (A nav-driven MkDocs repo, for instance, runs `--skip
 orphans`.)
 
 The checks span **two independent doc graphs**:
@@ -74,9 +73,8 @@ or vice versa. Both are flagged.
    untracked scratch are excluded.
 2. **Disconnected** — a **metadata-graph island**: a doc that carries frontmatter
    but participates in zero doc→doc edges in *either* direction. `covers` (code
-   ownership) and `source` (external provenance) edges don't count — they point
-   out of the doc→doc structure — so a doc whose only edges are `covers`→code is
-   disconnected. Fix it with a real `part-of`/`see-also`/`depends-on` edge.
+   ownership) and `source` (external provenance) edges don't count, so a doc whose
+   only edges are `covers`→code is disconnected. Fix it with a real `part-of`/`see-also`/`depends-on` edge.
 3. **Broken links** — a `[x](y.md)` whose target doesn't exist. Checked across
    the same tracked, non-ignored `.md` set as orphans.
 4. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
@@ -102,21 +100,14 @@ docgraph schema    # prints the JSON Schema (draft 2020-12) to stdout
 Emits the [JSON Schema](https://json-schema.org/) describing valid doc
 frontmatter — the `type` / `verified` / `review` / `links` shape the
 `frontmatter` and `edges` checks enforce, plus the advisory `type` / `rel`
-vocabularies (as `x-docgraph-core-types` / `x-docgraph-core-rels`). Another tool
-(an editor, a catalog builder) validates against the same rules docgraph uses
-instead of re-encoding them. **Read-only** — never reads the repo, never part of
+vocabularies (as `x-docgraph-core-types` / `x-docgraph-core-rels`), for
+validating frontmatter in another tool (an editor, a catalog builder). **Read-only** — never reads the repo, never part of
 the gate.
 
 **Where to put frontmatter.** Frontmatter is **required on every doc except
-`README.md`** — the one basename-wide exemption. GitHub renders a leading YAML
-frontmatter block as a metadata table above the page content, so a `README.md`
-with frontmatter greets every visitor with a table of `type` and `links` rows.
-Frontmatter is agent-facing metadata and the README is the human's front door —
-so docgraph exempts `README.md` from the `frontmatter` check (and, having no
-block, it is not a metadata-graph node, so `disconnected` never fires on it
-either). A frontmattered README is still valid — it just renders that way, so
-keep it out. docgraph itself follows this: `CLAUDE.md` carries a `covers` edge
-onto its code plus the `part-of` tree, this README carries no frontmatter at all.
+`README.md`**, and `disconnected` never fires on a README without it. A
+frontmattered README still passes, but GitHub renders the block as a table above
+the page, so keep it out.
 
 ### `leaks` — the content scan
 
@@ -124,20 +115,17 @@ Scans **tracked file content** (working tree only, never git history) for
 secret / owner-specific strings, to catch them before a repo goes public. Runs by
 default; `--skip leaks` turns it off.
 
-It is also the only check whose cost you will notice, since it reads every
-tracked file rather than just the docs: roughly proportional to tracked bytes and
-to the number of rules, it runs in ~6s on a 9.7k-file repo tracking ~1GB and 14M
-lines, against ~0.3s for all six doc-graph checks combined there. Binaries are
-skipped on a prefix probe, so vendored archives cost little.
+It is the only check with a noticeable cost, roughly proportional to tracked
+bytes and rule count: ~6s on a 9.7k-file, ~1GB repo, against ~0.3s for all six
+doc-graph checks there. Binary files are skipped.
 
 Scope is governed by **git tracking**, not the doc-graph ignore layers: every
 `git ls-files` entry is scanned (so `.gitignore` decides what's excluded), and
 `defaultIgnores` / `.docgraphignore` do **not** narrow it — only an explicit
-`--ignore` glob does. A tracked `.claude/` config ships in a public clone, so it
-stays in scope even though the doc-graph checks skip it.
+`--ignore` glob does. Tracked `.claude/` files are scanned, even though the
+doc-graph checks skip them.
 
-Patterns come from a **global TOML file, never committed to a repo** — a per-repo
-deny/allow list would itself enumerate your sensitive terms. Resolution:
+Patterns come from a **global TOML file, never committed to a repo**. Resolution:
 `--leaks-config <path>` → `$DOCGRAPH_LEAKS` →
 `$XDG_CONFIG_HOME/docgraph/leaks.toml` (default `~/.config/docgraph/leaks.toml`).
 
@@ -215,11 +203,10 @@ shapes (PEM, AWS, GitHub, Slack) are just `regex` entries you add, with a leadin
 Because the config is machine-local, CI and fresh clones (no file) have no rules
 and the scan is a no-op there — it stays a **local** pre-push gate. Handling:
 
-- **No config file** → no rules, scans nothing, prints a warning. **Not** fatal
-  (a hard-fail would brick every CI push).
+- **No config file** → no rules, scans nothing, prints a warning. **Not** fatal.
 - **Malformed config** (bad TOML, an unknown key, bad regex, a non-absolute
   `[[dir]]` path, a `[[group]]` with no terms or regex) → exit 2, fail-closed.
-  A broken config is a real bug, not the "not set up yet" case. `--skip leaks`
+  `--skip leaks`
   bypasses config loading entirely, so it's the escape hatch if a config trips
   this path — fix the config rather than leaning on the skip, since it also
   turns off the check.
@@ -245,13 +232,11 @@ It emits one `regex:` line per deny rule, including every `[[group]]`'s rules
 `regex` entries stay case-insensitive unless they carry `(?-i)`, normalized to a
 plain case-sensitive pattern), using filter-repo's `***REMOVED***` replacement. A
 stderr summary reports any `allow` / `allow_regex` / `[[dir]]` rules it
-**dropped** — filter-repo rewrites by content across all paths and history, so
-those exceptions can't apply. Emitted patterns target filter-repo's Python regex
+**dropped** (filter-repo can't apply them). Emitted patterns target filter-repo's Python regex
 engine, so RE2-only syntax may need manual review.
 
 > The rewrite changes commit SHAs: force-push and have every collaborator
-> re-clone. docgraph itself never reads or rewrites history — it only exports the
-> rules.
+> re-clone.
 
 ## `footgun-drift` — the advisory pre-push rider
 
@@ -266,16 +251,13 @@ docgraph footgun-drift                       # reads git's pre-push ref lines fr
 docgraph footgun-drift --range base..head    # explicit range, for manual use
 ```
 
-With no `--range` it reads the ref lines git feeds a `pre-push` hook on stdin and
-derives `remotesha..localsha` per ref (a new branch falls back to the merge-base
-with the nearest integration branch). A declaration counts only if its line is in
-that range's *added*-line set, read at the head revision — so a declaration
-already on the remote is never re-flagged. File scope is every `.md` the diff
+With no `--range` it reads the pushed refs from the `pre-push` hook's stdin (a new
+branch is compared against its merge-base with the nearest integration branch).
+Only added lines count, so a declaration already on the remote is never
+re-flagged. File scope is every `.md` the diff
 touches, including `.claude/` skill files that the doc-graph checks exclude.
 
-It is a **nag, not a judge**: it reports every added declaration because it can't
-rank whether a stated "why" is good — that's a judgment call it doesn't pretend
-to make. On a finding it asks two questions — (1) is this a real footgun (a trap
+It is a **nag, not a judge**: it reports every added declaration. On a finding it asks two questions — (1) is this a real footgun (a trap
 you hit, a tempting-but-wrong approach, a re-litigated decision)? (2) is it at
 the right doc level (invariant → `CLAUDE.md`, rationale → `docs/`, human prose →
 `README`)? It also names the commonest false footgun: a bug you just fixed, whose
@@ -298,23 +280,19 @@ docgraph covers-drift                       # reads git's pre-push ref lines fro
 docgraph covers-drift --range base..head    # explicit range, for manual use
 ```
 
-A rewritten function whose doc describes the old behaviour in prose leaves no
-removed symbol and no changed literal to grep for, but a `covers` edge already
-declares that doc the architecture of record for the code. The same join runs at
+The same check runs at
 the end of each agent turn inside
 [`doc-drift`](#docgraph-doc-drift--the-stop-hook-staleness-gate), scoped to that
 session's changes; this rider is the push-time pass over the whole pushed range.
 
-With no `--range` it reads the ref lines git feeds a `pre-push` hook on stdin and
-derives `remotesha..localsha` per ref, deduping findings across refs. Docs are
-`.md` only — the same `RepoDocs`/`trackedMD` set every whole-state check reads,
-unlike `doc-drift`'s doc-grep which also matches `.mdx`; "code" is every other
-tracked path except the prose formats `.txt`/`.rst`/`.adoc`/`.markdown`. An
-`.mdx` file is therefore neither: a `covers` edge declared in one never fires.
+With no `--range` it reads the pushed refs from the `pre-push` hook's stdin,
+deduping findings across refs. Docs are `.md` only (unlike `doc-drift`, which also
+reads `.mdx`); "code" is every other tracked path except the prose formats
+`.txt`/`.rst`/`.adoc`/`.markdown`. A `covers` edge declared in an `.mdx` file
+never fires.
 
 **A still-accurate doc wants no edit, and the nag says so**; a falsified one is
-corrected or cut, nothing more. A doc the change set touched never fires, so
-there's nothing to suppress. A repo with no `covers` edges never sees it. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
+corrected or cut, nothing more. A doc the push also touched never fires. A repo with no `covers` edges never sees it. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
 it.
 
@@ -329,7 +307,7 @@ describe code which just changed underneath them — before the agent hands cont
 back.
 
 It scans a **working-tree-inclusive** range — base→worktree, covering committed
-*and* uncommitted changes, because it fires before a commit necessarily exists.
+*and* uncommitted changes.
 On a feature branch the base is the closest integration branch's merge-base (the
 whole branch so far). On a trunk branch it is the session's own change set — the
 commits since its previous Stop, as for covers drift below, plus the working tree;
@@ -347,22 +325,17 @@ docgraph doc-drift --range base..head     # explicit range — bypasses the loop
 ```
 
 Bare invocation applies a **once-per-finding loop-guard**: a finding blocks the
-first time it appears, then stays silent at that `HEAD` and every later one, so
-a long-lived branch's distant merge-base doesn't re-block each commit's agent on
-a finding already judged. A finding the last nag didn't carry blocks again (with
-the full list); one that is fixed and later recurs counts as new. This de-dupes
-the *nag*, it doesn't suppress the *finding*.
+first time it appears, then stays silent at that `HEAD` and every later one. A
+finding the last nag didn't carry blocks again (with the full list); one that is
+fixed and later recurs counts as new.
 
 A finding in either class **blocks** — prints to **stderr**, exits **2**.
 
 It also raises **covers drift**: code this session changed that a doc declares it
-`covers`, where the session didn't touch the doc. The change set is the
-first-parent, non-merge commits since the `HEAD` at the session's previous Stop
-(on its first Stop, since the transcript's first timestamp) plus the working tree,
-keeping only paths the session edited with an edit tool or committed itself — so
-reading a file, merging a trunk in, or another session committing to the same
-branch, never counts. It reads
-`session_id`/`transcript_path` from the Stop payload on stdin; without one it
+`covers`, where the session didn't touch the doc. The change set is the paths
+this session edited or committed since its previous Stop (or since it started),
+plus the working tree — reading a file, merging a trunk in, or another session's
+commits never count. It reads the Stop payload on stdin; without one it
 checks the working tree alone, and `--range` checks that spec. A doc touched
 anywhere in the set clears the finding. Each (doc, path) pair blocks once per
 session; the message asks the agent to read the parts of the doc describing
@@ -376,15 +349,12 @@ other suppression surface (no per-finding flag, no inline
 marker): a flagged reference is a judgment call — fix the doc, or confirm it's
 intentional framed history. The fix the message asks for is the smallest edit
 that makes the doc true again (swap the value, rename the symbol, or delete the
-sentence that now describes nothing), never an account of what changed — that is
-the commit message's job.
+sentence that now describes nothing), never an account of what changed.
 
 Scope limits worth knowing:
 
 - **Docs are `.md`/`.mdx`; "code" is everything else** except the prose formats
-  `.txt`/`.rst`/`.adoc`/`.markdown`, which are excluded from the code scan so
-  def-shaped prose (a `class …` sentence in a `CHANGELOG.txt`) isn't read as a
-  removed definition.
+  `.txt`/`.rst`/`.adoc`/`.markdown`.
 - **Anchored value drift is not proximity-checked** — it fires when a
   symbol-naming doc *also* contains the old literal anywhere in the file, so it
   can over-report if that number appears coincidentally.
@@ -396,9 +366,9 @@ Scope limits worth knowing:
 
 ## `covers`, `index`, `stale`, `graph` — read-only views
 
-Four subcommands that query the doc graph for a human or an agent tool, built on
-the same parse the seven checks use. All are **read-only**: never write, never
-gate (not in `checkNames`, not `--skip`-able, not run by the generated hook),
+Four subcommands that query the doc graph for a human or an agent tool. All are
+**read-only**: never write, never gate (not `--skip`-able, not run by the
+generated hook),
 always exit `0` on success — `2` only on a usage/git error.
 
 ```bash
@@ -413,8 +383,7 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
 - **`covers <path>`** — prints every tracked doc that documents `<path>` via a
   frontmatter `covers` edge, directly or by covering a parent directory
   (`covers: src/auth/` covers `src/auth/login.go`). `<path>` is
-  **repo-root-relative** — frontmatter edges resolve against the repo root, unlike
-  an inline markdown link. Prints nothing (exit `0`) if no doc covers it. The same
+  **repo-root-relative**. Prints nothing (exit `0`) if no doc covers it. The same
   `covers` edges feed covers drift (`doc-drift` at Stop,
   [`covers-drift`](#covers-drift--the-advisory-pre-push-rider) at push), so
   declaring one both answers this query and gets the doc surfaced when its code
@@ -423,9 +392,8 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   frontmatter, grouped by `type` (core types in canonical order, then custom
   types alphabetically), each as `- [label](path) — description` (the tail is
   omitted when a doc has no `description`). The label is the doc's `title` if
-  set, else its **body H1**, else its path — so a doc gets a readable entry
-  without restating its own heading in frontmatter; set `title` only when the
-  index label should differ from the H1. It's a view, not a hand-maintained
+  set, else its **body H1**, else its path; set `title` only when the index label
+  should differ from the H1. It's a view, not a hand-maintained
   page — redirect it into a tracked file (`docgraph index > docs/index.md`) and
   regenerate when the graph changes.
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
@@ -434,8 +402,7 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   doc's own `review:` cadence (e.g. `review: 90d`) overrides it. A doc with no
   `verified` date, or an unparseable value, is silently skipped — malformed
   frontmatter is the `frontmatter` check's concern.
-- **`graph [--json]`** — serves **both** doc graphs over the same node set the
-  gate reads (so the served graph and the gated graph can never diverge). Default
+- **`graph [--json]`** — serves **both** doc graphs, exactly as the gate sees them. Default
   output is human-readable markdown: the `part-of` hierarchy, cross-reference
   edges, and both island lists (content-graph and metadata-graph). `--json` emits
   a stable, `schemaVersion`-stamped payload instead — the machine seam a catalog
@@ -447,13 +414,9 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   than silently reshaping the payload. `--root`/`--ignore` apply as elsewhere.
 
   `graph` reads the working tree by default. Pass `--ref <ref>` (e.g. `--ref HEAD`,
-  `--ref dev`) to build the graph from the **committed state at that ref**, read
-  entirely from the git object store — so it also runs inside a **bare** repo (no
-  checkout). On a clean checkout `--ref HEAD` matches the default output exactly; it
-  diverges only by ignoring uncommitted/untracked changes to tracked docs, which is
-  what "at a ref" means. This is the mode a scanner (e.g.
-[Mycelium](https://github.com/lockyc/mycelium)) uses to read a
-  bare repo store without materializing a work-tree.
+  `--ref dev`) to build the graph from the **committed state at that ref**; this
+  also works inside a **bare** repo (no checkout). On a clean checkout `--ref HEAD`
+  matches the default output exactly.
 
 ## Install
 
@@ -474,10 +437,7 @@ seeds `~/.config/docgraph/`, and prints where the binary landed. Or directly:
 go install github.com/lockyc/docgraph/v3@latest   # or, from a checkout: just install
 ```
 
-Needs **Go** (the install is `go install`) and **git** on PATH (docgraph shells
-out to it at runtime). The module dependencies are `github.com/BurntSushi/toml`
-(config decode) and `gopkg.in/yaml.v3` (frontmatter decode); the rest is the Go
-stdlib.
+Needs **Go** and **git** on PATH.
 
 ### As a pre-push gate
 
@@ -490,20 +450,16 @@ docgraph install-hook --no-footgun-drift        # omit the footgun-drift rider
 docgraph install-hook --no-covers-drift         # omit the covers-drift rider
 ```
 
-The generated hook runs the whole-state gate `docgraph .` (a bare invocation, so
-a later-version check is enforced without regenerating), then the advisory
+The generated hook runs the whole-state gate `docgraph .`, then the advisory
 `docgraph footgun-drift` and `docgraph covers-drift`, each fed git's pre-push
-stdin. Only the first can block a push — both riders ride with `|| true`, so not
-even an operational error in one can abort it. It writes a tracked `.githooks/pre-push`
+stdin. Only the first can block a push; the riders never do, even on error. It writes a tracked `.githooks/pre-push`
 and sets `core.hooksPath` for this clone (others activate with `git config
 core.hooksPath .githooks`). It refuses to clobber an existing hook (pass
 `--force`, or integrate a docgraph call into your own). It fails **closed** — a
-missing `docgraph` blocks the push, because a gate that skips when its tool is
-absent is a false green.
+missing `docgraph` blocks the push.
 
-The generated hook resolves docgraph via PATH **and** the Go bin dir (`$GOBIN` /
-`$GOPATH/bin` / `~/go/bin`), because git runs hooks with the caller's PATH and GUI
-clients / sandboxed agents often push with a bare PATH that omits `~/go/bin`.
+The generated hook finds docgraph via PATH **and** the Go bin dir (`$GOBIN` /
+`$GOPATH/bin` / `~/go/bin`), so it works from GUI clients and sandboxed agents too.
 
 ## Usage
 
@@ -533,22 +489,18 @@ git repo / malformed leak config. `footgun-drift` and `covers-drift` are
 advisory: `0` regardless of findings (nag on stdout), `2` only on a git/usage
 error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
 dangling-reference, anchored-value or covers finding (stderr) or on an error · `1` on a
-bad flag (a Stop hook exiting `2` would block every turn). `covers` /
+bad flag. `covers` /
 `index` / `stale` / `graph` are read-only: `0` always on success, `2` only on error.
 
-**Linked worktrees work** — docgraph shells out to `git -C`, which resolves a
-`.git` gitdir pointer natively; there is nothing to configure. A worktree whose
-pointer is *dangling* (its main repo was moved or pruned, or is unreachable from
-a sandbox) is the one case that fails, and the `not a git repository` report
-carries git's own explanation in parentheses so the dangling target is named
-rather than mistaken for "worktrees are unsupported".
+**Linked worktrees work**, with nothing to configure. A worktree whose pointer is
+*dangling* (its main repo was moved or pruned, or is unreachable from a sandbox)
+fails with `not a git repository`, followed by git's own explanation naming the
+dangling target.
 
 A clean run prints a single line (`docgraph: clean ✓ (N tracked .md, M reachable,
-0 findings)`), so a green pre-push gate doesn't bury the terminal. Only on a
-finding does the output turn self-describing — a banner, the sections that
-actually have findings, and a footer explaining what docgraph is, why the
-non-zero exit aborts the push, and how to remediate each category — so a failed
-push doesn't have to be reverse-engineered.
+0 findings)`). A run with findings prints a banner, the sections that have
+findings, and a footer explaining what docgraph is, why the push was aborted, and
+how to remediate each category.
 
 ### Entry points (roots)
 
@@ -559,8 +511,7 @@ a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 ### Ignoring paths
 
 `**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for the
-doc-graph checks (untracked scratch, and agent skill/config tooling that's never
-part of the doc graph), and by `doc-drift`. Add more via `.docgraphignore` (one glob per
+doc-graph checks and by `doc-drift`. Add more via `.docgraphignore` (one glob per
 line, `#` comments) or repeatable `--ignore` globs. These are repo-root-relative globs, not
 gitignore syntax: `*` and `?` match within one path segment, `**` matches any number of
 segments, and there is no negation — exclude a directory with `dir/**`, and a file at any
@@ -612,12 +563,9 @@ each has a cheap fix (an index page; a `type:` line), and excluding buys a quiet
 gate by never checking that content again.
 
 `.docgraphignore` does **not** exempt a corpus from `leaks` — that scan is scoped
-by git tracking, not the doc-graph ignore layers. That's a separate decision with
-a separate lever: a knowledge base legitimately full of the hosts, paths and
-identifiers your rules match isn't leaking, it's just being itself, so silence it
-in the **leaks config** with a `[[dir]]` `ignore` for that corpus. Two ignore
-layers, two questions — "is this a doc graph?" and "should this content be leak
-scanned?" — answer them independently.
+by git tracking, not the doc-graph ignore layers. To silence a corpus legitimately
+full of the hosts, paths and identifiers your rules match, add a `[[dir]]` `ignore`
+for it in the **leaks config**.
 
 A repo that doesn't use the `Footgun:` convention opts out of `footgun-drift`
 outright (it's not a check, so no `--skip` name) — `DOCGRAPH_FOOTGUN_OFF=1` or
@@ -671,9 +619,8 @@ Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
 Notes:
 
 - **Absent config → silently off** (the normal state). A **malformed**
-  `config.toml` warns and disables logging but **does not fail the run** — logging
-  is auxiliary, so a log-config typo must never block a push (unlike a malformed
-  `leaks.toml`, which is fatal).
+  `config.toml` warns and disables logging but **does not fail the run** (unlike a
+  malformed `leaks.toml`, which is fatal).
 - `DOCGRAPH_NO_LOG=1` disables logging for one run even when the config enables it.
 - Best-effort: an unwritable log file is silently skipped and never changes the
   exit code.
