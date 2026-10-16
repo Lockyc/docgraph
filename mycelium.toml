@@ -10,5 +10,5 @@ topics_extra = ["cli", "developer-tools", "documentation", "golang", "linter", "
 
 [[provides]]
 name    = "docgraph"
-summary = "go-installable doc-graph + leak audit binary; wired into .githooks/pre-push and CI"
+summary = "go-installable doc-graph + leak audit binary; wired into .githooks/pre-push"
 url     = "https://github.com/lockyc/docgraph"

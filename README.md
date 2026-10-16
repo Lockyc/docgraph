@@ -1,7 +1,6 @@
 # docgraph
 
 [![Release](https://img.shields.io/github/v/release/lockyc/docgraph?sort=semver&label=release)](https://github.com/lockyc/docgraph/releases/latest)
-[![CI](https://github.com/lockyc/docgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/lockyc/docgraph/actions/workflows/ci.yml)
 ![Built with Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)
 [![License](https://img.shields.io/github/license/lockyc/docgraph)](LICENSE)
 

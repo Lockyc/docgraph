@@ -560,8 +560,8 @@ hook's own "install it:" message can all stop installing anything, for everyone,
 silently.
 
 It hides because every path this repo exercises bypasses module resolution:
-`just install` is `go install .` (local, no proxy) and CI is `checkout`+`vet`+`test`
-(also local). A green gate and a working local binary say *nothing* about whether a
+`just install` is `go install .` (local, no proxy) and `just gate` runs `vet`+`test`
+in the checkout (also local). A green gate and a working local binary say *nothing* about whether a
 consumer can install the thing — only a fresh `go install <module>@latest` does.
 
 So: **after any release that moves the module path or major version, verify from
