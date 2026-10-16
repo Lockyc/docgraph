@@ -32,7 +32,7 @@ docgraph has four independent modes, each with its own trigger and scope:
 | **Whole-state checks** | `docgraph [path]` | the current tree | pre-push / CI | **yes** — exit 1 on any finding |
 | **`footgun-drift`** | `docgraph footgun-drift` | what a push *adds* | pre-push (advisory rider) | no — nags, always exit 0 |
 | **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
-| **`doc-drift`** | `docgraph doc-drift` | the branch diff (incl. uncommitted), or on a trunk the session's commits + worktree; the session's changes for covers drift | agent Stop hook | **yes** — exit 2, once per finding |
+| **`doc-drift`** | `docgraph doc-drift` | the branch diff incl. uncommitted changes (on a trunk branch: this agent session's commits + uncommitted changes) | agent Stop hook | **yes** — exit 2, once per finding |
 
 Plus **read-only** helpers that never gate: `schema` (emits the frontmatter
 vocabulary), and the doc-graph **views** `covers` / `index` / `stale` / `graph`
@@ -48,7 +48,7 @@ tracked files (see [`leaks`](#leaks--the-content-scan)).
 
 Seven checks run by default on `docgraph [path]`. **Everything is enforced; you
 exclude explicitly** with `--skip <check[,check]>`; a check added in a later
-version is enforced automatically. (A nav-driven MkDocs repo, for instance, runs `--skip
+version is enforced automatically. (An auto-nav MkDocs repo, for instance, runs `--skip
 orphans`.)
 
 The checks span **two independent doc graphs**:
@@ -160,11 +160,11 @@ regexps, also case-insensitive unless you opt out per-pattern with a leading
 
 Deny rules fall into **groups**. Top-level `terms` / `regex` are the implicit
 `default` group; a `[[group]]` block is a named deny list. A `[[dir]].ignore`
-glob silences the `default` group by default, but `ignore_groups` *replaces*
-that default rather than adding to it — name `"default"` alongside another
-group to keep both silenced — so a private repo can blanket-ignore its own
-footprint vocabulary while staying scanned for terms that must not appear in
-*any* repo:
+glob silences the `default` group unless `ignore_groups` names other groups.
+`ignore_groups` *replaces* that default rather than adding to it, so list
+`"default"` too if you want it silenced as well. This lets a private repo ignore
+its own footprint vocabulary while still being scanned for terms that must not
+appear in *any* repo:
 
     regex = ['(?-i)AKIA[0-9A-Z]{16}']   # default group: secret shapes
 
@@ -181,10 +181,10 @@ footprint vocabulary while staying scanned for terms that must not appear in
     ignore        = ["**"]
     ignore_groups = ["footprint"]     # footprint is fine here; client + secrets stay live
 
-`default` is reserved for the top-level rules — a `[[group]]` claiming it, a
-group with no name, a duplicate name, or no terms/regex of its own, an
-`ignore_groups` naming an undefined group, or an `ignore_groups` with no
-`ignore` globs are all fatal config errors.
+`default` is reserved for the top-level rules. These are all fatal config errors:
+a `[[group]]` named `default`; a group with no name, a duplicate name, or no
+terms/regex; an `ignore_groups` naming an undefined group; an `ignore_groups`
+with no `ignore` globs.
 `allow` / `allow_regex` are not group-scoped: naming the string suppresses it
 whatever group it belongs to, which is the per-repo escape hatch for a class the
 repo legitimately owns.
@@ -228,9 +228,9 @@ git filter-repo --replace-text rules.txt  # destructive: rewrites history
 ```
 
 It emits one `regex:` line per deny rule, including every `[[group]]`'s rules
-(terms escaped and case-insensitive;
-`regex` entries stay case-insensitive unless they carry `(?-i)`, normalized to a
-plain case-sensitive pattern), using filter-repo's `***REMOVED***` replacement. A
+(terms are escaped and case-insensitive; `regex` entries are case-insensitive,
+except those starting with `(?-i)`, which are emitted as plain case-sensitive
+patterns), using filter-repo's `***REMOVED***` replacement. A
 stderr summary reports any `allow` / `allow_regex` / `[[dir]]` rules it
 **dropped** (filter-repo can't apply them). Emitted patterns target filter-repo's Python regex
 engine, so RE2-only syntax may need manual review.
@@ -241,10 +241,10 @@ engine, so RE2-only syntax may need manual review.
 ## `footgun-drift` — the advisory pre-push rider
 
 `footgun-drift` scans only what a push **adds** to tracked markdown, and it is
-**advisory**: it prints a nag but exits 0 and never blocks. It flags a footgun
-**declaration** (a line-leading `Footgun:` marker or a bolded mid-line footgun
-lead — introducing one, not mentioning it; a cross-reference or a bare `##
-Footguns` heading never counts) on any *added* line.
+**advisory**: it prints a nag but exits 0 and never blocks. It flags any *added*
+line that declares a footgun (a documented trap): a line starting with
+`Footgun:`, or a bolded footgun lead-in mid-line. Mentioning or
+cross-referencing a footgun, or a bare `## Footguns` heading, doesn't count.
 
 ```bash
 docgraph footgun-drift                       # reads git's pre-push ref lines from stdin
@@ -308,10 +308,10 @@ back.
 
 It scans a **working-tree-inclusive** range — base→worktree, covering committed
 *and* uncommitted changes.
-On a feature branch the base is the closest integration branch's merge-base (the
-whole branch so far). On a trunk branch it is the session's own change set — the
-commits since its previous Stop, as for covers drift below, plus the working tree;
-without a session (a manual run), the working tree alone. It flags
+On a feature branch the range starts at the closest integration branch's
+merge-base (the whole branch so far). On a trunk branch it covers only this agent
+session's changes: commits since the agent's previous turn ended (its last Stop),
+plus the working tree; without a session (a manual run), the working tree alone. It flags
 two mechanical staleness classes, and both **block** the turn from ending:
 
 1. **Dangling reference** — a symbol whose *definition* was removed in the diff
@@ -325,9 +325,9 @@ docgraph doc-drift --range base..head     # explicit range — bypasses the loop
 ```
 
 Bare invocation applies a **once-per-finding loop-guard**: a finding blocks the
-first time it appears, then stays silent at that `HEAD` and every later one. A
-finding the last nag didn't carry blocks again (with the full list); one that is
-fixed and later recurs counts as new.
+first time it appears, then stays silent at that `HEAD` and every later one. Any
+finding that wasn't in the previous nag blocks the turn, and that block lists all
+current findings. A finding that is fixed and later comes back counts as new.
 
 A finding in either class **blocks** — prints to **stderr**, exits **2**.
 
@@ -340,14 +340,14 @@ checks the working tree alone, and `--range` checks that spec. A doc touched
 anywhere in the set clears the finding. Each (doc, path) pair blocks once per
 session; the message asks the agent to read the parts of the doc describing
 what it changed and fix only what is now false. `DOCGRAPH_COVERS_OFF=1` turns
-this half off.
-`DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo that
-doesn't use the anchored-symbol-and-value convention it relies on. Paths the
+off covers drift.
+`DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo whose docs
+don't name code symbols alongside their values. Paths the
 doc-graph ignore layers exclude (defaults + `.docgraphignore`) are out of scope on
 both sides — neither scanned as code nor grepped as docs. There is no
 other suppression surface (no per-finding flag, no inline
-marker): a flagged reference is a judgment call — fix the doc, or confirm it's
-intentional framed history. The fix the message asks for is the smallest edit
+marker): a flagged reference is a judgment call — fix the doc, or confirm the
+mention deliberately describes past behaviour. The fix the message asks for is the smallest edit
 that makes the doc true again (swap the value, rename the symbol, or delete the
 sentence that now describes nothing), never an account of what changed.
 
@@ -443,7 +443,7 @@ Needs **Go** and **git** on PATH.
 
 ```bash
 docgraph install-hook [path]                    # gate: enforce ALL checks (default)
-docgraph install-hook --skip orphans            # nav-driven repos (no orphan gate)
+docgraph install-hook --skip orphans            # auto-nav MkDocs repos (no orphan gate)
 docgraph install-hook --ignore '**/*_test.go'   # bake an --ignore glob into the hook
 docgraph install-hook --force                   # regenerate an existing hook
 docgraph install-hook --no-footgun-drift        # omit the footgun-drift rider
@@ -452,7 +452,8 @@ docgraph install-hook --no-covers-drift         # omit the covers-drift rider
 
 The generated hook runs the whole-state gate `docgraph .`, then the advisory
 `docgraph footgun-drift` and `docgraph covers-drift`, each fed git's pre-push
-stdin. Only the first can block a push; the riders never do, even on error. It writes a tracked `.githooks/pre-push`
+stdin. Only the first can block a push; the riders never do, even on error.
+`install-hook` writes a tracked `.githooks/pre-push`
 and sets `core.hooksPath` for this clone (others activate with `git config
 core.hooksPath .githooks`). It refuses to clobber an existing hook (pass
 `--force`, or integrate a docgraph call into your own). It fails **closed** — a
@@ -510,7 +511,7 @@ a whole doc repo and a project whose docs are `CLAUDE.md` + `docs/`.
 
 ### Ignoring paths
 
-`**/superpowers/**`, `.claude/**`, and `.agents/**` are ignored by default for the
+`**/superpowers/**` (an agent plugin's scratch files), `.claude/**`, and `.agents/**` are ignored by default for the
 doc-graph checks and by `doc-drift`. Add more via `.docgraphignore` (one glob per
 line, `#` comments) or repeatable `--ignore` globs. These are repo-root-relative globs, not
 gitignore syntax: `*` and `?` match within one path segment, `**` matches any number of
@@ -534,8 +535,8 @@ mention their way through `docs/` (satisfying `orphans`), and every doc carries 
 `type:` block placed with a doc→doc edge (satisfying `frontmatter` and
 `disconnected`). That fits most repos. Two exceptions:
 
-- **Nav-driven MkDocs sites** — a `docs/` with no `nav:` block; MkDocs
-  auto-builds the sidebar and pages never cross-link, so every page is a
+- **Auto-nav MkDocs sites** — a `docs/` with no `nav:` block, where MkDocs
+  builds the sidebar itself and pages never cross-link, so every page is a
   content-graph island by design, and such pages usually carry no `type:`
   frontmatter either. Gate with `--skip orphans` and, unless you'll add a `type:`
   block to every page, `--skip frontmatter` (which also moots `disconnected`,
@@ -555,8 +556,8 @@ verbatim clippings — asks one question: is it yours to conform?**
   a real graph node, and `broken`/`untracked` keep covering it.
 - **Derived / never hand-edited → exclude it** with `.docgraphignore`, because a
   regen would drop any `type:` you added, so conforming can't stick.
-- **`--skip` is wrong either way** — it's repo-wide, so a corpus's conventions
-  also disable those checks on your `CLAUDE.md`/`README.md`, where they're valid.
+- **`--skip` is wrong either way** — it's repo-wide, so skipping a check to suit
+  a corpus also turns it off for your `CLAUDE.md`/`README.md`, where it still applies.
 
 A flood of orphans or frontmatter findings is a reason to look, not to exclude:
 each has a cheap fix (an index page; a `type:` line), and excluding buys a quiet
