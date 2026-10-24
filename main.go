@@ -549,13 +549,11 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // means, why a non-zero exit aborts a push, and how to remediate: banner, the
 // sections that actually have findings, and the explain-and-remediate footer.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
-	orphans := sel["orphans"] && len(r.Orphans) > 0
-	broken := sel["broken"] && len(r.BrokenLinks) > 0
-	untracked := sel["untracked"] && len(r.Untracked) > 0
-	frontmatter := sel["frontmatter"] && len(r.FrontmatterFindings) > 0
-	edges := sel["edges"] && (len(r.BrokenEdges) > 0 || len(r.EdgeCycles) > 0)
-	leaksFound := sel["leaks"] && len(leaks) > 0
-	disconnected := sel["disconnected"] && len(r.Disconnected) > 0
+	counts := audit.CheckCounts(r, leaks)
+	found := func(name string) bool { return sel[name] && counts[name] > 0 }
+	orphans, broken, untracked := found("orphans"), found("broken"), found("untracked")
+	frontmatter, edges, leaksFound := found("frontmatter"), found("edges"), found("leaks")
+	disconnected := found("disconnected")
 	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
 		fmt.Fprintf(w, "docgraph: clean ✓ (%d tracked .md, %d reachable, 0 findings)\n", r.TrackedMD, r.Reachable)
 		return false
@@ -623,26 +621,10 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	}
 
 	n := 0
-	if sel["orphans"] {
-		n += len(r.Orphans)
-	}
-	if sel["broken"] {
-		n += len(r.BrokenLinks)
-	}
-	if sel["untracked"] {
-		n += len(r.Untracked)
-	}
-	if sel["frontmatter"] {
-		n += len(r.FrontmatterFindings)
-	}
-	if sel["edges"] {
-		n += len(r.BrokenEdges) + len(r.EdgeCycles)
-	}
-	if sel["leaks"] {
-		n += len(leaks)
-	}
-	if sel["disconnected"] {
-		n += len(r.Disconnected)
+	for name, c := range counts {
+		if sel[name] {
+			n += c
+		}
 	}
 	printFailureFooter(w, n, orphans, broken, untracked, frontmatter, edges, leaksFound, disconnected)
 	return true
@@ -715,16 +697,9 @@ func runFootgunDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	if err != nil {
 		return notARepo(stderr, path, err)
 	}
-	var ranges []audit.RevRange
-	if *rangeFlag != "" {
-		b, h, ok := splitRange(*rangeFlag)
-		if !ok {
-			fmt.Fprintf(stderr, "docgraph: bad --range %q (want base..head)\n", *rangeFlag)
-			return 2
-		}
-		ranges = []audit.RevRange{{Base: b, Head: h}}
-	} else {
-		ranges = rangesFromPrePushStdin(stdin, root)
+	ranges, ok := pushRanges(*rangeFlag, stdin, root, stderr)
+	if !ok {
+		return 2
 	}
 	if len(ranges) == 0 {
 		return 0
@@ -743,6 +718,21 @@ func runFootgunDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	// nags (the two-question test) and trusts the pusher to double-check — rather
 	// than blocking on something it can't evaluate and training a --no-verify habit.
 	return 0
+}
+
+// pushRanges resolves the commit ranges an advisory pre-push rider scopes to:
+// --range when given, else the pushed refs on stdin. One home so the riders can
+// never scope a push differently. ok=false means a usage error (exit 2).
+func pushRanges(rangeFlag string, stdin io.Reader, root string, stderr io.Writer) ([]audit.RevRange, bool) {
+	if rangeFlag == "" {
+		return rangesFromPrePushStdin(stdin, root), true
+	}
+	b, h, ok := splitRange(rangeFlag)
+	if !ok {
+		fmt.Fprintf(stderr, "docgraph: bad --range %q (want base..head)\n", rangeFlag)
+		return nil, false
+	}
+	return []audit.RevRange{{Base: b, Head: h}}, true
 }
 
 func splitRange(s string) (string, string, bool) {
@@ -843,16 +833,9 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 	if err != nil {
 		return notARepo(stderr, path, err)
 	}
-	var ranges []audit.RevRange
-	if *rangeFlag != "" {
-		b, h, ok := splitRange(*rangeFlag)
-		if !ok {
-			fmt.Fprintf(stderr, "docgraph: bad --range %q (want base..head)\n", *rangeFlag)
-			return 2
-		}
-		ranges = []audit.RevRange{{Base: b, Head: h}}
-	} else {
-		ranges = rangesFromPrePushStdin(stdin, root)
+	ranges, ok := pushRanges(*rangeFlag, stdin, root, stderr)
+	if !ok {
+		return 2
 	}
 	if len(ranges) == 0 {
 		return 0

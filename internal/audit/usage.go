@@ -54,26 +54,10 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 	sort.Strings(checks)
 
 	counts := map[string]int{}
-	if sel["orphans"] {
-		counts["orphans"] = len(rep.Orphans)
-	}
-	if sel["broken"] {
-		counts["broken"] = len(rep.BrokenLinks)
-	}
-	if sel["untracked"] {
-		counts["untracked"] = len(rep.Untracked)
-	}
-	if sel["leaks"] {
-		counts["leaks"] = len(leaks)
-	}
-	if sel["frontmatter"] {
-		counts["frontmatter"] = len(rep.FrontmatterFindings)
-	}
-	if sel["edges"] {
-		counts["edges"] = len(rep.BrokenEdges) + len(rep.EdgeCycles)
-	}
-	if sel["disconnected"] {
-		counts["disconnected"] = len(rep.Disconnected)
+	for name, n := range CheckCounts(rep, leaks) {
+		if sel[name] {
+			counts[name] = n
+		}
 	}
 
 	rec := UsageRecord{
