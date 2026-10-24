@@ -50,6 +50,29 @@ func TestLeakScanRegexDenyIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+// A tracked symlink is scanned by its target string (what git publishes), not by
+// following it to the pointee.
+func TestLeakScanReadsASymlinkAsItsTarget(t *testing.T) {
+	dir := setupRepo(t, map[string]string{"a.md": "clean\n"}, []string{"a.md"})
+	outside := filepath.Join(t.TempDir(), "corehost-notes.txt")
+	if err := os.WriteFile(outside, []byte("clean content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := GitCmd(dir, "add", "link").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v %s", err, out)
+	}
+	found, err := LeakScan(dir, LeakConfig{Terms: []string{"corehost"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].File != "link" {
+		t.Fatalf("want one finding in the link's target string, got %+v", found)
+	}
+}
+
 // J1: allow_regex is case-insensitive too, so it suppresses a deny match whose
 // casing differs from the allow pattern.
 func TestLeakScanAllowRegexIsCaseInsensitive(t *testing.T) {

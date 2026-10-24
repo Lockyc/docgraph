@@ -17,6 +17,7 @@ const (
 	EdgeCode                      // internal non-.md path — existence-checked only
 	EdgeExternal                  // URL / mailto — not checked
 	EdgeCrossRepo                 // owner/repo:path — deferred (never a finding)
+	EdgeMissing                   // no target (a missing `to:`, or anchor-only) — a finding, never a path
 )
 
 // ClassifyTarget infers an edge target's kind. Internal targets are treated as
@@ -31,6 +32,11 @@ func ClassifyTarget(to string) EdgeKind {
 	// Clean the target first to strip anchors/queries before checking for cross-repo
 	// patterns, so a doc like docs/x.md#a:b isn't misclassified by the colon in its anchor.
 	cleaned := cleanTarget(t)
+	// An empty target must never reach ResolveEdgeTarget, which would clean it to "."
+	// — the whole repo — so a `target:` typo for `to:` would silently cover everything.
+	if strings.TrimSpace(cleaned) == "" {
+		return EdgeMissing
+	}
 	if i := strings.Index(cleaned, ":"); i > 0 && strings.Contains(cleaned[:i], "/") {
 		return EdgeCrossRepo
 	}

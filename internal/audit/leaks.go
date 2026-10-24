@@ -429,11 +429,23 @@ func LeakScan(repoRoot string, cfg LeakConfig, extraIgnores []string) ([]LeakFin
 		if len(dirAllows) > 0 {
 			allow = append(append([]matcher{}, cl.allow...), dirAllows...)
 		}
-		b, err := readTextFile(abs)
-		if err != nil {
-			continue
+		// For a tracked symlink git publishes the link's target string, not the
+		// pointee: scan that string (an absolute home or homelab path is the leak)
+		// and never follow the link to content that doesn't ship.
+		var text string
+		if fi, err := os.Lstat(abs); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(abs)
+			if err != nil {
+				continue
+			}
+			text = target
+		} else {
+			b, err := readTextFile(abs)
+			if err != nil {
+				continue
+			}
+			text = string(b)
 		}
-		text := string(b)
 		if !filterFor(denyKey, deny).mayMatch(text) {
 			continue
 		}

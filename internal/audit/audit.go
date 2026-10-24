@@ -134,7 +134,14 @@ func brokenEdges(repoRoot string, docs map[string]*Doc) []BrokenEdge {
 	var out []BrokenEdge
 	for src, d := range docs {
 		for _, e := range d.Links {
+			// The emitted schema requires both; yaml decoding is lenient, so a typo'd
+			// key arrives as an empty field rather than an error.
+			if strings.TrimSpace(e.Rel) == "" {
+				out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: e.To, Reason: "missing rel"})
+			}
 			switch ClassifyTarget(e.To) {
+			case EdgeMissing:
+				out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: e.To, Reason: "missing to"})
 			case EdgeDoc, EdgeCode:
 				target := ResolveEdgeTarget(e.To)
 				if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(target))); err != nil {

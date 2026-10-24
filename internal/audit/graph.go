@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ContentEdge is a directed prose reference in the content graph. Kind is "link"
@@ -151,7 +152,8 @@ func isMetadataEdge(e Edge) bool {
 	if ClassifyTarget(e.To) != EdgeDoc {
 		return false
 	}
-	return e.Rel != "covers" && e.Rel != "source"
+	// An edge with no rel is malformed (brokenEdges reports it) and connects nothing.
+	return strings.TrimSpace(e.Rel) != "" && e.Rel != "covers" && e.Rel != "source"
 }
 
 // MetadataEdge is a frontmatter doc→doc relationship in the metadata graph.

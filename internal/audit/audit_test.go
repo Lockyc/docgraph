@@ -145,6 +145,33 @@ func TestFrontmatterRequiredExceptReadme(t *testing.T) {
 	}
 }
 
+func TestMalformedEdgesAreFindingsNotWholeRepoCovers(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "[a](docs/a.md)\n",
+		"docs/a.md": "---\ntype: runbook\nlinks:\n" +
+			"  - {rel: covers, target: scripts/x.sh}\n" + // typo: target for to
+			"  - {rel: covers, to: '#anchor-only'}\n" +
+			"  - {to: CLAUDE.md}\n" + // no rel
+			"---\nbody\n",
+	}, []string{"CLAUDE.md", "docs/a.md"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	reasons := map[string]int{}
+	for _, e := range rep.BrokenEdges {
+		reasons[e.Reason]++
+	}
+	if reasons["missing to"] != 2 || reasons["missing rel"] != 1 {
+		t.Fatalf("BrokenEdges = %+v, want 2 missing to + 1 missing rel", rep.BrokenEdges)
+	}
+	docs, _ := parseDocs(dir, []string{"CLAUDE.md", "docs/a.md"}, nil)
+	if got := CoversOf(docs, "main.go"); len(got) != 0 {
+		t.Errorf("CoversOf(main.go) = %v; a malformed covers edge must not cover the repo", got)
+	}
+}
+
 func TestBrokenEdges(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		"CLAUDE.md": "[a](docs/a.md)\n",
