@@ -103,6 +103,25 @@ func TestGraphMarkdownTerminatesOnPartOfCycle(t *testing.T) {
 	}
 }
 
+func TestGraphMarkdownShowsAClosedPartOfCycle(t *testing.T) {
+	part := func(to string) string {
+		return "---\ntype: reference\nlinks:\n  - {rel: part-of, to: " + to + "}\n---\n# x\n"
+	}
+	dir := setupRepo(t, map[string]string{
+		"docs/a.md": part("docs/b.md"),
+		"docs/b.md": part("docs/a.md"),
+	}, []string{"docs/a.md", "docs/b.md"})
+	v, err := BuildGraphView(dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := v.Markdown()
+	hierarchy, _, _ := strings.Cut(md, "## Cross-references")
+	if !strings.Contains(hierarchy, "docs/a.md") || !strings.Contains(hierarchy, "(cycle)") {
+		t.Fatalf("a closed cycle must appear in the hierarchy, marked:\n%s", md)
+	}
+}
+
 func TestGraphViewAtRefFromSubdirectory(t *testing.T) {
 	files, track := fixtureFiles()
 	dir := setupRepo(t, files, track)

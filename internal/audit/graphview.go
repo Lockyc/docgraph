@@ -136,6 +136,7 @@ func (v GraphView) Markdown() string {
 	}
 	sort.Strings(roots)
 	onPath := map[string]bool{} // a part-of cycle (an `edges` finding) must not recurse forever
+	printed := map[string]bool{}
 	var walk func(p string, depth int)
 	walk = func(p string, depth int) {
 		indent := strings.Repeat("  ", depth)
@@ -144,6 +145,7 @@ func (v GraphView) Markdown() string {
 			return
 		}
 		fmt.Fprintf(&b, "%s- %s\n", indent, p)
+		printed[p] = true
 		onPath[p] = true
 		kids := children[p]
 		sort.Strings(kids)
@@ -154,6 +156,20 @@ func (v GraphView) Markdown() string {
 	}
 	for _, r := range roots {
 		walk(r, 0)
+	}
+	// A closed part-of cycle has no root (every member has a parent), so no walk
+	// reaches it; root it at its first member so the view still shows it, marked.
+	var unreached []string
+	for _, n := range v.Nodes {
+		if n.HasFrontmatter && hasParent[n.Path] && !printed[n.Path] {
+			unreached = append(unreached, n.Path)
+		}
+	}
+	sort.Strings(unreached)
+	for _, p := range unreached {
+		if !printed[p] {
+			walk(p, 0)
+		}
 	}
 	b.WriteString("\n## Cross-references\n\n")
 	for _, e := range v.MetadataEdges {
