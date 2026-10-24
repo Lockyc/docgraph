@@ -488,8 +488,9 @@ docgraph version                    # print version (also --version, -v)
 git repo / malformed leak config. `footgun-drift` and `covers-drift` are
 advisory: `0` regardless of findings (nag on stdout), `2` only on a git/usage
 error. `doc-drift` blocks: `0` clean (or loop-guard-silenced) · `2` on a
-dangling-reference, anchored-value or covers finding (stderr) or on an error · `1` on a
-bad flag. `covers` /
+dangling-reference, anchored-value or covers finding (stderr), or on an error the
+first time it is seen · `1` on the same error again (bare runs; a clean run re-arms
+it — `--range` always exits `2` on an error) or a bad flag. `covers` /
 `index` / `stale` / `graph` are read-only: `0` always on success, `2` only on error.
 
 **Linked worktrees work**, with nothing to configure. A worktree whose pointer is

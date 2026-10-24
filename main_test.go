@@ -1011,6 +1011,28 @@ func TestDocDriftLoopGuardNagsOncePerHead(t *testing.T) {
 	}
 }
 
+// TestDocDriftToolErrorBlocksOncePerError pins that a bare run's tool error is
+// heard once (blocks) and then only reported, so a persistent failure never
+// wedges every Stop — and that a clean run re-arms it.
+func TestDocDriftToolErrorBlocksOncePerError(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := t.TempDir()
+	boom := fmt.Errorf("git diff: exit status 128")
+	if got := docDriftToolError(root, io.Discard, boom); got != 2 {
+		t.Fatalf("first sighting must block -> want 2, got %d", got)
+	}
+	if got := docDriftToolError(root, io.Discard, boom); got != 1 {
+		t.Fatalf("same error again must not block -> want 1, got %d", got)
+	}
+	if got := docDriftToolError(root, io.Discard, fmt.Errorf("another")); got != 2 {
+		t.Fatalf("a different error must block -> want 2, got %d", got)
+	}
+	clearDocDriftError(root)
+	if got := docDriftToolError(root, io.Discard, fmt.Errorf("another")); got != 2 {
+		t.Fatalf("after a clean run the error blocks again -> want 2, got %d", got)
+	}
+}
+
 // TestDocDriftLoopGuardNagsOncePerFinding pins that a new HEAD carrying only
 // findings the last nag already raised stays silent, and that a NEW finding
 // blocks again — a long-lived branch's distant merge-base must not re-block

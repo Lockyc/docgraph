@@ -926,8 +926,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		diff, err = audit.DocDriftDiff(root, spec)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "docgraph: %v\n", err)
-		return 2
+		return docDriftToolError(root, stderr, err)
 	}
 	var fresh []audit.DocDriftFinding
 	// Already nagged over this exact diff at this HEAD? Then the greps would
@@ -937,8 +936,7 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if scanned := docDriftScanKey(head, diff.Text); docDriftNaggedAt(root) != scanned {
 		findings, err := diff.Findings()
 		if err != nil {
-			fmt.Fprintf(stderr, "docgraph: %v\n", err)
-			return 2
+			return docDriftToolError(root, stderr, err)
 		}
 		if len(findings) > 0 {
 			seen := docDriftNaggedKeys(root)
@@ -948,7 +946,35 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 		}
 	}
+	clearDocDriftError(root)
 	return reportDocDrift(stderr, fresh, sessionCoversDrift(root, head, payload, stderr))
+}
+
+// docDriftToolError reports a docgraph or git failure from a bare (Stop-hook)
+// run. It blocks (2) the first time a given error is seen, so the agent hears it
+// — a non-blocking Stop-hook exit is barely heard — and returns 1 for the same
+// error after that, so a persistent failure never wedges every turn. A clean run
+// clears the record (clearDocDriftError), so the error recurring later blocks again.
+func docDriftToolError(root string, stderr io.Writer, err error) int {
+	fmt.Fprintf(stderr, "docgraph: %v\n", err)
+	p := docDriftStatePath(root, ".error")
+	if p == "" {
+		return 1
+	}
+	key := err.Error()
+	if b, rerr := os.ReadFile(p); rerr == nil && string(b) == key {
+		return 1
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	_ = os.WriteFile(p, []byte(key), 0o644)
+	return 2
+}
+
+// clearDocDriftError forgets the last tool error once a bare run gets through.
+func clearDocDriftError(root string) {
+	if p := docDriftStatePath(root, ".error"); p != "" {
+		_ = os.Remove(p)
+	}
 }
 
 // trunkSessionRevs selects the commits this session made since its previous
