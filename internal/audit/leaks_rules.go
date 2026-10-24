@@ -17,7 +17,7 @@ type Dropped struct {
 // --replace-text lines. Each line is `regex:<pat>`, using filter-repo's default
 // ***REMOVED*** replacement. terms are regexp-escaped and made case-insensitive
 // ((?i)); regex entries also get a (?i) prefix unless they already opt out with a
-// leading (?-i) — mirroring regexMatcher's case-folding (leaks.go:60). A leading
+// leading (?-i) — mirroring regexMatcher's case-folding. A leading
 // (?-i) is stripped rather than emitted verbatim: filter-repo compiles regex: lines
 // with Python re, which rejects the bare (?-i) flag-clear that Go/RE2 accepts, so
 // the opt-out is normalized to a plain case-sensitive pattern instead. Output is
@@ -92,7 +92,7 @@ func countNonEmpty(ss []string) int {
 
 // Validate reports whether cfg is well-formed — every regexp compiles and every
 // [[dir]] path is absolute — by reusing the same compile step the leaks scan runs
-// (leaks.go:105). leaks-rules treats a malformed config as fatal, exactly like the
+// (LeakConfig.compile). leaks-rules treats a malformed config as fatal, exactly like the
 // scan, so it validates before emitting.
 func (c LeakConfig) Validate() error {
 	_, err := c.compile()

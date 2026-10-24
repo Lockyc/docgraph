@@ -370,7 +370,7 @@ wider `--skip`, not just `--skip orphans`.
     vocabulary is not an obstacle: `Doc.Extra` (`yaml:",inline"`) exists so domain
     keys ride along, so an Obsidian clipping keeps `created`/`source`/`author` and
     merely gains `type: reference`. Reference instance: homelab's
-    `docs/cheatsheet/**` (22 clippings folded in 2026-07-17). The corpus becomes a
+    `docs/cheatsheet/**`. The corpus becomes a
     first-class graph citizen instead of a blind spot, which is the better outcome:
     excluding it means `broken`/`untracked` stop covering it too.
   - **Derived / never-hand-edited → exclude** (`.docgraphignore`). Conforming is
@@ -383,8 +383,7 @@ wider `--skip`, not just `--skip orphans`.
   - **Footgun — "it floods orphans and frontmatter" is a reason to look, not to
     exclude.** Both floods have a cheap fix (an index page; a `type:` line), and
     reaching for the ignore because the numbers are big buys a quiet gate at the
-    cost of never checking that content again. docgraph itself made this mistake
-    in this section's first draft.
+    cost of never checking that content again.
 
   **Leaks is a separate layer, and `.docgraphignore` never touches it** —
   `LeakScan` is scoped by git tracking, not the doc-graph ignore layers. A corpus
@@ -508,10 +507,7 @@ docs/" with zero config.
   gate, seeds the leaks config, and installs the skill below. Neither depends on `just`,
   and both declare the module path once, in a `MODULE` var, rather than inline — so the
   `MODULE` lines are `/vN` sites a major bump must move along with every other
-  `@latest` site (see the major-bump footgun). `/docgraph:install`'s copy is the one
-  that already rotted: it inlined the *bare* path, which matches no `go.mod` at major
-  ≥2, so the detect step reported `NOT_IN_REPO` from inside the checkout — and this
-  sentence claiming otherwise is what kept the `/v2` sweep from looking there.
+  `@latest` site (see the major-bump footgun).
 - `.claude/skills/docgraph/SKILL.md` — **the only thing that advertises the read-only
   views.** The gates push themselves at an agent (a hook fires whether or not it knows
   docgraph exists); `covers`/`index`/`stale` are pull-only, so an agent that never
@@ -541,7 +537,7 @@ docs/" with zero config.
   *not* used: it summarises merged PRs, and this repo integrates on the trunk, so it only
   ever produced a bare changelog link.
 - **The major version lives in the module path too** — `go.mod` currently declares
-  `github.com/lockyc/docgraph/v3` (`VERSION` is `3.0.0`), and the `/vN` suffix must be
+  `github.com/lockyc/docgraph/v3`, and the `/vN` suffix must be
   bumped in lockstep with a major `VERSION` bump (`v4` → `module …/v4`). The `/vN`
   sites, all of which must move together: `go.mod`'s `module` line, the `internal/`
   import paths, and **every `go install …@latest` site** — the README install line,

@@ -789,11 +789,8 @@ func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
 // footgunEchoRunes caps how much of a declaration line is echoed. The file:line
 // is what makes a finding actionable — you open the file to judge it, since no
 // terminal echo tells you whether a stated rationale is real. The line itself is
-// only there to say WHICH declaration, so it is trimmed to a recognisable head.
-// Untrimmed it dominated the output: on one real push, nine findings echoed 6.1k
-// characters of CLAUDE.md prose (single lines up to 2k) around 270 characters of
-// actual payload — a per-push tax on the reader, and on an agent's context when
-// the agent is the one pushing.
+// only there to say WHICH declaration, so it is trimmed to a recognisable head:
+// untrimmed, long CLAUDE.md lines dominate the output.
 const footgunEchoRunes = 100
 
 // echoLine trims a declaration line to footgunEchoRunes, rune-safe.

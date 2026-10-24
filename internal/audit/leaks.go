@@ -194,10 +194,7 @@ func (f scanFilter) mayMatch(text string) bool {
 var errBinary = fmt.Errorf("binary file")
 
 // readTextFile reads a file for scanning, deciding binary-ness from a prefix so a
-// large binary is never fully read. looksBinary only ever inspected the first
-// 8000 bytes; reading the whole file to hand it those bytes cost the scan the
-// full size of every vendored archive, image and tarball in the repo on every
-// run (~800MB of the 1GB tracked in one real repo).
+// large binary is never fully read.
 func readTextFile(abs string) ([]byte, error) {
 	f, err := os.Open(abs)
 	if err != nil {

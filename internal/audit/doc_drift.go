@@ -153,7 +153,7 @@ func gitDiff(root, spec string, excl ...string) (string, error) {
 	args := append(append([]string{"diff", spec, "--"}, nonCodePathspec...), excl...)
 	out, err := GitCmd(root, args...).Output()
 	if err != nil {
-		return "", err
+		return "", gitError(err)
 	}
 	return string(out), nil
 }
@@ -307,7 +307,7 @@ func SessionDocDriftDiff(root string, revArgs []string) (CodeDiff, error) {
 	args = append(append(append(args, "--"), nonCodePathspec...), excl...)
 	committed, err := GitCmd(root, args...).Output()
 	if err != nil {
-		return CodeDiff{}, err
+		return CodeDiff{}, gitError(err)
 	}
 	worktree, err := gitDiff(root, "HEAD", excl...)
 	if err != nil {
