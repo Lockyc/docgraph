@@ -313,7 +313,7 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   (`scanDeclarations`/`isFootgunDeclaration`, `internal/audit/footguns.go`): a
   deterministic scanner can't rank whether a stated "why" is real — that would just
   reward typing "because". It prints the two-question test (is this a real footgun;
-  is it at the right doc level — the `doc-and-audit-rigor` skill's test) and leaves
+  is it at the right doc level — the `doc-rigor` skill's test) and leaves
   the judgment to the pusher, so it does not block. Do NOT reintroduce
   rationale detection to "reduce noise" — an honest nag beats a fake judge.
 - **`footgun-drift`'s file scope is `git diff --name-only <range> -- '*.md'`** —
