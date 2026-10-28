@@ -85,8 +85,9 @@ or vice versa. Both are flagged.
    missing `type` is a finding; `README.md` is exempt (see *Where to put
    frontmatter* below). `type` is an advisory vocabulary — see
    [`schema`](#docgraph-schema--the-frontmatter-vocabulary).
-7. **Edges** — every internal `to` target in a frontmatter `links:` list (a
-   repo-root-relative `.md` doc or code path) must exist, and `part-of` /
+7. **Edges** — every entry in a frontmatter `links:` list must carry a `rel`
+   and a `to`; every internal `to` target (a repo-root-relative `.md` doc or
+   code path) must exist; and `part-of` /
    `supersedes` edges between docs must not form a cycle. External URLs and
    `owner/repo:...` cross-repo targets are never checked.
 
@@ -110,7 +111,8 @@ the page, so keep it out.
 
 ### `leaks` — the content scan
 
-Scans **tracked file content** (working tree only, never git history) for
+Scans **tracked file content** (working tree only, never git history; for a
+tracked symlink, the link's target path rather than the file it points to) for
 secret / owner-specific strings, to catch them before a repo goes public. Runs by
 default; `--skip leaks` turns it off.
 
