@@ -578,8 +578,9 @@ Go-bin fallback back to `command -v`.
 
 The doc-graph work is not the cost. On a 9.7k-file repo (~14M tracked lines,
 ~1GB tracked) the six doc-graph checks measure **~0.3s combined**, while
-`leaks` measured **~25s** — because `scanLine` runs one `FindAllStringIndex` per
-rule per line, over every tracked non-binary file. So the profile is inverted
+`leaks` costs the README's figure (*Leaks*) — because `scanLine` runs one
+`FindAllStringIndex` per rule per line, over every tracked non-binary file the
+prefilter lets through. So the profile is inverted
 from where the interesting code is: an optimisation aimed at `BuildContentGraph`
 or `parseDocs` buys nothing measurable, and a change that adds a per-line rule
 pass to `leaks` costs seconds per push.

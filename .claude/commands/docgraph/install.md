@@ -104,10 +104,13 @@ disturb another tool's Stop hooks:
 
 ```bash
 [ -f ~/.claude/settings.json ] || echo '{"hooks":{}}' > ~/.claude/settings.json
-jq --arg cmd "$HOME/go/bin/docgraph doc-drift" \
+tmp=$(mktemp) && jq --arg cmd "$HOME/go/bin/docgraph doc-drift" \
    '.hooks.Stop += [{"hooks":[{"type":"command","command":$cmd}]}]' \
-   ~/.claude/settings.json > /tmp/docgraph-settings.json && mv /tmp/docgraph-settings.json ~/.claude/settings.json
+   ~/.claude/settings.json > "$tmp" && cat "$tmp" > ~/.claude/settings.json; rm -f "$tmp"
 ```
+
+Write back with `cat >`, never `mv`: a settings.json that is a symlink into a dotfiles repo
+must keep the link.
 
 Substitute the real `$BIN_DIR` into `--arg cmd` if it isn't `~/go/bin`. Report whether the
 hook was newly added or already present.
