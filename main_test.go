@@ -1666,6 +1666,21 @@ func TestDocDriftTrunkScansSessionCommits(t *testing.T) {
 	}
 }
 
+// A commit another agent landed on the shared trunk inside this session's
+// window is not this session's to reconcile: it must not block this Stop.
+func TestDocDriftTrunkIgnoresOtherSessionsCommits(t *testing.T) {
+	r := newSessionRepo(t)
+	r.write("src/w.go", "package src\n\ntype OldWidget struct{}\n")
+	r.write("docs/widgets.md", "---\ntype: reference\n---\n\nOldWidget.\n")
+	r.commitAt("2020-01-02T00:00:00Z", "widgets")
+
+	r.write("src/w.go", "package src\n")
+	r.commitAt("", "another agent drops OldWidget")
+	if code, msg := r.stop("s1"); code != 0 {
+		t.Fatalf("foreign commit -> want 0, got %d:\n%s", code, msg)
+	}
+}
+
 // --range is the deterministic manual check: that spec, no state, every run.
 func TestDocDriftCoversRangeIsUnguarded(t *testing.T) {
 	r := newSessionRepo(t)

@@ -977,15 +977,58 @@ func clearDocDriftError(root string) {
 // before that function advances it. An empty selection (HEAD unmoved since the
 // last Stop) is returned as a range that selects nothing, leaving the working
 // tree alone.
+//
+// Within that window only this session's commits count — one it made, or one
+// touching a file it edited (readSessionWork) — so another agent's commit on the
+// shared trunk never blocks this one. An unreadable transcript keeps the whole
+// window, the fallback sessionCoversDrift uses.
 func trunkSessionRevs(root, head string, p stopPayload) []string {
+	none := []string{head + ".." + head}
 	st, known := readCoversSession(root, p.SessionID)
 	if !known {
 		st.since = transcriptStart(p.TranscriptPath)
 	}
-	if rev := sessionRevs(root, head, st); rev != nil {
+	rev := sessionRevs(root, head, st)
+	if rev == nil {
+		return none
+	}
+	work, ok := readSessionWork(p.TranscriptPath)
+	if !ok {
 		return rev
 	}
-	return []string{head + ".." + head}
+	args := append([]string{"log", "--first-parent", "--no-merges", "--no-renames", "--name-only", "--format=%x00%H"}, rev...)
+	out, err := audit.GitCmd(root, args...).Output()
+	if err != nil {
+		return rev
+	}
+	var mine []string
+	for _, rec := range strings.Split(string(out), "\x00")[1:] {
+		lines := strings.Split(strings.TrimSpace(rec), "\n")
+		if sessionMadeCommit(root, work, lines[0], lines[1:]) {
+			mine = append(mine, lines[0])
+		}
+	}
+	if len(mine) == 0 {
+		return none
+	}
+	return append([]string{"--no-walk"}, mine...)
+}
+
+// sessionMadeCommit reports whether commit sha, changing paths, is this
+// session's: its sha is in the transcript's commit output, or it touches a file
+// the session edited.
+func sessionMadeCommit(root string, w sessionWork, sha string, paths []string) bool {
+	for _, c := range w.commits {
+		if strings.HasPrefix(sha, c) {
+			return true
+		}
+	}
+	for _, path := range paths {
+		if path != "" && w.edited[realPath(filepath.Join(root, path))] {
+			return true
+		}
+	}
+	return false
 }
 
 // reportDocDrift prints whatever was found and returns the Stop hook's exit code.
