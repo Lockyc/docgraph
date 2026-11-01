@@ -944,6 +944,11 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			if !docDriftAllSeen(findings, seen) {
 				fresh = findings
 			}
+		} else if p := docDriftStatePath(root, ""); p != "" {
+			// Clean: forget the last nag, so a finding fixed here and reintroduced
+			// later is new again. The clean key isn't recorded, so the next doc
+			// edit still scans.
+			_ = os.Remove(p)
 		}
 	}
 	clearDocDriftError(root)

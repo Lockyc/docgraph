@@ -1071,6 +1071,41 @@ func TestDocDriftLoopGuardNagsOncePerFinding(t *testing.T) {
 	}
 }
 
+// TestDocDriftFixedThenReintroducedBlocksAgain pins that a clean scan forgets the
+// last nag: a finding fixed and later brought back is new, not "already seen".
+func TestDocDriftFixedThenReintroducedBlocksAgain(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := setupRepoMain(t, map[string]string{
+		"x.go": "type OldWidget struct{}\n", "CLAUDE.md": "We use OldWidget.\n",
+	})
+	git := func(a ...string) {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	commit := func(msg string) { git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", msg) }
+	commit("base")
+	git("branch", "dev")
+	git("checkout", "-qb", "feature")
+	run := func() int { return runDocDrift([]string{dir}, strings.NewReader(""), io.Discard, io.Discard) }
+
+	os.WriteFile(filepath.Join(dir, "x.go"), []byte("package x\n"), 0o644)
+	commit("drop OldWidget")
+	if code := run(); code != 2 {
+		t.Fatalf("first nag must block -> want 2, got %d", code)
+	}
+	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("We use nothing.\n"), 0o644)
+	commit("fix the doc")
+	if code := run(); code != 0 {
+		t.Fatalf("fixed -> want 0, got %d", code)
+	}
+	os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("We use OldWidget again.\n"), 0o644)
+	commit("bring the reference back")
+	if code := run(); code != 2 {
+		t.Fatalf("reintroduced finding must block -> want 2, got %d", code)
+	}
+}
+
 // setupDriftRepoMain builds a committed repo whose working tree has removed a
 // symbol a doc still names — i.e. a bare doc-drift run finds drift. Returns the
 // repo dir and the root as audit.GitRoot resolves it (macOS symlinks /var ->
