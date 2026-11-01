@@ -1238,6 +1238,26 @@ func TestRunCovers(t *testing.T) {
 	}
 }
 
+// TestViewsRefuseStrayArguments pins that a view never silently ignores an
+// argument: `graph ../other-repo` must not print the cwd's graph.
+func TestViewsRefuseStrayArguments(t *testing.T) {
+	dir := setupRepoMain(t, map[string]string{"CLAUDE.md": "x\n"})
+	restore := chdir(t, dir)
+	defer restore()
+	for name, run := range map[string]func([]string, io.Writer, io.Writer) int{
+		"index": runIndex, "stale": runStale, "graph": runGraph,
+	} {
+		var out, errb bytes.Buffer
+		if code := run([]string{"../other-repo"}, &out, &errb); code != 2 || out.Len() != 0 {
+			t.Errorf("%s with a stray argument: exit %d, stdout %q; want 2 and nothing", name, code, out.String())
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := runCovers([]string{"a.go", "b.go"}, &out, &errb); code != 2 {
+		t.Errorf("covers with two paths: exit %d, want 2", code)
+	}
+}
+
 // TestRunGraphJSON exercises the graph subcommand end-to-end: exit 0, and
 // stdout is valid JSON carrying the versioned schema stamp. graph is a
 // read-only view (like covers/index/stale above) — never gates, never

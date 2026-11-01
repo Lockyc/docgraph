@@ -1576,7 +1576,7 @@ func runCovers(args []string, stdout, stderr io.Writer) int {
 	if perr != nil {
 		return flagExit(perr)
 	}
-	if len(positional) < 1 {
+	if len(positional) != 1 {
 		fmt.Fprintln(stderr, "docgraph: usage: docgraph covers <repo-relative-path>")
 		return 2
 	}
@@ -1595,6 +1595,22 @@ func runCovers(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// viewArgs parses a cwd-scoped view's flags and refuses any positional argument:
+// `docgraph graph ../other-repo` would otherwise print the cwd's graph, silently
+// ignoring the argument (parseArgs' docblock). ok=false means return code.
+func viewArgs(fs *flag.FlagSet, args []string, stderr io.Writer) (code int, ok bool) {
+	positional, perr := parseArgs(fs, args)
+	if perr != nil {
+		return flagExit(perr), false
+	}
+	if len(positional) > 0 {
+		fmt.Fprintf(stderr, "docgraph: %s takes no arguments (it reads the current repo): %s\n",
+			strings.TrimPrefix(fs.Name(), "docgraph "), strings.Join(positional, " "))
+		return 2, false
+	}
+	return 0, true
+}
+
 // runIndex prints a generated markdown index of the doc graph to stdout (redirect
 // it to an index.md). A read-only view — never part of the gate.
 func runIndex(args []string, stdout, stderr io.Writer) int {
@@ -1602,8 +1618,8 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
-	if _, perr := parseArgs(fs, args); perr != nil {
-		return flagExit(perr)
+	if code, ok := viewArgs(fs, args, stderr); !ok {
+		return code
 	}
 	root, err := audit.GitRoot(".")
 	if err != nil {
@@ -1627,8 +1643,8 @@ func runStale(args []string, stdout, stderr io.Writer) int {
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
 	olderThan := fs.Int("older-than", 180, "default staleness threshold in days (a per-doc `review:` cadence overrides it)")
-	if _, perr := parseArgs(fs, args); perr != nil {
-		return flagExit(perr)
+	if code, ok := viewArgs(fs, args, stderr); !ok {
+		return code
 	}
 	root, err := audit.GitRoot(".")
 	if err != nil {
@@ -1658,8 +1674,8 @@ func runGraph(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
 	asJSON := fs.Bool("json", false, "emit the graph as JSON (schemaVersion-stamped)")
 	ref := fs.String("ref", "", "read the graph from this git ref (e.g. HEAD, dev); works on a bare repo, reads committed state not the working tree")
-	if _, perr := parseArgs(fs, args); perr != nil {
-		return flagExit(perr)
+	if code, ok := viewArgs(fs, args, stderr); !ok {
+		return code
 	}
 
 	var v audit.GraphView
