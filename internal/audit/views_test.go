@@ -60,7 +60,7 @@ func TestIndexMarkdown(t *testing.T) {
 		"docs/h.md":   {Type: "reference", Heading: "From H1"},               // no title → falls back to the body H1
 		"docs/z.md":   {Type: "reference"},                                   // no title, no H1 → falls back to path
 	}
-	out := IndexMarkdown(docs)
+	out := IndexMarkdown(docs, "")
 	// runbook is earlier than reference in CoreTypes order.
 	if !strings.Contains(out, "## runbook") || !strings.Contains(out, "## reference") {
 		t.Fatalf("missing type headings:\n%s", out)
@@ -79,6 +79,59 @@ func TestIndexMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(out, "[docs/z.md](docs/z.md)") {
 		t.Errorf("doc with neither title nor H1 should fall back to its path:\n%s", out)
+	}
+}
+
+// With a dest, links resolve from dest's directory, the page opens with a
+// `type: index` block, and dest is not listed in itself.
+func TestIndexMarkdownForDest(t *testing.T) {
+	docs := map[string]*Doc{
+		"CLAUDE.md":        {Type: "architecture", Heading: "Notes"},
+		"docs/a.md":        {Type: "reference", Heading: "A"},
+		"docs/sub/b.md":    {Type: "guide", Heading: "B"},
+		"docs/index.md":    {Type: "index", Heading: "Index"},
+		"other/runbook.md": {Type: "runbook", Heading: "R"},
+	}
+	out := IndexMarkdown(docs, "docs/index.md")
+	if !strings.HasPrefix(out, "---\ntype: index\n---\n\n# Index\n") {
+		t.Errorf("missing leading type: index block:\n%s", out)
+	}
+	for _, want := range []string{"[Notes](../CLAUDE.md)", "[A](a.md)", "[B](sub/b.md)", "[R](../other/runbook.md)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "(index.md)") || strings.Contains(out, "## index") {
+		t.Errorf("dest should not list itself:\n%s", out)
+	}
+}
+
+// The page `index --for docs/index.md` generates passes the whole-state audit
+// when written to docs/index.md.
+func TestAuditPassesGeneratedIndex(t *testing.T) {
+	files := map[string]string{
+		"README.md":     "# Proj\n",
+		"CLAUDE.md":     "---\ntype: architecture\nlinks:\n  - rel: part-of\n    to: docs/index.md\n---\n\n# Notes\n",
+		"docs/index.md": "placeholder\n",
+		"docs/a.md":     "---\ntype: reference\nlinks:\n  - rel: part-of\n    to: docs/index.md\n---\n\n# A\n",
+		"docs/sub/b.md": "---\ntype: guide\nlinks:\n  - rel: part-of\n    to: docs/index.md\n---\n\n# B\n",
+	}
+	var track []string
+	for f := range files {
+		track = append(track, f)
+	}
+	dir := setupRepo(t, files, track)
+	docs, err := RepoDocs(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "docs/index.md", IndexMarkdown(docs, "docs/index.md"))
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.HasFindings() {
+		t.Errorf("generated index should pass the audit: %+v", rep)
 	}
 }
 

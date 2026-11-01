@@ -98,7 +98,7 @@ the first time a doc is added or renamed. But it can't be fixed the same way
 tools.md was:
 
 - The section lives **inside** `CLAUDE.md`, surrounded by prose that must stay.
-  `index > docs/index.md` would produce a *second* page, not replace the
+  `index --for docs/index.md > docs/index.md` would produce a *second* page, not replace the
   section — so the shadow would remain, now with a rival.
 - Its per-doc descriptions are **richer than a one-line `description:`** — some
   are a paragraph carrying real guidance ("Read before touching `sortHierarchy`

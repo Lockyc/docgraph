@@ -1654,13 +1654,15 @@ func viewArgs(fs *flag.FlagSet, args []string, stderr io.Writer) (code int, ok b
 	return 0, true
 }
 
-// runIndex prints a generated markdown index of the doc graph to stdout (redirect
-// it to an index.md). A read-only view — never part of the gate.
+// runIndex prints a generated markdown index of the doc graph to stdout;
+// `--for <dest>` shapes it to be redirected into dest. A read-only view — never
+// part of the gate.
 func runIndex(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docgraph index", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var ignores multiFlag
 	fs.Var(&ignores, "ignore", "glob to exclude (repeatable)")
+	dest := fs.String("for", "", "repo-root-relative `file` the output will be written to: links resolve from its directory and the page opens with type: index frontmatter")
 	if code, ok := viewArgs(fs, args, stderr); !ok {
 		return code
 	}
@@ -1673,7 +1675,7 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
-	fmt.Fprint(stdout, audit.IndexMarkdown(docs))
+	fmt.Fprint(stdout, audit.IndexMarkdown(docs, *dest))
 	return 0
 }
 

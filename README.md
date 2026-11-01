@@ -374,7 +374,7 @@ always exit `0` on success — `2` only on a usage/git error.
 
 ```bash
 docgraph covers <path>               # docs that cover <path> (repo-root-relative)
-docgraph index                       # generated markdown index of the doc graph
+docgraph index [--for <file>]        # generated markdown index of the doc graph
 docgraph stale                       # docs whose verified date is past its threshold
 docgraph stale --older-than 90       # override the default 180-day threshold
 docgraph graph                       # both doc graphs as human-readable markdown
@@ -395,8 +395,12 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
   omitted when a doc has no `description`). The label is the doc's `title` if
   set, else its **body H1**, else its path; set `title` only when the index label
   should differ from the H1. It's a view, not a hand-maintained
-  page — redirect it into a tracked file (`docgraph index > docs/index.md`) and
-  regenerate when the graph changes.
+  page — redirect it into a tracked file and regenerate when the graph changes:
+  `docgraph index --for docs/index.md > docs/index.md`. `--for <file>` writes
+  each link relative to that file's directory, opens the page with a
+  `type: index` frontmatter block and leaves the file out of its own listing, so
+  the result passes the gate (it still needs a doc→doc edge, e.g. a `part-of`
+  pointing at it, or `disconnected` flags it).
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
   past its staleness threshold: `docs/old.md (verified 2026-01-01 — 195d old,
   threshold 180d)`. The threshold is `--older-than` (default **180**) unless the

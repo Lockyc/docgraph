@@ -58,11 +58,25 @@ func CoversOf(docs map[string]*Doc, target string) []string {
 // alphabetically), each listed with its label and description. The label is the
 // doc's `title` if set, else its body H1, else its path — so a doc gets a
 // readable index entry without restating its own heading in frontmatter. Only
-// docs with frontmatter appear — they are the graph nodes. Intended to be
-// redirected into an index.md.
-func IndexMarkdown(docs map[string]*Doc) string {
+// docs with frontmatter appear — they are the graph nodes.
+//
+// dest is the repo-root-relative file the output will be written to, or "" for
+// a free-standing listing. With a dest, each link is relative to dest's
+// directory (markdown links resolve against the source file, so a root-relative
+// path inside docs/index.md would point at docs/docs/…), the page opens with a
+// `type: index` frontmatter block so it passes the `frontmatter` check, and dest
+// itself is left out of its own listing.
+func IndexMarkdown(docs map[string]*Doc, dest string) string {
+	base := ""
+	if dest != "" {
+		dest = filepath.ToSlash(filepath.Clean(dest))
+		base = filepath.Dir(dest)
+	}
 	byType := map[string][]string{}
 	for src, d := range docs {
+		if src == dest {
+			continue
+		}
 		t := d.Type
 		if strings.TrimSpace(t) == "" {
 			t = "(untyped)"
@@ -87,6 +101,9 @@ func IndexMarkdown(docs map[string]*Doc) string {
 	order = append(order, rest...)
 
 	var b strings.Builder
+	if dest != "" {
+		b.WriteString("---\ntype: index\n---\n\n")
+	}
 	b.WriteString("# Index\n")
 	for _, t := range order {
 		fmt.Fprintf(&b, "\n## %s\n\n", t)
@@ -101,10 +118,16 @@ func IndexMarkdown(docs map[string]*Doc) string {
 			if strings.TrimSpace(title) == "" {
 				title = src
 			}
+			link := src
+			if base != "" {
+				if rel, err := filepath.Rel(base, src); err == nil {
+					link = filepath.ToSlash(rel)
+				}
+			}
 			if strings.TrimSpace(d.Description) != "" {
-				fmt.Fprintf(&b, "- [%s](%s) — %s\n", title, src, d.Description)
+				fmt.Fprintf(&b, "- [%s](%s) — %s\n", title, link, d.Description)
 			} else {
-				fmt.Fprintf(&b, "- [%s](%s)\n", title, src)
+				fmt.Fprintf(&b, "- [%s](%s)\n", title, link)
 			}
 		}
 	}

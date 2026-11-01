@@ -26,6 +26,7 @@ All four are read-only, never gate, and exit 0 even when they print nothing.
 ```bash
 docgraph covers <path>    # which docs govern <path> — REPO-ROOT-RELATIVE
 docgraph index            # generated markdown index of the doc graph
+docgraph index --for docs/index.md > docs/index.md   # ...as a page that passes the gate
 docgraph stale            # docs past their freshness threshold
 docgraph stale --older-than 90
 docgraph graph            # both doc graphs (part-of tree + cross-refs + islands)
