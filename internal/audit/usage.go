@@ -154,22 +154,43 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 // LogPath resolves the usage-log file: DOCGRAPH_LOG env > cfgPath (config [log].path)
 // > $XDG_STATE_HOME/docgraph/usage.jsonl (default ~/.local/state/... — XDG *state*,
 // not config, matching the machine's ~/.local/state ledger convention).
+//
+// cfgPath expands a leading ~/ and must then be absolute: the log is written from
+// whatever cwd docgraph runs in (the repo root, under the pre-push hook), so a
+// relative or unexpanded-~ path would land inside the repo — at level 3, leak
+// match text where a `git add -A` commits it.
 func LogPath(cfgPath string) (string, error) {
 	if env := os.Getenv("DOCGRAPH_LOG"); env != "" {
 		return env, nil
 	}
 	if cfgPath != "" {
-		return cfgPath, nil
-	}
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
+		p, err := expandDirPath(cfgPath)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("[log].path %q: %w", cfgPath, err)
 		}
-		dir = filepath.Join(home, ".local", "state")
+		return p, nil
+	}
+	dir, err := XDGDir("XDG_STATE_HOME", ".local", "state")
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "docgraph", "usage.jsonl"), nil
+}
+
+// XDGDir resolves the XDG base directory named by env — its value when that is an
+// absolute path (the spec says a relative one is ignored), else ~/<fallback...>.
+// The one rule every docgraph config and state path follows: XDG, never
+// os.UserConfigDir(), which on macOS is ~/Library/Application Support, Apple's
+// GUI-app convention and the wrong home for a CLI tool.
+func XDGDir(env string, fallback ...string) (string, error) {
+	if dir := os.Getenv(env); filepath.IsAbs(dir) {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{home}, fallback...)...), nil
 }
 
 // LogRun appends rec as one newline-terminated JSON line to path, creating parent

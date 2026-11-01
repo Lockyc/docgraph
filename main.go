@@ -390,6 +390,7 @@ func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []
 	}
 	logPath, err := audit.LogPath(logCfg.Path)
 	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
 		return
 	}
 	rec := audit.BuildRecord(cmd, root, version, exit, rep, leaks, sel, logCfg.Level, time.Now())
@@ -397,8 +398,7 @@ func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []
 }
 
 // resolveConfig resolves the global config.toml: --config > $DOCGRAPH_CONFIG >
-// $XDG_CONFIG_HOME/docgraph/config.toml (else ~/.config/...). Same XDG discipline
-// as resolveLeaksConfig — never os.UserConfigDir() (wrong on macOS for a CLI tool).
+// $XDG_CONFIG_HOME/docgraph/config.toml (else ~/.config/...; see audit.XDGDir).
 func resolveConfig(flagVal string) (string, error) {
 	if flagVal != "" {
 		return flagVal, nil
@@ -406,13 +406,9 @@ func resolveConfig(flagVal string) (string, error) {
 	if env := os.Getenv("DOCGRAPH_CONFIG"); env != "" {
 		return env, nil
 	}
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".config")
+	dir, err := audit.XDGDir("XDG_CONFIG_HOME", ".config")
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "docgraph", "config.toml"), nil
 }
@@ -503,16 +499,9 @@ func resolveLeaksConfig(flagVal string) (string, error) {
 	if env := os.Getenv("DOCGRAPH_LEAKS"); env != "" {
 		return env, nil
 	}
-	// XDG, not os.UserConfigDir(): docgraph is a CLI tool, and os.UserConfigDir()
-	// returns ~/Library/Application Support on macOS (Apple's GUI-app convention),
-	// which is the wrong home for a dev tool. Honor $XDG_CONFIG_HOME, else ~/.config.
-	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(home, ".config")
+	dir, err := audit.XDGDir("XDG_CONFIG_HOME", ".config")
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "docgraph", "leaks.toml"), nil
 }
@@ -1490,13 +1479,9 @@ func docDriftRecordNag(root, scanned string, fs []audit.DocDriftFinding) {
 // docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
 // ~/.local/state/...), matching the usage-log XDG-state convention.
 func docDriftStateDir() string {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".local", "state")
+	dir, err := audit.XDGDir("XDG_STATE_HOME", ".local", "state")
+	if err != nil {
+		return ""
 	}
 	return filepath.Join(dir, "docgraph", "doc-drift")
 }

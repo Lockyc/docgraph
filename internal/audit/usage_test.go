@@ -129,6 +129,26 @@ func TestLogPathPrecedence(t *testing.T) {
 	}
 }
 
+func TestLogPathExpandsTildeAndRejectsRelative(t *testing.T) {
+	t.Setenv("DOCGRAPH_LOG", "")
+	home, _ := os.UserHomeDir()
+	got, err := LogPath("~/.local/state/docgraph/usage.jsonl")
+	if err != nil || got != filepath.Join(home, ".local/state/docgraph/usage.jsonl") {
+		t.Fatalf("~ not expanded: got %q, %v", got, err)
+	}
+	if _, err := LogPath("logs/usage.jsonl"); err == nil {
+		t.Fatal("a relative [log].path must be an error, not a file inside the cwd")
+	}
+}
+
+func TestXDGDirIgnoresARelativeValue(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	if got, _ := XDGDir("XDG_STATE_HOME", ".local", "state"); got != filepath.Join(home, ".local", "state") {
+		t.Fatalf("relative XDG value must fall back: got %q", got)
+	}
+}
+
 func TestLogRunAppendsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "usage.jsonl") // parent dir does not exist yet
