@@ -536,15 +536,12 @@ docs/" with zero config.
   without them, before it touches anything public. `gh --generate-notes` is deliberately
   *not* used: it summarises merged PRs, and this repo integrates on the trunk, so it only
   ever produced a bare changelog link.
-- **The major version lives in the module path too** — `go.mod` currently declares
-  `github.com/lockyc/docgraph/v3`, and the `/vN` suffix must be
-  bumped in lockstep with a major `VERSION` bump (`v4` → `module …/v4`). The `/vN`
-  sites, all of which must move together: `go.mod`'s `module` line, the `internal/`
-  import paths, and **every `go install …@latest` site** — the README install line,
-  `install.sh`'s `MODULE` var, `/docgraph:install`'s `MODULE` var, `SKILL.md`, and the
-  fail-closed hook's own "install it:" message that `hookScript` prints. This is Go's
-  semantic import versioning, not a style choice; the footgun below is what enforcing
-  it costs when you don't.
+- **The major version lives in the module path too** — a major `VERSION` bump moves
+  the `/vN` suffix (`v4` → `module …/v4`): `go.mod`, the `internal/` import paths, and
+  every tracked install site. `modulePath()` derives the hook's install hint from
+  `VERSION`, and `TestModuleMajorMatchesVersion` fails on any site left behind. This is
+  Go's semantic import versioning, not a style choice; the footgun below is what
+  enforcing it costs when you don't.
 
 ## Footgun — a major bump must move the module path, or the release is invisible
 
