@@ -97,21 +97,27 @@ func cleanTarget(target string) string {
 	return target
 }
 
-// isLocalMd reports whether target is an intra-repo link to a .md file.
+// isLocalMd reports whether target is an intra-repo link to a .md file. A
+// root-relative /docs/x.md is one (GitHub resolves it against the repo root); a
+// protocol-relative //host/x.md is not.
 func isLocalMd(target string) bool {
 	if strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") {
 		return false
 	}
 	t := cleanTarget(target)
-	if t == "" || strings.HasPrefix(t, "/") {
+	if t == "" || strings.HasPrefix(t, "//") {
 		return false
 	}
 	return strings.HasSuffix(t, ".md")
 }
 
-// resolveTarget resolves target relative to the source file's directory and
-// returns a /-separated, cleaned, repo-relative path.
+// resolveTarget resolves target relative to the source file's directory — or,
+// for a leading-/ target, the repo root — and returns a /-separated, cleaned,
+// repo-relative path.
 func resolveTarget(sourceRel, target string) string {
-	dir := filepath.Dir(sourceRel)
-	return filepath.ToSlash(filepath.Clean(filepath.Join(dir, cleanTarget(target))))
+	t := cleanTarget(target)
+	if strings.HasPrefix(t, "/") {
+		return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(t)), "/")
+	}
+	return filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourceRel), t)))
 }

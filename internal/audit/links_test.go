@@ -28,7 +28,7 @@ func TestIsLocalMd(t *testing.T) {
 	cases := map[string]bool{
 		"x.md": true, "../a/b.md": true, "y.md#frag": true, "y.md \"T\"": true,
 		"https://e.com/a.md": false, "mailto:x@y.z": false, "#frag": false,
-		"/abs/site.md": false, "img.png": false, "": false,
+		"/docs/x.md": true, "//host/x.md": false, "img.png": false, "": false,
 	}
 	for in, want := range cases {
 		if got := isLocalMd(in); got != want {
@@ -42,6 +42,13 @@ func TestResolveTarget(t *testing.T) {
 		t.Errorf("resolveTarget = %q", got)
 	}
 	if got := resolveTarget("CLAUDE.md", "docs/index.md"); got != "docs/index.md" {
+		t.Errorf("resolveTarget = %q", got)
+	}
+	// A leading / resolves against the repo root, never above it.
+	if got := resolveTarget("docs/services/a.md", "/docs/b.md#x"); got != "docs/b.md" {
+		t.Errorf("resolveTarget = %q", got)
+	}
+	if got := resolveTarget("docs/a.md", "/../c.md"); got != "c.md" {
 		t.Errorf("resolveTarget = %q", got)
 	}
 }

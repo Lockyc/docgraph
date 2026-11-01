@@ -49,6 +49,26 @@ func TestAuditPathMentionReachability(t *testing.T) {
 	}
 }
 
+// A root-relative link (/docs/x.md) resolves against the repo root, as GitHub
+// does: it is a content edge from any directory, and a dead one is broken.
+func TestAuditRootRelativeLinks(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md":     "[a](/docs/sub/a.md) and [dead](/docs/gone.md)\n",
+		"docs/sub/a.md": "leaf\n",
+	}, []string{"CLAUDE.md", "docs/sub/a.md"})
+
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Orphans) != 0 {
+		t.Errorf("root-relative link should reach docs/sub/a.md, orphans = %v", rep.Orphans)
+	}
+	if got := rep.BrokenLinks; len(got) != 1 || got[0].Target != "docs/gone.md" {
+		t.Errorf("broken = %v, want one for docs/gone.md", got)
+	}
+}
+
 func TestAuditExcludesToolingNotRealDocs(t *testing.T) {
 	// Skill files under .claude/ are runtime tooling, not docs — excluded.
 	// A real doc outside docs/ (a config-dir README) IS a document and must be
