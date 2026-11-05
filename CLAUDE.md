@@ -60,8 +60,8 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   invoked by the generated pre-push hook, always exit `0` on success regardless of
   what they print. `covers <path>` answers "which doc governs this file" (a
   `covers` frontmatter edge, direct or parent-directory); `stale` reads the
-  `verified`/`review` freshness fields the frontmatter model has carried since
-  the `schema` vocabulary but that no check has read until now; `index` is a
+  `verified`/`review` freshness fields — by calendar against `review`, and by fact
+  against the last commit to the doc's `covers` code (`CodeMovedDocs`); `index` is a
   **generated** view (`IndexMarkdown`), not a hand-maintained page — redirect
   it into a tracked file rather than editing the output; `graph` renders **both**
   graphs (`BuildGraphView`) — a human markdown view (part-of tree + cross-refs +
@@ -447,7 +447,8 @@ docs/" with zero config.
   `.git`, and every git command fails. Stripping the parenthetical cause as noise
   restores a message whose honest reading is "docgraph can't run in a worktree".
 - `internal/audit/views.go` — `RepoDocs` (the shared parse path behind the
-  views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`.
+  views), `CoversOf`, `IndexMarkdown`, `StaleDocs` + `parseReviewDays`,
+  `CodeMovedDocs`.
 - `internal/audit/graph.go` — the two graphs: `BuildContentGraph`/`ContentGraph`
   (links ∪ path-mentions over doc bodies; `Islands()` = zero-inbound non-roots →
   `orphans`) and `BuildMetadataGraph`/`MetadataGraph` (`isMetadataEdge` doc→doc

@@ -143,6 +143,95 @@ type StaleFinding struct {
 	Threshold int
 }
 
+// CodeMovedFinding is a doc verified before code it covers last changed: Changed
+// is that change's commit day and Path one file it touched.
+type CodeMovedFinding struct {
+	File     string
+	Verified string
+	Changed  string
+	Path     string
+}
+
+// CodeMovedDocs reports docs whose covered code was committed to on a later day
+// than the doc's `verified` date — stale by fact, where StaleDocs is stale by
+// calendar. Day granularity matches `verified`, so a change on the day of
+// verification is taken as seen; prose files under a covered directory are not
+// code. One `git log` walk since the oldest verified date serves every doc, newest
+// commit first, each doc settled by the first commit touching its covered paths.
+func CodeMovedDocs(root string, docs map[string]*Doc) ([]CodeMovedFinding, error) {
+	type watch struct {
+		verified string
+		paths    []string
+	}
+	watched := map[string]watch{}
+	pathSet := map[string]bool{}
+	oldest := ""
+	for src, d := range docs {
+		v := strings.TrimSpace(d.Verified)
+		if _, err := time.Parse("2006-01-02", v); err != nil {
+			continue
+		}
+		var paths []string
+		for _, e := range d.Links {
+			if e.Rel == "covers" && ClassifyTarget(e.To) == EdgeCode {
+				p := strings.TrimSuffix(ResolveEdgeTarget(e.To), "/")
+				paths = append(paths, p)
+				pathSet[p] = true
+			}
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		watched[src] = watch{v, paths}
+		if oldest == "" || v < oldest {
+			oldest = v
+		}
+	}
+	if len(watched) == 0 {
+		return nil, nil
+	}
+	args := []string{"log", "--since=" + oldest, "--format=%x00%cs", "--name-only", "--"}
+	for p := range pathSet {
+		args = append(args, p)
+	}
+	args = append(args, nonCodePathspec[1:]...) // the prose excludes, without "." widening scope
+	out, err := GitCmd(root, args...).Output()
+	if err != nil {
+		return nil, gitError(err)
+	}
+	var found []CodeMovedFinding
+	for _, rec := range strings.Split(string(out), "\x00")[1:] {
+		lines := strings.Split(strings.TrimSpace(rec), "\n")
+		day, files := lines[0], lines[1:]
+		for src, w := range watched {
+			if day <= w.verified { // ISO dates compare as strings
+				continue
+			}
+			if f := firstUnder(files, w.paths); f != "" {
+				found = append(found, CodeMovedFinding{File: src, Verified: w.verified, Changed: day, Path: f})
+				delete(watched, src)
+			}
+		}
+		if len(watched) == 0 {
+			break
+		}
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].File < found[j].File })
+	return found, nil
+}
+
+// firstUnder returns the first of files equal to or inside one of paths.
+func firstUnder(files, paths []string) string {
+	for _, f := range files {
+		for _, p := range paths {
+			if f == p || strings.HasPrefix(f, p+"/") {
+				return f
+			}
+		}
+	}
+	return ""
+}
+
 // StaleDocs reports docs whose verified date is older than their threshold as of
 // now. Threshold is the doc's `review:` cadence (e.g. "90d") if set and parseable,
 // else defaultDays. Docs with no `verified`, or an unparseable verified/review,

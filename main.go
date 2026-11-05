@@ -1818,8 +1818,22 @@ func runStale(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "docgraph: %v\n", err)
 		return 2
 	}
+	moved, err := audit.CodeMovedDocs(root, docs)
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: %v\n", err)
+		return 2
+	}
+	type line struct{ file, text string }
+	var lines []line
 	for _, s := range audit.StaleDocs(docs, time.Now(), *olderThan) {
-		fmt.Fprintf(stdout, "%s (verified %s — %dd old, threshold %dd)\n", s.File, s.Verified, s.AgeDays, s.Threshold)
+		lines = append(lines, line{s.File, fmt.Sprintf("%s (verified %s — %dd old, threshold %dd)", s.File, s.Verified, s.AgeDays, s.Threshold)})
+	}
+	for _, m := range moved {
+		lines = append(lines, line{m.File, fmt.Sprintf("%s (verified %s — covered code changed %s: %s)", m.File, m.Verified, m.Changed, m.Path)})
+	}
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i].file < lines[j].file })
+	for _, l := range lines {
+		fmt.Fprintln(stdout, l.text)
 	}
 	return 0
 }

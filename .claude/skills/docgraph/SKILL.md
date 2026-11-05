@@ -27,7 +27,7 @@ All four are read-only, never gate, and exit 0 even when they print nothing.
 docgraph covers <path>    # which docs govern <path> — REPO-ROOT-RELATIVE
 docgraph index            # generated markdown index of the doc graph
 docgraph index --for docs/index.md > docs/index.md   # ...as a page that passes the gate
-docgraph stale            # docs past their freshness threshold
+docgraph stale            # docs past their freshness threshold, or verified before their covered code changed
 docgraph stale --older-than 90
 docgraph graph            # both doc graphs (part-of tree + cross-refs + islands)
 docgraph graph --json     # ...as a stable schemaVersion-stamped JSON payload

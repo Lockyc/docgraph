@@ -383,7 +383,7 @@ always exit `0` on success — `2` only on a usage/git error.
 ```bash
 docgraph covers <path>               # docs that cover <path> (repo-root-relative)
 docgraph index [--for <file>]        # generated markdown index of the doc graph
-docgraph stale                       # docs whose verified date is past its threshold
+docgraph stale                       # docs past their threshold, or verified before their covered code changed
 docgraph stale --older-than 90       # override the default 180-day threshold
 docgraph graph                       # both doc graphs as human-readable markdown
 docgraph graph --json                # ...or as a stable JSON payload (machine seam)
@@ -412,7 +412,11 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
 - **`stale [--older-than <days>]`** — prints every doc whose `verified` date is
   past its staleness threshold: `docs/old.md (verified 2026-01-01 — 195d old,
   threshold 180d)`. The threshold is `--older-than` (default **180**) unless the
-  doc's own `review:` cadence (e.g. `review: 90d`) overrides it. A doc with no
+  doc's own `review:` cadence (e.g. `review: 90d`) overrides it. It also prints
+  every doc verified before the code it `covers` last changed, whatever its
+  age: `docs/auth.md (verified 2026-03-01 — covered code changed 2026-03-10:
+  src/auth.go)`. That is a commit on a later day than `verified` touching a
+  covered path (prose files under a covered directory don't count). A doc with no
   `verified` date, or an unparseable value, is silently skipped — malformed
   frontmatter is the `frontmatter` check's concern.
 - **`graph [--json]`** — serves **both** doc graphs, exactly as the gate sees them. Default
