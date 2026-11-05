@@ -595,6 +595,13 @@ trends over time across all your repos. It is **opt-in** and machine-local: off
 unless a global `config.toml` enables it, so CI, fresh clones, and contributors
 never log.
 
+`doc-drift` logs too (`"cmd":"doc-drift"`), on a Stop that blocks and on one that
+sees a doc an earlier covers nag in the session named since changed — never on a
+quiet Stop. Its counts are `dangling`, `value`, `covers` (docs nagged),
+`covers_pointed` (of those, docs the nag pointed at lines in) and `covers_acted`
+(nagged docs since changed); level 2 adds the doc paths. `covers_acted` against
+`covers` is how often a covers nag leads to a doc edit.
+
 Enable it in `~/.config/docgraph/config.toml` (resolved `--config` →
 `$DOCGRAPH_CONFIG` → `$XDG_CONFIG_HOME/docgraph/config.toml`):
 

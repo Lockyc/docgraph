@@ -372,30 +372,40 @@ func run(args []string, stdout, stderr io.Writer) int {
 // and disables logging — NOT fatal, unlike a malformed leaks.toml: logging is
 // auxiliary, so a log-config typo must not block a push.
 func maybeLog(configFlag, cmd, root string, exit int, rep audit.Report, leaks []audit.LeakFinding, sel map[string]bool, stderr io.Writer) {
-	if os.Getenv("DOCGRAPH_NO_LOG") != "" {
+	logPath, level, ok := logTarget(configFlag, stderr)
+	if !ok {
 		return
+	}
+	rec := audit.BuildRecord(cmd, root, version, exit, rep, leaks, sel, level, time.Now())
+	_ = audit.LogRun(logPath, rec) // best-effort: a gate never fails because the log is unwritable.
+}
+
+// logTarget resolves where and at what level to log, or ok=false when logging is
+// off. Every logging command goes through it, so the opt-in, the kill switch and
+// the non-fatal config handling are one decision.
+func logTarget(configFlag string, stderr io.Writer) (path string, level int, ok bool) {
+	if os.Getenv("DOCGRAPH_NO_LOG") != "" {
+		return "", 0, false
 	}
 	cfgPath, err := resolveConfig(configFlag)
 	if err != nil {
-		return
+		return "", 0, false
 	}
 	logCfg, err := loadLogConfig(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return // absent config → logging silently off (the normal CI/clone state).
+		return "", 0, false // absent config → logging silently off (the normal CI/clone state).
 	} else if err != nil {
 		fmt.Fprintf(stderr, "docgraph: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
-		return
+		return "", 0, false
 	}
 	if !logCfg.Active() {
-		return
+		return "", 0, false
 	}
-	logPath, err := audit.LogPath(logCfg.Path)
-	if err != nil {
+	if path, err = audit.LogPath(logCfg.Path); err != nil {
 		fmt.Fprintf(stderr, "docgraph: config %s: %v — logging disabled (non-fatal)\n", cfgPath, err)
-		return
+		return "", 0, false
 	}
-	rec := audit.BuildRecord(cmd, root, version, exit, rep, leaks, sel, logCfg.Level, time.Now())
-	_ = audit.LogRun(logPath, rec) // best-effort: a gate never fails because the log is unwritable.
+	return path, logCfg.Level, true
 }
 
 // resolveConfig resolves the global config.toml: --config > $DOCGRAPH_CONFIG >
@@ -980,7 +990,13 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	clearDocDriftError(root)
-	return reportDocDrift(stderr, fresh, sessionCoversDrift(root, head, payload, stderr))
+	logPath, level, logOn := logTarget("", stderr)
+	covers, acted := sessionCoversDrift(root, head, payload, logOn, stderr)
+	exit := reportDocDrift(stderr, fresh, covers)
+	if logOn && (exit != 0 || len(acted) > 0) {
+		_ = audit.LogRun(logPath, audit.DocDriftRecord(root, version, exit, fresh, covers, acted, level, time.Now()))
+	}
+	return exit
 }
 
 // docDriftToolError reports a docgraph or git failure from a bare (Stop-hook)
@@ -1139,9 +1155,12 @@ func readStopPayload(r io.Reader) stopPayload {
 //
 // Each (doc, path) pair blocks once per session; the seen set accumulates, so a
 // file the agent keeps editing does not re-nag every turn.
-func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []audit.CoversFinding {
+//
+// With measure set (usage logging is on), it also returns acted: docs an earlier
+// nag this session named that changed since the previous Stop, each reported once.
+func sessionCoversDrift(root, head string, p stopPayload, measure bool, stderr io.Writer) (fresh []audit.CoversFinding, acted []string) {
 	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
-		return nil
+		return nil, nil
 	}
 	st, known := readCoversSession(root, p.SessionID)
 	if !known && p.SessionID != "" {
@@ -1157,7 +1176,10 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "docgraph: covers check skipped: %v\n", err)
-		return nil
+		return nil, nil
+	}
+	if measure && p.SessionID != "" {
+		acted = actedDocs(root, rev, &st)
 	}
 	findings := coversOf(root, code, md, nil, stderr)
 	var work sessionWork
@@ -1169,7 +1191,6 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 		}
 	}
 
-	var fresh []audit.CoversFinding
 	for _, f := range findings {
 		var paths []string
 		for _, path := range f.Paths {
@@ -1191,7 +1212,40 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 		diff, err := audit.CoversChangeDiff(root, rev, coveredPaths(fresh))
 		fresh = pointCovers(root, fresh, diff, err, stderr)
 	}
-	return fresh
+	return fresh, acted
+}
+
+// actedDocs returns the docs an earlier covers nag this session named that the
+// working tree or the session's commits since its previous Stop (rev) changed,
+// marking each in st so it is reported once. It costs two git calls, and none
+// while no nagged doc is outstanding. A concurrent session editing the same doc
+// in that window counts too; the window is one turn, so that is rare.
+func actedDocs(root string, rev []string, st *coversSession) []string {
+	outstanding := map[string]bool{}
+	for k := range st.seen {
+		if doc, _, _ := strings.Cut(k, "\t"); !st.acted[doc] {
+			outstanding[doc] = true
+		}
+	}
+	if len(outstanding) == 0 {
+		return nil
+	}
+	changed, _ := audit.GitCmd(root, "diff", "--name-only", "HEAD", "--", "*.md").Output()
+	if rev != nil {
+		args := append(append([]string{"log", "--first-parent", "--no-merges", "--name-only", "--format="}, rev...), "--", "*.md")
+		out, _ := audit.GitCmd(root, args...).Output()
+		changed = append(changed, out...)
+	}
+	var acted []string
+	for _, doc := range strings.Split(string(changed), "\n") {
+		if outstanding[doc] {
+			outstanding[doc] = false
+			st.acted[doc] = true
+			acted = append(acted, doc)
+		}
+	}
+	sort.Strings(acted)
+	return acted
 }
 
 // sessionRevs is the git-log selection for the session's commits since its last
@@ -1353,7 +1407,12 @@ type coversSession struct {
 	head  string          // HEAD at the session's previous Stop
 	since string          // session start, git --since form; "" if unknown
 	seen  map[string]bool // "doc\tpath" pairs already raised
+	acted map[string]bool // nagged docs since changed, already logged (actedDocs)
 }
+
+// actedPrefix marks an acted doc's line in the session file; a "doc\tpath" seen
+// line never starts with it.
+const actedPrefix = "\x01"
 
 // coversSessionMaxAge bounds how long a session's state file outlives its last
 // write; a session idle this long is not coming back to the same HEAD.
@@ -1375,7 +1434,7 @@ func coversSessionPath(root, session string) string {
 }
 
 func readCoversSession(root, session string) (coversSession, bool) {
-	st := coversSession{seen: map[string]bool{}}
+	st := coversSession{seen: map[string]bool{}, acted: map[string]bool{}}
 	p := coversSessionPath(root, session)
 	if p == "" {
 		return st, false
@@ -1387,7 +1446,11 @@ func readCoversSession(root, session string) (coversSession, bool) {
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	st.head, st.since, _ = strings.Cut(lines[0], "\t")
 	for _, k := range lines[1:] {
-		st.seen[k] = true
+		if doc, ok := strings.CutPrefix(k, actedPrefix); ok {
+			st.acted[doc] = true
+		} else {
+			st.seen[k] = true
+		}
 	}
 	return st, true
 }
@@ -1414,6 +1477,9 @@ func writeCoversSession(root, session string, st coversSession, first bool) {
 	lines := []string{st.head + "\t" + st.since}
 	for k := range st.seen {
 		lines = append(lines, k)
+	}
+	for doc := range st.acted {
+		lines = append(lines, actedPrefix+doc)
 	}
 	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }

@@ -26,8 +26,8 @@ func (c LogConfig) Active() bool { return c.Enabled && c.Level >= 1 && c.Level <
 
 // UsageRecord is one JSONL line per docgraph run. Level gates the optional detail:
 // Files (paths, level ≥2) and Findings (paths + broken targets + leak MATCH TEXT,
-// level 3) are the escalating tiers. Cmd names the subcommand; only `run` logs
-// today, and one that starts logging uses the same file and shape.
+// level 3) are the escalating tiers. Cmd names the subcommand — `run` (BuildRecord)
+// and `doc-drift` (DocDriftRecord) — sharing one file and shape so trends span them.
 type UsageRecord struct {
 	TS       string              `json:"ts"`
 	Version  string              `json:"version"`
@@ -148,6 +148,49 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 		rec.Files = f
 	}
 
+	return rec
+}
+
+// DocDriftRecord is the usage record for a doc-drift Stop that nagged or saw a
+// nagged doc edited: what it reported, and acted — docs an earlier covers nag in
+// the session named that the session has since changed. covers_acted against
+// covers, split by covers_pointed, is the nag's hit rate. No tier carries match
+// text — these are symbols and doc paths — so level 3 logs what level 2 does.
+func DocDriftRecord(repo, version string, exit int, fs []DocDriftFinding, covers []CoversFinding, acted []string, level int, now time.Time) UsageRecord {
+	counts := map[string]int{"dangling": 0, "value": 0, "covers": len(covers), "covers_pointed": 0, "covers_acted": len(acted)}
+	files := map[string][]string{}
+	for _, f := range fs {
+		k := "dangling"
+		if f.Kind == ValueDrift {
+			k = "value"
+		}
+		counts[k]++
+		for _, h := range f.Hits {
+			files[k] = append(files[k], fmt.Sprintf("%s:%d", h.File, h.Line))
+		}
+	}
+	for _, c := range covers {
+		files["covers"] = append(files["covers"], c.Doc)
+		if len(c.Lines) > 0 {
+			counts["covers_pointed"]++
+			files["covers_pointed"] = append(files["covers_pointed"], c.Doc)
+		}
+	}
+	if len(acted) > 0 {
+		files["covers_acted"] = append([]string{}, acted...)
+	}
+	rec := UsageRecord{
+		TS:      now.Format(time.RFC3339),
+		Version: version,
+		Repo:    repo,
+		Cmd:     "doc-drift",
+		Checks:  []string{"covers", "dangling", "value"},
+		Exit:    exit,
+		Counts:  counts,
+	}
+	if level >= 2 {
+		rec.Files = files
+	}
 	return rec
 }
 

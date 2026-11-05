@@ -1586,6 +1586,50 @@ func TestDocDriftCoversFirstStopIsSessionScoped(t *testing.T) {
 	}
 }
 
+// With logging on, a covers nag writes a doc-drift record, a quiet Stop writes
+// none, and the Stop after the nagged doc is edited logs it as acted — once.
+func TestDocDriftLogsNagsAndActedDocs(t *testing.T) {
+	r := newSessionRepo(t)
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(cfg, []byte("[log]\nenabled = true\nlevel = 2\n"), 0o644)
+	logFile := filepath.Join(t.TempDir(), "usage.jsonl")
+	t.Setenv("DOCGRAPH_CONFIG", cfg)
+	t.Setenv("DOCGRAPH_LOG", logFile)
+	records := func() []audit.UsageRecord {
+		b, _ := os.ReadFile(logFile)
+		var out []audit.UsageRecord
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var rec audit.UsageRecord
+			if l != "" && json.Unmarshal([]byte(l), &rec) == nil {
+				out = append(out, rec)
+			}
+		}
+		return out
+	}
+
+	r.change("src/a.go", "first")
+	if code, msg := r.stop("s1"); code != 2 {
+		t.Fatalf("want a covers nag, got %d\n%s", code, msg)
+	}
+	if recs := records(); len(recs) != 1 || recs[0].Cmd != "doc-drift" || recs[0].Counts["covers"] != 1 {
+		t.Fatalf("want one doc-drift record with covers=1, got %+v", recs)
+	}
+	r.stop("s1")
+	if n := len(records()); n != 1 {
+		t.Fatalf("a quiet Stop must not log, got %d records", n)
+	}
+	r.write("docs/auth.md", srcCoversFM+"\nupdated\n")
+	r.stop("s1")
+	recs := records()
+	if len(recs) != 2 || recs[1].Counts["covers_acted"] != 1 || recs[1].Files["covers_acted"][0] != "docs/auth.md" {
+		t.Fatalf("want an acted record for docs/auth.md, got %+v", recs)
+	}
+	r.stop("s1")
+	if n := len(records()); n != 2 {
+		t.Fatalf("acted is reported once, got %d records", n)
+	}
+}
+
 // A later Stop sees only the commits since the previous Stop, and a pair already
 // raised never blocks the session again.
 func TestDocDriftCoversLaterStopSeesOnlyNewCommits(t *testing.T) {

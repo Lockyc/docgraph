@@ -284,8 +284,8 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   `monitoring/README.md`) **is** a document and must be audited. `.claude/**` and
   `.agents/**` files are runtime tooling; a config-dir README is not — keep that
   distinction.
-- **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** One JSONL
-  record per run under `$XDG_STATE_HOME/docgraph/usage.jsonl` (XDG *state*, not
+- **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** JSONL
+  records under `$XDG_STATE_HOME/docgraph/usage.jsonl` (XDG *state*, not
   config), only when a global `config.toml` `[log]` table opts in (the README's
   Usage-logging section has the config + level table). Load-bearing invariants:
   - **Separate file from `leaks.toml`.** `leaks.toml` is a dedicated rules file that
@@ -299,12 +299,12 @@ restating the vocabulary, so the schema and the checks can't drift apart.
     findings **including leak match text** — levels 1–2 must NEVER write a leak
     `Match` (`BuildRecord`, `internal/audit/usage.go`); only L3 (a documented,
     trusted-machine opt-in) does.
-  - **Best-effort, never fails the run.** `maybeLog` swallows every error; the exit
-    code is decided by findings alone. `DOCGRAPH_NO_LOG=1` is the one-off kill switch
+  - **Best-effort, never fails the run.** Logging swallows every error (`logTarget`
+    decides on/off for every command); the exit code is decided by findings alone. `DOCGRAPH_NO_LOG=1` is the one-off kill switch
     (mirrors `DOC_DRIFT_OFF`).
-  - **`cmd` is a seam, not decoration.** Every record carries `cmd`; only `run` logs
-    today. A subcommand that starts logging uses the *same* file and record shape, so
-    trends span commands — keep the field.
+  - **`cmd` is a seam, not decoration.** Every record carries `cmd` (`run`, and
+    `doc-drift` — `DocDriftRecord`). A subcommand that starts logging uses the *same*
+    file and record shape, so trends span commands — keep the field.
 - **`footgun-drift` is a nag, not a judge — so it flags EVERY added
   declaration.** It detects a footgun *declaration* (a line-leading `Footgun:` or a
   bolded mid-line footgun lead, not a cross-reference or bare container heading)

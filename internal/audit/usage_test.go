@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -239,5 +240,31 @@ func TestBuildRecordLevel3FindsNewChecks(t *testing.T) {
 	}
 	if len(rec.Findings["edges"]) != 2 { // broken + cycle
 		t.Errorf("findings[edges] = %v, want 2 entries", rec.Findings["edges"])
+	}
+}
+
+func TestDocDriftRecordCountsAndTiers(t *testing.T) {
+	fs := []DocDriftFinding{
+		{Symbol: "OldWidget", Kind: Dangling, Hits: []DocHit{{File: "README.md", Line: 3}}},
+		{Symbol: "MAX_ROOTS", Kind: ValueDrift, Old: "10", Hits: []DocHit{{File: "docs/a.md", Line: 7}}},
+	}
+	covers := []CoversFinding{
+		{Doc: "docs/auth.md", Paths: []string{"src/auth.go"}, Lines: []DocHit{{File: "docs/auth.md", Line: 9}}},
+		{Doc: "docs/db.md", Paths: []string{"src/db.go"}},
+	}
+	acted := []string{"docs/old.md"}
+	now := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+
+	r1 := DocDriftRecord("/repo", "3.8.0", 2, fs, covers, acted, 1, now)
+	want := map[string]int{"dangling": 1, "value": 1, "covers": 2, "covers_pointed": 1, "covers_acted": 1}
+	if r1.Cmd != "doc-drift" || r1.Exit != 2 || !reflect.DeepEqual(r1.Counts, want) || r1.Files != nil {
+		t.Fatalf("level 1 = %+v, want counts %v and no files", r1, want)
+	}
+	r2 := DocDriftRecord("/repo", "3.8.0", 2, fs, covers, acted, 2, now)
+	if !reflect.DeepEqual(r2.Files["covers"], []string{"docs/auth.md", "docs/db.md"}) ||
+		!reflect.DeepEqual(r2.Files["covers_pointed"], []string{"docs/auth.md"}) ||
+		!reflect.DeepEqual(r2.Files["covers_acted"], []string{"docs/old.md"}) ||
+		!reflect.DeepEqual(r2.Files["dangling"], []string{"README.md:3"}) {
+		t.Fatalf("level 2 files = %v", r2.Files)
 	}
 }
