@@ -124,8 +124,7 @@ about drift while it can still act — see
 ## Frontmatter model
 
 A doc's optional leading YAML block (`SplitFrontmatter`: present only when the
-file's first line is exactly `---`, ending at the next line that's exactly
-`---`) is the agent-facing metadata layer `frontmatter`/`edges` and `docgraph
+file's first line is a `---` fence, ending at the next fence) is the agent-facing metadata layer `frontmatter`/`edges` and `docgraph
 schema` all key off:
 
 - **`type`** — required whenever a block is present (missing it is a
