@@ -189,7 +189,23 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 	cg := BuildContentGraph(repoRoot, tracked, trackedSet, rootSet, globs)
 	orphans := cg.Islands()
 
-	// Broken links: every tracked (non-ignored) md, any .md target missing on disk.
+	untrackedList, err := untrackedMD(repoRoot)
+	if err != nil {
+		return Report{}, err
+	}
+
+	// Broken links: every tracked (non-ignored) md, any .md target that is not a
+	// repo doc present on disk. Membership is the exact-case git path, so the
+	// verdict is a fresh clone's on any filesystem: a link escaping the repo, or
+	// matching a doc only case-insensitively, is broken even where os.Stat finds it.
+	// An untracked target is the `untracked` check's finding, not a broken link.
+	inRepo := make(map[string]bool, len(trackedSet)+len(untrackedList))
+	for f := range trackedSet {
+		inRepo[f] = true
+	}
+	for _, f := range untrackedList {
+		inRepo[f] = true
+	}
 	var broken []BrokenLink
 	for _, f := range tracked {
 		if matchesIgnore(f, globs) {
@@ -204,16 +220,13 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 				continue
 			}
 			resolved := resolveTarget(f, link.Target)
-			if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(resolved))); err != nil {
+			_, statErr := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(resolved)))
+			if !inRepo[resolved] || statErr != nil {
 				broken = append(broken, BrokenLink{Source: f, Line: link.Line, Target: resolved})
 			}
 		}
 	}
 
-	untrackedList, err := untrackedMD(repoRoot)
-	if err != nil {
-		return Report{}, err
-	}
 	var untracked []string
 	for _, f := range untrackedList {
 		if !matchesIgnore(f, globs) {

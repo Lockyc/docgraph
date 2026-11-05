@@ -229,11 +229,25 @@ func fileAtRev(root, rev, path string) (string, bool) {
 }
 
 // ClosestBase returns the merge-base of head with the nearest integration branch
-// (fewest commits in base..head). Two callers: the pre-push range for a new
-// branch with no upstream (rangesFromPrePushStdin), and doc-drift's diff base
-// (docDriftDiffBase), where returning head itself marks a trunk, whose symbol
-// scan then covers the session's own commits plus the working tree.
+// (fewest commits in base..head). It is doc-drift's diff base (docDriftDiffBase),
+// where returning head itself marks a trunk, whose symbol scan then covers the
+// session's own commits plus the working tree; PushBase is the pre-push variant.
 func ClosestBase(root, head string) (string, bool) {
+	return closestBase(root, head, false)
+}
+
+// PushBase is ClosestBase for a new branch's pre-push range: a candidate whose
+// merge-base is head itself is the pushed branch (or one at its tip) and would
+// yield an empty head..head range, so it is skipped.
+func PushBase(root, head string) (string, bool) {
+	sha, err := GitCmd(root, "rev-parse", head).Output()
+	if err != nil {
+		return "", false
+	}
+	return closestBase(root, strings.TrimSpace(string(sha)), true)
+}
+
+func closestBase(root, head string, skipSelf bool) (string, bool) {
 	best, bestCnt := "", -1
 	for _, cand := range []string{"origin/HEAD", "main", "master", "dev", "develop", "trunk"} {
 		mb, err := GitCmd(root, "merge-base", head, cand).Output()
@@ -241,7 +255,7 @@ func ClosestBase(root, head string) (string, bool) {
 			continue
 		}
 		base := strings.TrimSpace(string(mb))
-		if base == "" {
+		if base == "" || skipSelf && base == head {
 			continue
 		}
 		cntOut, err := GitCmd(root, "rev-list", "--count", base+".."+head).Output()

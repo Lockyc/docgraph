@@ -755,7 +755,7 @@ func rangesFromPrePushStdin(r io.Reader, root string) []audit.RevRange {
 			continue // deletion
 		}
 		if isZeroSHA(remoteSHA) {
-			if base, ok := audit.ClosestBase(root, localSHA); ok {
+			if base, ok := audit.PushBase(root, localSHA); ok {
 				out = append(out, audit.RevRange{Base: base, Head: localSHA})
 			}
 			continue

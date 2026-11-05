@@ -49,17 +49,19 @@ type Edge struct {
 }
 
 // SplitFrontmatter separates a leading YAML frontmatter block from the body. A
-// block exists only when the file's very first line is exactly `---`; it ends at
-// the next line that is exactly `---`. Returns the frontmatter YAML (without the
-// fences), the remaining body, and whether a block was present. A `---` anywhere
-// but the first line is a markdown horizontal rule, not frontmatter.
+// block exists only when the file's very first line (after any UTF-8 BOM) is a
+// `---` fence; it ends at the next fence line. A fence may carry trailing
+// whitespace, as GitHub's renderer accepts. Returns the frontmatter YAML (without
+// the fences), the remaining body, and whether a block was present. A `---`
+// anywhere but the first line is a markdown horizontal rule, not frontmatter.
 func SplitFrontmatter(content string) (fm, body string, has bool) {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimRight(lines[0], "\r") != "---" {
+	isFence := func(l string) bool { return strings.TrimRight(l, " \t\r") == "---" }
+	lines := strings.Split(strings.TrimPrefix(content, "\xef\xbb\xbf"), "\n")
+	if len(lines) == 0 || !isFence(lines[0]) {
 		return "", content, false
 	}
 	for i := 1; i < len(lines); i++ {
-		if strings.TrimRight(lines[i], "\r") == "---" {
+		if isFence(lines[i]) {
 			fm = strings.Join(lines[1:i], "\n")
 			body = strings.Join(lines[i+1:], "\n")
 			return fm, body, true

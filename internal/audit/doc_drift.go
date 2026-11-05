@@ -60,48 +60,72 @@ func diffIdents(diff string, want byte, re *regexp.Regexp) []string {
 	return ids
 }
 
-// removedNotReadded returns distinct definition identifiers removed in the diff
-// and NOT re-added (a moved/renamed-in-place symbol still exists), sorted.
-func removedNotReadded(diff string) []string {
-	added := map[string]bool{}
-	for _, id := range diffIdents(diff, '+', defKW) {
-		added[id] = true
-	}
-	seen := map[string]bool{}
-	var gone []string
-	for _, id := range diffIdents(diff, '-', defKW) {
-		if added[id] || seen[id] {
-			continue
+// removedNotReadded returns distinct definition identifiers removed and NOT
+// re-added (a moved/renamed-in-place symbol still exists), sorted. patches are
+// applied oldest first and a symbol's last event decides, so one edited in one
+// commit and deleted in a later one is gone, and one deleted then restored is not.
+func removedNotReadded(patches ...string) []string {
+	gone := map[string]bool{}
+	for _, p := range patches {
+		added := map[string]bool{}
+		for _, id := range diffIdents(p, '+', defKW) {
+			added[id] = true
 		}
-		seen[id] = true
-		gone = append(gone, id)
+		for _, id := range diffIdents(p, '-', defKW) {
+			if !added[id] {
+				gone[id] = true
+			}
+		}
+		for id := range added {
+			delete(gone, id)
+		}
 	}
-	sort.Strings(gone)
-	return gone
+	out := make([]string, 0, len(gone))
+	for id := range gone {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
-// changedConstants returns constants assigned a numeric literal on both diff
-// sides with a differing value, sorted by name.
-func changedConstants(diff string) []constChange {
-	old := map[string]string{}
+// diffAssigns maps each constant assigned a numeric literal on the want ('-' or
+// '+') side of a diff to its value; the last assignment wins.
+func diffAssigns(diff string, want byte) map[string]string {
+	vals := map[string]string{}
 	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			for _, m := range assignRe.FindAllStringSubmatch(line[1:], -1) {
-				old[m[1]] = m[2]
-			}
+		if len(line) == 0 || line[0] != want || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		for _, m := range assignRe.FindAllStringSubmatch(line[1:], -1) {
+			vals[m[1]] = m[2]
 		}
 	}
-	newv := map[string]string{}
-	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			for _, m := range assignRe.FindAllStringSubmatch(line[1:], -1) {
-				newv[m[1]] = m[2]
+	return vals
+}
+
+// changedConstants returns constants whose numeric value differs between the
+// first value the patches remove and the last value they leave, sorted by name.
+// patches are oldest first, so a value changed and changed back is unchanged, and
+// Old is the value before the first change, never an intermediate one.
+func changedConstants(patches ...string) []constChange {
+	first, last := map[string]string{}, map[string]string{}
+	for _, p := range patches {
+		old, newv := diffAssigns(p, '-'), diffAssigns(p, '+')
+		for name, v := range old {
+			if _, ok := first[name]; !ok {
+				first[name] = v
 			}
+			if _, ok := newv[name]; !ok {
+				delete(last, name)
+			}
+		}
+		for name, v := range newv {
+			last[name] = v
 		}
 	}
 	var out []constChange
-	for name, o := range old {
-		if n, ok := newv[name]; ok && n != o {
+	for name, o := range first {
+		if n, ok := last[name]; ok && n != o {
 			out = append(out, constChange{Name: name, Old: o})
 		}
 	}
@@ -272,11 +296,13 @@ func DocDrift(root, spec string) ([]DocDriftFinding, error) {
 }
 
 // CodeDiff is the code-side diff doc-drift scans, held so a caller can decide
-// from Text whether the doc greps are worth running before it runs them.
+// from Text whether the doc greps are worth running before it runs them. patches
+// is the same diff split per commit, oldest first; Text is their concatenation.
 type CodeDiff struct {
-	Text string
-	root string
-	excl []string
+	Text    string
+	patches []string
+	root    string
+	excl    []string
 }
 
 // DocDriftDiff collects the code-side `git diff <spec>`, scoped by
@@ -290,7 +316,7 @@ func DocDriftDiff(root, spec string) (CodeDiff, error) {
 	if err != nil {
 		return CodeDiff{}, err
 	}
-	return CodeDiff{Text: diff, root: root, excl: excl}, nil
+	return CodeDiff{Text: diff, patches: []string{diff}, root: root, excl: excl}, nil
 }
 
 // SessionDocDriftDiff collects the code-side patches of the commits revArgs
@@ -303,7 +329,7 @@ func SessionDocDriftDiff(root string, revArgs []string) (CodeDiff, error) {
 	if err != nil {
 		return CodeDiff{}, err
 	}
-	args := append([]string{"log", "--first-parent", "--no-merges", "-p", "--format="}, revArgs...)
+	args := append([]string{"log", "--reverse", "--first-parent", "--no-merges", "-p", "--format=%x00"}, revArgs...)
 	args = append(append(append(args, "--"), nonCodePathspec...), excl...)
 	committed, err := GitCmd(root, args...).Output()
 	if err != nil {
@@ -313,20 +339,27 @@ func SessionDocDriftDiff(root string, revArgs []string) (CodeDiff, error) {
 	if err != nil {
 		return CodeDiff{}, err
 	}
-	return CodeDiff{Text: string(committed) + worktree, root: root, excl: excl}, nil
+	var patches []string
+	for _, p := range strings.Split(string(committed), "\x00") {
+		if strings.TrimSpace(p) != "" {
+			patches = append(patches, p)
+		}
+	}
+	patches = append(patches, worktree)
+	return CodeDiff{Text: strings.Join(patches, ""), patches: patches, root: root, excl: excl}, nil
 }
 
 // Findings runs DocDrift's two scans over the collected diff.
 func (d CodeDiff) Findings() ([]DocDriftFinding, error) {
-	root, excl, diff := d.root, d.excl, d.Text
-	if diff == "" {
+	root, excl := d.root, d.excl
+	if strings.TrimSpace(d.Text) == "" {
 		return nil, nil
 	}
 	var out []DocDriftFinding
 
 	// (A) dangling references
 	n := 0
-	for _, sym := range removedNotReadded(diff) {
+	for _, sym := range removedNotReadded(d.patches...) {
 		if !looksLikeSymbol(sym) || stillDefinedInCode(root, sym, excl...) {
 			continue
 		}
@@ -344,7 +377,7 @@ func (d CodeDiff) Findings() ([]DocDriftFinding, error) {
 
 	// (B) anchored value drift
 	m := 0
-	for _, c := range changedConstants(diff) {
+	for _, c := range changedConstants(d.patches...) {
 		if !looksLikeSymbol(c.Name) {
 			continue
 		}
