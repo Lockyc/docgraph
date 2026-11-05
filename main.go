@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -846,8 +847,43 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 	if len(findings) == 0 {
 		return 0
 	}
-	printCoversDrift(stdout, findings)
+	var diff strings.Builder
+	for _, r := range ranges {
+		var d string
+		if d, err = audit.RangeChangeDiff(root, r.Base+".."+r.Head, coveredPaths(findings)); err != nil {
+			break
+		}
+		diff.WriteString(d)
+	}
+	printCoversDrift(stdout, pointCovers(root, findings, diff.String(), err, stderr))
 	return 0
+}
+
+// coveredPaths is the distinct code paths across covers findings, sorted.
+func coveredPaths(fs []audit.CoversFinding) []string {
+	set := map[string]bool{}
+	for _, f := range fs {
+		for _, p := range f.Paths {
+			set[p] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// pointCovers attaches the doc lines each finding should be checked at. Pointing
+// is a reading aid, so a failure to compute it leaves the findings unpointed
+// rather than failing the check.
+func pointCovers(root string, fs []audit.CoversFinding, diff string, err error, stderr io.Writer) []audit.CoversFinding {
+	if err != nil {
+		fmt.Fprintf(stderr, "docgraph: covers lines not pointed: %v\n", err)
+		return fs
+	}
+	return audit.PointCovers(root, fs, diff)
 }
 
 // runDocDrift is the Stop-hook subcommand: it flags dangling doc references and
@@ -892,7 +928,10 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		var covers []audit.CoversFinding
 		if os.Getenv("DOCGRAPH_COVERS_OFF") == "" {
 			code, md, err := audit.SpecChanges(root, spec)
-			covers = coversOf(root, code, md, err, stderr)
+			if covers = coversOf(root, code, md, err, stderr); len(covers) > 0 {
+				diff, err := audit.RangeChangeDiff(root, spec, coveredPaths(covers))
+				covers = pointCovers(root, covers, diff, err, stderr)
+			}
 		}
 		return reportDocDrift(stderr, findings, covers)
 	}
@@ -1042,7 +1081,7 @@ func reportDocDrift(w io.Writer, findings []audit.DocDriftFinding, covers []audi
 	if len(covers) > 0 {
 		fmt.Fprint(w, coversDriftMessage(
 			"doc-drift: you changed code these docs declare they cover, and didn't touch the docs:\n",
-			"Read the parts of each doc that describe what you changed.\n",
+			"Check the listed lines first, then what else each doc says these files do.\n",
 			"These won't block again — carry on.\n",
 			covers))
 	}
@@ -1109,8 +1148,9 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 		st.since = transcriptStart(p.TranscriptPath)
 	}
 	code, md, err := audit.WorktreeChanges(root)
+	var rev []string
 	if err == nil && p.SessionID != "" {
-		if rev := sessionRevs(root, head, st); rev != nil {
+		if rev = sessionRevs(root, head, st); rev != nil {
 			cc, cm, cerr := audit.CommitChanges(root, rev...)
 			code, md, err = append(code, cc...), append(md, cm...), cerr
 		}
@@ -1147,6 +1187,10 @@ func sessionCoversDrift(root, head string, p stopPayload, stderr io.Writer) []au
 	}
 	st.head = head
 	writeCoversSession(root, p.SessionID, st, !known)
+	if len(fresh) > 0 {
+		diff, err := audit.CoversChangeDiff(root, rev, coveredPaths(fresh))
+		fresh = pointCovers(root, fresh, diff, err, stderr)
+	}
 	return fresh
 }
 
@@ -1581,6 +1625,14 @@ func coversDriftMessage(lead, read, tail string, fs []audit.CoversFinding) strin
 		for _, p := range f.Paths {
 			fmt.Fprintf(&b, "      %s\n", p)
 		}
+		if len(f.Lines) == 0 {
+			b.WriteString("    no code in the doc names what this change added or removed\n")
+			continue
+		}
+		b.WriteString("    lines whose code names what changed:\n")
+		for _, h := range f.Lines {
+			fmt.Fprintf(&b, "      %s:%d: %s\n", h.File, h.Line, echoLine(h.Text))
+		}
 	}
 	b.WriteString(read)
 	b.WriteString("Now false → correct or cut the false lines, nothing more; what changed and why\n")
@@ -1593,7 +1645,7 @@ func coversDriftMessage(lead, read, tail string, fs []audit.CoversFinding) strin
 func printCoversDrift(w io.Writer, fs []audit.CoversFinding) {
 	fmt.Fprint(w, coversDriftMessage(
 		"COVERS-DRIFT: this push changes code that a doc declares it covers,\nbut the doc itself is untouched:\n",
-		"Read each against the change.\n",
+		"Check the listed lines first, then what else each doc says these files do.\n",
 		"Advisory — the push is not blocked.\n",
 		fs))
 }

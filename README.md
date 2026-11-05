@@ -292,6 +292,13 @@ reads `.mdx`); "code" is every other tracked path except the prose formats
 `.txt`/`.rst`/`.adoc`/`.markdown`. A `covers` edge declared in an `.mdx` file
 never fires.
 
+Each finding lists the doc's lines whose code (an inline code span, or a fenced
+block) names an identifier the change added or removed, a definition it changed,
+or the function a change sits in — up to 8 (`maxPointedLines`), leaving out an
+identifier on more than 3 of the doc's lines (`maxIdentLines`), which is its
+subject rather than one claim. A doc
+with none says so.
+
 **A still-accurate doc wants no edit, and the nag says so**; a falsified one is
 corrected or cut, nothing more. A doc the push also touched never fires. A repo with no `covers` edges never sees it. To turn it off outright: `DOCGRAPH_COVERS_OFF=1`, or
 `docgraph install-hook --no-covers-drift` to generate a hook that never invokes
@@ -339,8 +346,9 @@ plus the working tree — reading a file, merging a trunk in, or another session
 commits never count. It reads the Stop payload on stdin; without one it
 checks the working tree alone, and `--range` checks that spec. A doc touched
 anywhere in the set clears the finding. Each (doc, path) pair blocks once per
-session; the message asks the agent to read the parts of the doc describing
-what it changed and fix only what is now false. `DOCGRAPH_COVERS_OFF=1` turns
+session; the message points at the doc lines to check first, as
+[`covers-drift`](#covers-drift--the-advisory-pre-push-rider) does, and asks the
+agent to fix only what is now false. `DOCGRAPH_COVERS_OFF=1` turns
 off covers drift.
 `DOC_DRIFT_OFF=1` disables the whole subcommand outright, for a repo whose docs
 don't name code symbols alongside their values. Paths the

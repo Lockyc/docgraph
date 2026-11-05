@@ -925,6 +925,28 @@ func TestCoversDriftSubcommandReadsPrePushStdin(t *testing.T) {
 	}
 }
 
+// The nag lists the doc lines whose code names what the change touched, and says
+// so when none does.
+func TestCoversDriftPointsAtDocLines(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{
+			"docs/auth.md":  coversFM + "\n`Login` issues the session.\n",
+			"docs/other.md": strings.Replace(coversFM, "# Auth", "# Other", 1) + "\nNothing in code here.\n",
+			"src/auth.go":   "package auth\n",
+		},
+		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n"},
+	)
+	var out, errb bytes.Buffer
+	runCoversDrift([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+	got := out.String()
+	if !strings.Contains(got, "docs/auth.md:10: `Login` issues the session.") {
+		t.Fatalf("want docs/auth.md:10 pointed, got:\n%s", got)
+	}
+	if !strings.Contains(got, "no code in the doc names what this change added or removed") {
+		t.Fatalf("want docs/other.md reported as unpointed, got:\n%s", got)
+	}
+}
+
 // No covers edge -> nothing to nag about -> no output at all.
 func TestCoversDriftSubcommandSilentWithNoEdges(t *testing.T) {
 	dir, base, head := commitRepoMain(t,
