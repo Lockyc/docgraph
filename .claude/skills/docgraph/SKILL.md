@@ -1,6 +1,6 @@
 ---
 name: docgraph
-description: Use when you need to find which documentation governs a file or subsystem before changing it, when asked "where are the docs for X" / "which doc covers this" / "is there a doc for this code", when reconciling docs after a code change, or when auditing a repo's doc graph (orphans, broken links, stale docs, doc index, the content/metadata graphs). Wraps the docgraph CLI's read-only views — covers, index, stale, graph — and its audit gate.
+description: Use when you need to find which documentation governs a file or subsystem before changing it, when asked "where are the docs for X" / "which doc covers this" / "is there a doc for this code", when reconciling docs after a code change, or when auditing a repo's doc graph (orphans, broken links, stale docs, doc index, the content/metadata graphs). Wraps the docgraph CLI's read-only views — covers, index, stale, graph — and its audit gate, including the `leaks` content scan (the automated leak checker, rules in ~/.config/docgraph/leaks.toml).
 ---
 
 # docgraph — finding the doc that governs code
