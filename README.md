@@ -497,7 +497,7 @@ docgraph doc-drift                  # Stop-hook: working-tree-inclusive diff
 docgraph schema                     # print the frontmatter JSON Schema (read-only)
 docgraph covers <path>              # read-only: docs that cover <path>
 docgraph index                      # read-only: generated markdown index
-docgraph stale                      # read-only: docs past their freshness threshold
+docgraph stale                      # read-only: docs past their freshness threshold, or verified before their covered code changed
 docgraph graph [--json]             # read-only: both doc graphs (markdown or JSON)
 docgraph version                    # print version (also --version, -v)
 ```
