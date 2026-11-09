@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unsafe"
 )
 
 // DefaultGroup is the implicit group of the top-level terms/regex. A [[dir]]
@@ -136,31 +137,32 @@ type compiledLeaks struct {
 // A rule anchored with \A or \z, which per line means "line start/end", disables
 // the prefilter.
 type scanFilter struct {
-	lits   []string       // ASCII-lowercased literal terms
+	idx    litIndex       // every term literal (stop) and gate literal, searched in one pass
 	gates  []gatedRule    // regex rules with a derivable required literal
 	re     *regexp.Regexp // alternation of every remaining rule; nil when there are none
 	always bool           // a rule the whole-file alternation can't stand in for
 }
 
-// gatedRule is a regex rule run whole-file only when the lowercased file holds
-// one of lits — every match of re contains one.
+// gatedRule is a regex rule run only when the lowercased file holds one of its
+// required literals — every match of re contains one.
 type gatedRule struct {
-	lits []string
+	lits []int          // indices into the filter's litIndex
 	re   *regexp.Regexp // the rule in multi-line mode
 }
 
-// mayMatch runs the rule only where one of lits occurs. With aligned offsets that
-// is just the lines holding an occurrence — every rule is applied per line, so a
-// match can only sit on a line that holds its required literal; otherwise it runs
-// whole-file.
-func (g gatedRule) mayMatch(text, low string, aligned bool) bool {
-	for _, l := range g.lits {
-		if !strings.Contains(low, l) {
+// mayMatch runs the rule only where one of its found literals occurs. With
+// aligned offsets that is just the lines holding an occurrence — every rule is
+// applied per line, so a match can only sit on a line that holds its required
+// literal; otherwise it runs whole-file.
+func (g gatedRule) mayMatch(text, low string, aligned bool, idx litIndex, found []bool) bool {
+	for _, li := range g.lits {
+		if !found[li] {
 			continue
 		}
 		if !aligned {
 			return g.re.MatchString(text)
 		}
+		l := idx.lits[li]
 		for off := 0; off < len(low); {
 			i := strings.Index(low[off:], l)
 			if i < 0 {
@@ -188,24 +190,35 @@ func (g gatedRule) mayMatch(text, low string, aligned bool) bool {
 // size) degrades to "always scan", which only ever makes the filter wider.
 func newScanFilter(deny []matcher) scanFilter {
 	var f scanFilter
-	var parts []string
+	var parts, lits []string
+	var stop []bool
+	addLit := func(l string, isStop bool) int {
+		lits = append(lits, l)
+		stop = append(stop, isStop)
+		return len(lits) - 1
+	}
 	for _, d := range deny {
 		if d.lit != "" {
-			f.lits = append(f.lits, d.lit)
+			addLit(d.lit, true)
 			continue
 		}
 		src := d.re.String()
 		if strings.Contains(src, `\A`) || strings.Contains(src, `\z`) {
 			f.always = true
 		}
-		if lits, ok := requiredLiterals(d.re); ok {
+		if req, ok := requiredLiterals(d.re); ok {
 			if re, err := regexp.Compile("(?m)" + src); err == nil {
-				f.gates = append(f.gates, gatedRule{lits: lits, re: re})
+				g := gatedRule{re: re}
+				for _, l := range req {
+					g.lits = append(g.lits, addLit(l, false))
+				}
+				f.gates = append(f.gates, g)
 				continue
 			}
 		}
 		parts = append(parts, "(?:"+src+")")
 	}
+	f.idx = newLitIndex(lits, stop)
 	if len(parts) > 0 {
 		// (?m): scanLine applies each rule to one line, so ^/$ anchor every line;
 		// across the whole file only multi-line mode keeps that superset.
@@ -224,21 +237,20 @@ func (f scanFilter) mayMatch(text string) bool {
 	if f.always {
 		return true
 	}
-	if len(f.lits) > 0 || len(f.gates) > 0 {
-		if strings.ContainsAny(text, "\u017f\u212a") {
+	if len(f.idx.lits) > 0 {
+		// Pure ASCII holds neither fold rune; it also keeps every byte of low at
+		// its offset in text, which the gates' line slicing relies on.
+		ascii := isASCII(text)
+		if !ascii && strings.ContainsAny(text, "ſK") {
 			return true
 		}
 		low := strings.ToLower(text)
-		for _, l := range f.lits {
-			if strings.Contains(low, l) {
-				return true
-			}
+		found, stopped := f.idx.scan(low)
+		if stopped {
+			return true
 		}
-		// Byte offsets in low index text only when lowering kept every byte in
-		// place, which ASCII guarantees.
-		aligned := isASCII(text)
 		for _, g := range f.gates {
-			if g.mayMatch(text, low, aligned) {
+			if g.mayMatch(text, low, ascii, f.idx, found) {
 				return true
 			}
 		}
@@ -251,27 +263,43 @@ func (f scanFilter) mayMatch(text string) bool {
 var errBinary = fmt.Errorf("binary file")
 
 // readTextFile reads a file for scanning, deciding binary-ness from a prefix so a
-// large binary is never fully read.
+// large binary is never fully read. The buffer is sized from the file's stat, so a
+// large text file is read in place rather than grown and copied.
 func readTextFile(abs string) ([]byte, error) {
 	f, err := os.Open(abs)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	head := make([]byte, binaryProbeBytes)
-	n, err := io.ReadFull(f, head)
+	size := binaryProbeBytes
+	if fi, err := f.Stat(); err == nil && fi.Size() > int64(size) {
+		size = int(fi.Size())
+	}
+	buf := make([]byte, size+1) // +1: a file that grew since the stat still reads to EOF below
+	n, err := io.ReadFull(f, buf[:binaryProbeBytes])
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 		return nil, err
 	}
-	head = head[:n]
-	if looksBinary(head) {
+	if looksBinary(buf[:n]) {
 		return nil, errBinary
 	}
-	rest, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
+	if n < binaryProbeBytes {
+		return buf[:n], nil
 	}
-	return append(head, rest...), nil
+	for {
+		if n == len(buf) {
+			buf = append(buf, 0)[:n]
+			buf = buf[:cap(buf)]
+		}
+		m, err := f.Read(buf[n:])
+		n += m
+		if err == io.EOF {
+			return buf[:n], nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 }
 
 // expandDirPath resolves a [[dir]] path key to a cleaned absolute path, expanding
@@ -501,7 +529,7 @@ func LeakScan(repoRoot string, cfg LeakConfig, extraIgnores []string) ([]LeakFin
 			if err != nil {
 				continue
 			}
-			text = string(b)
+			text = unsafe.String(unsafe.SliceData(b), len(b)) // b is never written again
 		}
 		if !filterFor(denyKey, deny).mayMatch(text) {
 			continue
