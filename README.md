@@ -117,8 +117,12 @@ secret / owner-specific strings, to catch them before a repo goes public. Runs b
 default; `--skip leaks` turns it off.
 
 It is the only check with a noticeable cost, roughly proportional to tracked
-bytes and rule count: ~6s on a 9.7k-file, ~1GB repo, against ~0.3s for all six
-doc-graph checks there. Binary files are skipped.
+text: ~1s on a 15k-file repo holding ~200 MB of text, scanned across every core.
+Binary files are skipped. A file that scanned clean is cached in
+`$XDG_CACHE_HOME/docgraph/leaks/` (default `~/.cache`) and skipped next run
+while its content, its path, the leaks config and the docgraph binary are all
+unchanged, so a repeat push scans only what changed. `DOCGRAPH_NO_CACHE=1`
+scans everything.
 
 Scope is governed by **git tracking**, not the doc-graph ignore layers: every
 `git ls-files` entry is scanned (so `.gitignore` decides what's excluded), and

@@ -473,8 +473,10 @@ docs/" with zero config.
   snapshot; `changedCode` shares `nonCodePathspec` with `gitDiff`/
   `stillDefinedInCode` so every code-side scan agrees on what "code" is),
   `leaks.go`
-  (TOML config decode + dir-scoped content scan), `leaks_required.go`
-  (`requiredLiterals`, the regex rules' prefilter gate), `footguns.go` (the
+  (TOML config decode + dir-scoped, parallel content scan), `leaks_required.go`
+  (`requiredLiterals`, the regex rules' prefilter gate), `leaks_litindex.go`
+  (the prefilter's one-pass literal search), `leaks_cache.go` (`LeakCache`, the
+  clean-file cache), `footguns.go` (the
   declaration scanner — `scanDeclarations`/`isFootgunDeclaration`; a
   *declaration* is a footgun being introduced, not a passing mention of one,
   and every one is reported — `scanDeclarations` does no rationale filtering),
@@ -576,14 +578,14 @@ Go-bin fallback back to `command -v`.
 
 The doc-graph work is not the cost. On a 9.7k-file repo (~14M tracked lines,
 ~1GB tracked) the six doc-graph checks measure **~0.3s combined**, while
-`leaks` costs seconds: every byte of tracked text is read, lowercased and
+`leaks` costs the rest: every byte of tracked text not in the clean-file cache is read, lowercased and
 substring-searched, and any regexp that runs over it goes at Go-NFA speed
 (~50–80MB/s for a rule with no literal prefix). So the profile is inverted
 from where the interesting code is: an optimisation aimed at `BuildContentGraph`
 or `parseDocs` buys nothing measurable, while a regex rule that can't be gated
 (no `requiredLiterals`) or a per-line rule pass costs seconds per push.
 
-Two things stand between the rules and the per-line loop, and both are the kind
+Three things stand between the rules and the per-line loop, and all are the kind
 that look safe to tighten:
 
 - **`scanFilter` (`mayMatch`) is a whole-file prefilter, and it must be a strict
@@ -599,6 +601,11 @@ that look safe to tighten:
   reads the rest.** Dropping the second read to "just scan the head" would look
   like a further win and would silently stop scanning past the first 8000 bytes
   of every file.
+- **The clean-file cache (`LeakCache`) may skip only a file whose result cannot
+  have changed.** Its key and its two checks — `ls-files -m` before a hit, and the
+  scanned bytes hashing to the index blob before a record — each look like
+  redundant cost, and dropping any one lets a leak hide behind a stale "clean"
+  entry. The docblock lists what each one closes; `TestLeakCache*` pins them.
 
 ## Footgun — every install path must exec the new binary once, or `doc-drift` costs ~1s a turn
 
