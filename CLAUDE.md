@@ -473,7 +473,8 @@ docs/" with zero config.
   snapshot; `changedCode` shares `nonCodePathspec` with `gitDiff`/
   `stillDefinedInCode` so every code-side scan agrees on what "code" is),
   `leaks.go`
-  (TOML config decode + dir-scoped content scan), `footguns.go` (the
+  (TOML config decode + dir-scoped content scan), `leaks_required.go`
+  (`requiredLiterals`, the regex rules' prefilter gate), `footguns.go` (the
   declaration scanner — `scanDeclarations`/`isFootgunDeclaration`; a
   *declaration* is a footgun being introduced, not a passing mention of one,
   and every one is reported — `scanDeclarations` does no rationale filtering),
@@ -575,22 +576,23 @@ Go-bin fallback back to `command -v`.
 
 The doc-graph work is not the cost. On a 9.7k-file repo (~14M tracked lines,
 ~1GB tracked) the six doc-graph checks measure **~0.3s combined**, while
-`leaks` costs the README's figure (*Leaks*) — because `scanLine` runs one
-`FindAllStringIndex` per rule per line, over every tracked non-binary file the
-prefilter lets through. So the profile is inverted
+`leaks` costs seconds: every byte of tracked text is read, lowercased and
+substring-searched, and any regexp that runs over it goes at Go-NFA speed
+(~50–80MB/s for a rule with no literal prefix). So the profile is inverted
 from where the interesting code is: an optimisation aimed at `BuildContentGraph`
-or `parseDocs` buys nothing measurable, and a change that adds a per-line rule
-pass to `leaks` costs seconds per push.
+or `parseDocs` buys nothing measurable, while a regex rule that can't be gated
+(no `requiredLiterals`) or a per-line rule pass costs seconds per push.
 
-Two things now stand between the rules and that loop, and both are the kind that
-look safe to tighten:
+Two things stand between the rules and the per-line loop, and both are the kind
+that look safe to tighten:
 
 - **`scanFilter` (`mayMatch`) is a whole-file prefilter, and it must be a strict
   SUPERSET of the rules.** Anything it rejects is never scanned line-by-line, so
   narrowing it is a *silently missed leak* — no finding, green gate, exit 0. That
   is why an ASCII literal gets the fast case-folded substring path but a
   non-ASCII one keeps its regexp (byte-wise lowercase is not Unicode folding),
-  and why whatever the whole-file alternation can't stand in for forces the
+  why `requiredLiterals` gives up rather than claim a string some match could
+  lack, and why whatever the whole-file alternation can't stand in for forces the
   scan (`scanFilter`'s docblock lists the cases). The `TestLeakScan*` tests are
   what stop this regressing.
 - **`readTextFile` decides binary-ness from a `binaryProbeBytes` prefix, then
