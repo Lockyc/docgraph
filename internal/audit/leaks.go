@@ -120,27 +120,70 @@ type compiledLeaks struct {
 	dirs  []compiledDir
 }
 
-// scanFilter answers "could this file contain ANY deny match at all" in one pass
-// over the whole file, so the per-line loop — which costs one FindAllStringIndex
-// per rule per line — runs only on the rare file that has a candidate. That loop
-// is the whole cost of the leaks check: on a repo of ~14M tracked lines with 14
-// rules it was ~250M regexp calls and ~25s, versus ~0.3s for every other check
-// combined.
+// scanFilter answers "could this file contain ANY deny match at all" over the
+// whole file, so the per-line loop — one FindAllStringIndex per rule per line —
+// runs only on the rare file that has a candidate. A regexp with no literal prefix
+// runs on Go's NFA at ~50–80MB/s, so the filter itself is the leaks check's cost
+// on a large repo unless most files are rejected by substring search first.
 //
 // It must never be NARROWER than the rules it stands in for — a false negative
-// here is a missed leak, silently. Two guarantees keep it a superset: a literal
+// here is a missed leak, silently. Three guarantees keep it a superset: a literal
 // term is prefiltered by case-folded substring search only when it is pure ASCII
 // and the file holds neither non-ASCII rune that (?i) folds onto an ASCII letter
-// (U+017F ſ → s, U+212A Kelvin K → k), and every other rule is kept verbatim in a
-// multi-line alternation of its own compiled pattern; a rule anchored with \A or
-// \z, which per line means "line start/end", disables the regex prefilter.
+// (U+017F ſ → s, U+212A Kelvin K → k); a regex rule is gated on its
+// requiredLiterals under the same fold guard, then run whole-file; and every other
+// rule is kept verbatim in a multi-line alternation of its own compiled pattern.
+// A rule anchored with \A or \z, which per line means "line start/end", disables
+// the prefilter.
 type scanFilter struct {
 	lits   []string       // ASCII-lowercased literal terms
+	gates  []gatedRule    // regex rules with a derivable required literal
 	re     *regexp.Regexp // alternation of every remaining rule; nil when there are none
 	always bool           // a rule the whole-file alternation can't stand in for
 }
 
-// newScanFilter splits a deny set into the two prefilter strategies. A rule whose
+// gatedRule is a regex rule run whole-file only when the lowercased file holds
+// one of lits — every match of re contains one.
+type gatedRule struct {
+	lits []string
+	re   *regexp.Regexp // the rule in multi-line mode
+}
+
+// mayMatch runs the rule only where one of lits occurs. With aligned offsets that
+// is just the lines holding an occurrence — every rule is applied per line, so a
+// match can only sit on a line that holds its required literal; otherwise it runs
+// whole-file.
+func (g gatedRule) mayMatch(text, low string, aligned bool) bool {
+	for _, l := range g.lits {
+		if !strings.Contains(low, l) {
+			continue
+		}
+		if !aligned {
+			return g.re.MatchString(text)
+		}
+		for off := 0; off < len(low); {
+			i := strings.Index(low[off:], l)
+			if i < 0 {
+				break
+			}
+			i += off
+			start := strings.LastIndexByte(text[:i], '\n') + 1
+			end := strings.IndexByte(text[i:], '\n')
+			if end < 0 {
+				end = len(text)
+			} else {
+				end += i
+			}
+			if g.re.MatchString(text[start:end]) {
+				return true
+			}
+			off = end + 1
+		}
+	}
+	return false
+}
+
+// newScanFilter splits a deny set into the prefilter strategies. A rule whose
 // pattern compiles alone but not as part of the alternation (RE2 caps program
 // size) degrades to "always scan", which only ever makes the filter wider.
 func newScanFilter(deny []matcher) scanFilter {
@@ -154,6 +197,12 @@ func newScanFilter(deny []matcher) scanFilter {
 		src := d.re.String()
 		if strings.Contains(src, `\A`) || strings.Contains(src, `\z`) {
 			f.always = true
+		}
+		if lits, ok := requiredLiterals(d.re); ok {
+			if re, err := regexp.Compile("(?m)" + src); err == nil {
+				f.gates = append(f.gates, gatedRule{lits: lits, re: re})
+				continue
+			}
 		}
 		parts = append(parts, "(?:"+src+")")
 	}
@@ -175,13 +224,21 @@ func (f scanFilter) mayMatch(text string) bool {
 	if f.always {
 		return true
 	}
-	if len(f.lits) > 0 {
+	if len(f.lits) > 0 || len(f.gates) > 0 {
 		if strings.ContainsAny(text, "\u017f\u212a") {
 			return true
 		}
 		low := strings.ToLower(text)
 		for _, l := range f.lits {
 			if strings.Contains(low, l) {
+				return true
+			}
+		}
+		// Byte offsets in low index text only when lowering kept every byte in
+		// place, which ASCII guarantees.
+		aligned := isASCII(text)
+		for _, g := range f.gates {
+			if g.mayMatch(text, low, aligned) {
 				return true
 			}
 		}
