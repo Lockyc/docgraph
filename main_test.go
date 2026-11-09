@@ -584,13 +584,17 @@ func TestRunEnforcesLeaksByDefault(t *testing.T) {
 }
 
 // TestMain isolates every test in this package from the dev machine's real
-// ~/.config and ~/.local/state, so a test can never read the owner's config.toml
-// or append junk to the real usage.jsonl if logging is enabled on this machine.
+// ~/.config, ~/.local/state and ~/.cache, so a test can never read the owner's
+// config.toml, append junk to the real usage.jsonl if logging is enabled on this
+// machine, or leave leaks-cache files behind for its temp repos.
 func TestMain(m *testing.M) {
 	cfg, _ := os.MkdirTemp("", "docgraph-cfg")
 	state, _ := os.MkdirTemp("", "docgraph-state")
+	cache, _ := os.MkdirTemp("", "docgraph-cache")
 	os.Setenv("XDG_CONFIG_HOME", cfg)
 	os.Setenv("XDG_STATE_HOME", state)
+	os.Setenv("XDG_CACHE_HOME", cache)
+	os.Unsetenv("DOCGRAPH_NO_CACHE")
 	os.Unsetenv("DOCGRAPH_CONFIG")
 	os.Unsetenv("DOCGRAPH_LOG")
 	os.Unsetenv("DOCGRAPH_NO_LOG")
@@ -598,6 +602,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(cfg)
 	os.RemoveAll(state)
+	os.RemoveAll(cache)
 	os.Exit(code)
 }
 

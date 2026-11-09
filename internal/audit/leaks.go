@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
@@ -451,27 +453,50 @@ func relUnder(abs, dir string) (string, bool) {
 // not appear anywhere. Global + dir-scoped allows suppress individual matches.
 // History is never read. A bad regexp in the config is an error.
 func LeakScan(repoRoot string, cfg LeakConfig, extraIgnores []string) ([]LeakFinding, error) {
+	return LeakScanCached(repoRoot, cfg, extraIgnores, nil)
+}
+
+// leakJob is one file's resolved rules, decided before any file is read.
+type leakJob struct {
+	file, abs string
+	deny      []matcher
+	allow     []matcher
+	filter    *scanFilter
+	blob      string   // index blob id; "" = uncacheable
+	key       cacheKey // valid when blob != ""
+}
+
+// LeakScanCached is LeakScan with a clean-file cache; a nil cache scans
+// everything. Files are read and scanned in parallel.
+func LeakScanCached(repoRoot string, cfg LeakConfig, extraIgnores []string, cache *LeakCache) ([]LeakFinding, error) {
 	cl, err := cfg.compile()
 	if err != nil {
 		return nil, err
 	}
-	files, err := gitLines(repoRoot, "ls-files")
+	entries, err := lsFilesStaged(repoRoot)
 	if err != nil {
 		return nil, err
 	}
-	var findings []LeakFinding
+	var (
+		known    map[cacheKey]bool
+		modified map[string]bool
+		base     []byte
+		emptyID  string
+	)
+	if cache != nil {
+		if modified, err = lsFilesModified(repoRoot); err != nil {
+			return nil, err
+		}
+		known = cache.load()
+		base = cacheBase(cache.Salt, cfg)
+	}
 	// One filter per distinct deny set. Nearly every file uses the full set; a
 	// [[dir]] that suppresses a group yields one more, built once and reused.
-	filters := map[string]scanFilter{}
-	filterFor := func(key string, deny []matcher) scanFilter {
-		if f, ok := filters[key]; ok {
-			return f
-		}
-		f := newScanFilter(deny)
-		filters[key] = f
-		return f
-	}
-	for _, f := range files {
+	filters := map[string]*scanFilter{}
+	var jobs []leakJob
+	var keep []cacheKey // clean files this run, hits and fresh alike
+	for _, e := range entries {
+		f := e.path
 		if matchesIgnore(f, extraIgnores) {
 			continue
 		}
@@ -514,29 +539,58 @@ func LeakScan(repoRoot string, cfg LeakConfig, extraIgnores []string) ([]LeakFin
 		if len(dirAllows) > 0 {
 			allow = append(append([]matcher{}, cl.allow...), dirAllows...)
 		}
-		// For a tracked symlink git publishes the link's target string, not the
-		// pointee: scan that string (an absolute home or homelab path is the leak)
-		// and never follow the link to content that doesn't ship.
-		var text string
-		if fi, err := os.Lstat(abs); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(abs)
-			if err != nil {
-				continue
+		filter, ok := filters[denyKey]
+		if !ok {
+			sf := newScanFilter(deny)
+			filter = &sf
+			filters[denyKey] = filter
+		}
+		job := leakJob{file: f, abs: abs, deny: deny, allow: allow, filter: filter}
+		if cache != nil && e.blob != "" && !modified[f] {
+			if emptyID == "" {
+				emptyID = gitBlobID("", e.blob)
 			}
-			text = target
-		} else {
-			b, err := readTextFile(abs)
-			if err != nil {
-				continue
+			// An intent-to-add entry carries the empty blob whatever the file holds.
+			if e.blob != emptyID {
+				job.blob = e.blob
+				job.key = keyFor(base, abs, e.blob)
+				if known[job.key] {
+					keep = append(keep, job.key)
+					continue
+				}
 			}
-			text = unsafe.String(unsafe.SliceData(b), len(b)) // b is never written again
 		}
-		if !filterFor(denyKey, deny).mayMatch(text) {
-			continue
+		jobs = append(jobs, job)
+	}
+
+	results := make([][]LeakFinding, len(jobs))
+	clean := make([]bool, len(jobs))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < runtime.GOMAXPROCS(0); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				results[i], clean[i] = scanJob(jobs[i])
+			}
+		}()
+	}
+	for i := range jobs {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+
+	var findings []LeakFinding
+	for i, r := range results {
+		findings = append(findings, r...)
+		if clean[i] {
+			keep = append(keep, jobs[i].key)
 		}
-		for i, line := range strings.Split(text, "\n") {
-			findings = append(findings, scanLine(f, i+1, line, deny, allow)...)
-		}
+	}
+	if cache != nil {
+		cache.save(keep)
 	}
 	sort.Slice(findings, func(i, j int) bool {
 		if findings[i].File != findings[j].File {
@@ -548,6 +602,34 @@ func LeakScan(repoRoot string, cfg LeakConfig, extraIgnores []string) ([]LeakFin
 		return findings[i].Match < findings[j].Match
 	})
 	return findings, nil
+}
+
+// scanJob reads and scans one file. clean reports whether it may be cached:
+// cacheable, no findings, and the bytes scanned are exactly the index blob.
+func scanJob(j leakJob) (findings []LeakFinding, clean bool) {
+	// For a tracked symlink git publishes the link's target string, not the
+	// pointee: scan that string (an absolute home or homelab path is the leak)
+	// and never follow the link to content that doesn't ship.
+	var text string
+	if fi, err := os.Lstat(j.abs); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(j.abs)
+		if err != nil {
+			return nil, false
+		}
+		text = target
+	} else {
+		b, err := readTextFile(j.abs)
+		if err != nil {
+			return nil, false
+		}
+		text = unsafe.String(unsafe.SliceData(b), len(b)) // b is never written again
+	}
+	if j.filter.mayMatch(text) {
+		for i, line := range strings.Split(text, "\n") {
+			findings = append(findings, scanLine(j.file, i+1, line, j.deny, j.allow)...)
+		}
+	}
+	return findings, len(findings) == 0 && j.blob != "" && gitBlobID(text, j.blob) == j.blob
 }
 
 // scanLine returns findings for one line: deny matches not covered by an allow

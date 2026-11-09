@@ -350,7 +350,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
 			return 2
 		}
-		leaks, err = audit.LeakScan(root, cfg, ignores)
+		leaks, err = audit.LeakScanCached(root, cfg, ignores, leakCache(root))
 		if err != nil {
 			// A bad regexp in an otherwise-valid config surfaces here — also fatal.
 			fmt.Fprintf(stderr, "docgraph: leaks config %s: %v\n", cfgPath, err)
@@ -1627,6 +1627,33 @@ func docDriftRecordNag(root, scanned string, fs []audit.DocDriftFinding) {
 	}
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+// leakCache is the leaks clean-file cache under $XDG_CACHE_HOME (default
+// ~/.cache), salted with this binary's own hash so any rebuild starts cold; nil —
+// scan everything — under DOCGRAPH_NO_CACHE=1 or when the binary can't be read.
+func leakCache(root string) *audit.LeakCache {
+	if os.Getenv("DOCGRAPH_NO_CACHE") == "1" {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	f, err := os.Open(exe)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil
+	}
+	dir, err := audit.XDGDir("XDG_CACHE_HOME", ".cache")
+	if err != nil {
+		return nil
+	}
+	return &audit.LeakCache{Path: audit.LeakCachePath(dir, root), Salt: hex.EncodeToString(h.Sum(nil))}
 }
 
 // docDriftStateDir resolves $XDG_STATE_HOME/docgraph/doc-drift (default
