@@ -76,8 +76,8 @@ its own subcommand with its own trigger (a git range / a Stop invocation), not a
 and the `covers`/`index`/`stale`/`graph` views are a third kind again: not a check
 and not diff-scoped, no trigger of their own — `schema` emits a fixed vocabulary,
 the views query the current tree read-only. There's also an **opt-in usage
-log** (see the logging footgun). Human-facing usage lives in `README.md`; this
-file carries the invariants and footguns.
+log** (see the logging footgun). Human-facing usage lives in `README.md` and the
+`docs/` pages it links; this file carries the invariants and footguns.
 
 ## Intended use
 
@@ -91,8 +91,8 @@ Separately, `docgraph doc-drift` is meant to be wired as a **Stop hook** by the
 agent harness (e.g. a Claude Code `Stop` hook entry that runs `docgraph
 doc-drift`): it fires at the end of a turn, not at push time, so the agent hears
 about drift while it can still act — see
-[`doc-drift`](README.md#docgraph-doc-drift--the-stop-hook-staleness-gate) in
-`README.md`.
+[`doc-drift`](docs/drift.md#doc-drift--the-stop-hook-staleness-gate) in
+`docs/drift.md`.
 
 ## What it is (and is not)
 
@@ -178,8 +178,8 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   per-repo deny list committed to a public repo *is itself the leak* (it
   enumerates the owner's sensitive terms), and the footprint vocabulary is
   identical across repos. **The leaks config is the single control surface** — no
-  per-repo/inline override (referenced across the footguns below). The README's
-  `leaks` section documents the TOML schema, the
+  per-repo/inline override (referenced across the footguns below). `docs/leaks.md`
+  documents the TOML schema, the
   `--leaks-config`→`$DOCGRAPH_LEAKS`→`$XDG_CONFIG_HOME` resolution (XDG, never
   `os.UserConfigDir()` — wrong on macOS for a CLI), and the `leaks-rules` export.
   The load-bearing invariants:
@@ -286,8 +286,8 @@ restating the vocabulary, so the schema and the checks can't drift apart.
   distinction.
 - **Usage logging is OPT-IN, side-channel, and MUST NOT alter the gate.** JSONL
   records under `$XDG_STATE_HOME/docgraph/usage.jsonl` (XDG *state*, not
-  config), only when a global `config.toml` `[log]` table opts in (the README's
-  Usage-logging section has the config + level table). Load-bearing invariants:
+  config), only when a global `config.toml` `[log]` table opts in (`docs/logging.md`
+  has the config + level table). Load-bearing invariants:
   - **Separate file from `leaks.toml`.** `leaks.toml` is a dedicated rules file that
     may be synced on its own; `config.toml` holds `[log]`. Don't merge them.
   - **Malformed `config.toml` is NON-fatal here** — warn, disable logging, run

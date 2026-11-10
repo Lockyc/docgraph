@@ -73,7 +73,7 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 	switch {
 	case level >= 3:
 		// Level 3 — the deliberate sink: paths plus broken targets and leak MATCH
-		// text. The README warns this turns the log into the sensitive-string sink
+		// text. docs/logging.md warns this turns the log into the sensitive-string sink
 		// the leaks check exists to prevent.
 		f := map[string][]string{}
 		if sel["orphans"] {
