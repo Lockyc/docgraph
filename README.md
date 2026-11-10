@@ -18,7 +18,7 @@ docgraph .                                      # audit the current repo
 docgraph install-hook                           # wire it in as a pre-push gate
 ```
 
-Under Claude Code, `/docgraph:install` does the install, wires the `doc-drift`
+In Claude Code, from a clone of this repo, `/docgraph:install` does the install, wires the `doc-drift`
 Stop hook, and seeds the leaks config for you. See [Install](#install) for the
 full menu.
 
@@ -441,7 +441,7 @@ docgraph graph --json                # ...or as a stable JSON payload (machine s
 
 ## Install
 
-**Guided (Claude Code):** `/docgraph:install` — installs the binary, offers to
+**Guided (Claude Code):** from a clone of this repo, run `/docgraph:install` — it installs the binary, offers to
 wire the `doc-drift` Stop hook into `~/.claude/settings.json`, offers this repo's
 pre-push gate, and seeds the leaks config.
 
