@@ -76,8 +76,10 @@ This runs `go install` (from the current checkout if you're in one, else `@lates
 go install github.com/lockyc/docgraph/v3@latest
 ```
 
-Needs **Go** and **git** on PATH. From a clone of this repo, Claude Code's `/docgraph:install`
-also wires `doc-drift` into `~/.claude/settings.json` as a Stop hook.
+Needs **Go** and **git** on PATH. For Claude Code, add `~/go/bin/docgraph doc-drift` (your Go
+bin dir, which the installer prints) to the `Stop` hooks in `~/.claude/settings.json`, and copy
+[`.claude/skills/docgraph/SKILL.md`](.claude/skills/docgraph/SKILL.md) to
+`~/.claude/skills/docgraph/SKILL.md` so agents reach for the read-only views.
 
 ### As a pre-push gate
 

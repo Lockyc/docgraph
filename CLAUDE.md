@@ -502,22 +502,18 @@ docs/" with zero config.
 - **Install with `just install`** (or `go install .`) → `~/go/bin`. The binary is not
   reinstalled automatically, because `go install` only runs when invoked — so
   reinstall after changing the CLI or the local binary runs stale logic.
-- `install.sh` + `.claude/commands/docgraph/install.md` (`/docgraph:install`) — the
-  guided installer (`project-standards` item 13). `install.sh` is the curl-pipeable
-  mechanism (`go install`, dual-mode IN_REPO/`@latest`, seeds `~/.config/docgraph/`,
-  edits no global config); `/docgraph:install` is the guided layer that wires the
-  `doc-drift` Stop hook into `~/.claude/settings.json`, offers the per-repo pre-push
-  gate, seeds the leaks config, and installs the skill below. Neither depends on `just`,
-  and both declare the module path once, in a `MODULE` var, rather than inline — so the
-  `MODULE` lines are `/vN` sites a major bump must move along with every other
-  `@latest` site (see the major-bump footgun).
+- `install.sh` — the curl-pipeable installer (`project-standards` item 13): `go install`,
+  dual-mode IN_REPO/`@latest`, seeds `~/.config/docgraph/`, edits no global config, and
+  prints the Stop-hook and skill wiring as next steps. It doesn't depend on `just`, and
+  declares the module path once, in a `MODULE` var — a `/vN` site a major bump must move
+  along with every other `@latest` site (see the major-bump footgun).
 - `.claude/skills/docgraph/SKILL.md` — **the only thing that advertises the read-only
   views.** The gates push themselves at an agent (a hook fires whether or not it knows
   docgraph exists); `covers`/`index`/`stale` are pull-only, so an agent that never
   learns of them greps instead and the views may as well not exist. The skill's
   *description* line is the advertisement — permanently in context for the cost of one
   line, body loaded only when a doc question actually forms. The repo copy is the
-  source of truth; `/docgraph:install` installs it to `~/.claude/skills/docgraph/`.
+  source of truth; the README's Install has it copied to `~/.claude/skills/docgraph/`.
   Keep it honest about empty results: a repo with no `covers:` edges legitimately
   answers nothing, and an agent must not read that as "no doc exists".
 
@@ -622,7 +618,7 @@ in this repo, where docgraph is what you are rebuilding, on turn after turn.
 
 The fix is that **every install path execs the new binary once**, absorbing the
 assessment where someone is already waiting on a build: `just install` runs
-`"$bin/docgraph" version`, and `install.sh` / `/docgraph:install` already exec it for the
+`"$bin/docgraph" version`, and `install.sh` already execs it for the
 version string.
 
 **The trap is that those execs read as cosmetic** — a smoke test, or a version string you

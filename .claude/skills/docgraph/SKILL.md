@@ -150,8 +150,8 @@ no doc claims a file sitting inside another doc's directory edge.
 
 `docgraph .` runs seven whole-state checks (orphans, disconnected, broken links,
 untracked, leaks, frontmatter, edges) and exits non-zero on a finding — it's the
-pre-push gate, and `docgraph doc-drift` is a Stop hook. Both are wired by
-`/docgraph:install`; you rarely invoke them by hand.
+pre-push gate (`docgraph install-hook`), and `docgraph doc-drift` is a Stop hook;
+you rarely invoke them by hand.
 
 `docgraph schema` emits the frontmatter JSON Schema — use it instead of
 re-encoding the vocabulary if you're building something that reads the graph.

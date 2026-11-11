@@ -7,8 +7,8 @@
 #
 # docgraph is a Go CLI, not a bundle — this installs a BINARY to the Go bin dir; there
 # is no ~/.docgraph clone to manage. It seeds the global config dir but never edits
-# ~/.claude/settings.json or any repo's git hook — that guided wiring is /docgraph:install's
-# job (a non-interactive curl|bash must not silently edit global config). Never uses `just`.
+# ~/.claude/settings.json or any repo's git hook — it prints that wiring as next steps
+# (a non-interactive curl|bash must not silently edit global config). Never uses `just`.
 set -e
 
 # The /vN suffix is Go's semantic import versioning: a module at major >=2 must
@@ -59,11 +59,10 @@ case ":$PATH:" in
 esac
 echo ""
 echo "Next steps:"
-echo "  • Guided setup (Claude Code): /docgraph:install"
-echo "      wires the doc-drift Stop hook into ~/.claude/settings.json, offers the"
-echo "      per-repo pre-push gate, and seeds the leaks config."
 echo "  • Pre-push gate for a repo:   run 'docgraph install-hook' inside it."
-echo "  • doc-drift Stop hook (manual): add '$BIN_DIR/docgraph doc-drift' to the"
+echo "  • doc-drift Stop hook: add '$BIN_DIR/docgraph doc-drift' to the"
 echo "      Stop hooks array in ~/.claude/settings.json."
+echo "  • docgraph skill: copy .claude/skills/docgraph/SKILL.md from this repo to"
+echo "      ~/.claude/skills/docgraph/SKILL.md."
 echo "  • Leak rules are a global file you curate: $CFG_DIR/leaks.toml"
 echo "      (schema + 'docgraph leaks-rules' export — see the README leaks section)."
