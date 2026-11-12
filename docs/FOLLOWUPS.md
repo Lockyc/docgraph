@@ -9,7 +9,7 @@ links:
 # Follow-ups
 
 Wanted work that is deferred, not out of scope. (Genuinely out-of-scope
-non-goals live in the README's *Known gaps* — don't mix them: a gap says "we
+non-goals live in the README's *Limits* — don't mix them: a gap says "we
 won't", this file says "not yet".)
 
 ## Superseded-link detection
