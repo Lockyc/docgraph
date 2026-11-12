@@ -542,12 +542,11 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 }
 
 // printReport prints the outcome of the checks being run and reports whether any
-// has findings. A clean run is a single terse line, so a green pre-push gate does
-// not bury the terminal in headers nobody reads. Only on findings does the output
-// turn self-describing — a reader (often a fresh agent seeing only a failed `git
-// push`) should then learn from the text alone what docgraph is, what a finding
-// means, why a non-zero exit aborts a push, and how to remediate: banner, the
-// sections that actually have findings, and the explain-and-remediate footer.
+// has findings. A clean run is a single terse line. On findings the reader is
+// often a fresh agent seeing only a failed `git push`, so it gets the sections
+// that have findings, that the exit aborted the push, and one fix line per
+// failing check — and nothing describing the tool, which it would pay for in
+// context on every failed push.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
 	counts := audit.CheckCounts(r, leaks)
 	found := func(name string) bool { return sel[name] && counts[name] > 0 }
@@ -559,12 +558,6 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 		return false
 	}
 
-	fmt.Fprintln(w, "docgraph — enforces agent-facing repo hygiene across two doc graphs: the")
-	fmt.Fprintln(w, "content graph (findability — orphans flags an island no prose reference reaches)")
-	fmt.Fprintln(w, "and the metadata graph (structure — disconnected flags a frontmatter doc with no")
-	fmt.Fprintln(w, "doc→doc edge). Frontmatter is required on every doc except README. Plus broken")
-	fmt.Fprintln(w, "typed-edge/link targets, untracked .md, and a content scan for leak patterns.")
-	fmt.Fprintln(w, "All checks run by default; exclude one with --skip. Reads the doc graph and file content.")
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
 
 	if orphans {
@@ -635,16 +628,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
 func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmatter, edges, leaks, disconnected bool) {
-	bar := strings.Repeat("─", 82)
-	fmt.Fprintln(w, bar)
-	fmt.Fprintf(w, "docgraph: %d finding(s) in gated checks → exiting non-zero.\n", n)
-	fmt.Fprintln(w, "Its intended use is a pre-push gate, so if a git push just failed, this is why: the")
-	fmt.Fprintln(w, "non-zero exit aborted the push. A finding is a repo-hygiene problem — a doc an agent")
-	fmt.Fprintln(w, "can't reach, a dead .md link, an untracked .md, malformed/incomplete frontmatter, a")
-	fmt.Fprintln(w, "frontmatter edge pointing at a missing target, a configured leak pattern matched in")
-	fmt.Fprintln(w, "tracked content, or a frontmatter doc with no place in the metadata structure.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Fix the findings listed above:")
+	fmt.Fprintf(w, "docgraph: %d finding(s) → exit 1 (as the pre-push gate, this aborted the push). Fix:\n", n)
 	if orphans {
 		fmt.Fprintln(w, "  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a")
 		fmt.Fprintln(w, "              .docgraphignore entry) if it is intentionally standalone; or delete it.")
@@ -671,7 +655,6 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 		fmt.Fprintln(w, "  DISCONNECTED → give the doc a frontmatter part-of/see-also/depends-on edge to a")
 		fmt.Fprintln(w, "                related doc (a covers→code edge does not count); or `--skip disconnected`.")
 	}
-	fmt.Fprintln(w, bar)
 }
 
 // runFootgunDrift checks only footgun declarations ADDED in a range. With
@@ -712,7 +695,7 @@ func runFootgunDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	if len(findings) == 0 {
 		return 0
 	}
-	printFootgunDrift(stdout, findings)
+	printFootgunDrift(stdout, findings, ranges)
 	// Advisory, NOT a gate: exit 0 so a footgun declaration never aborts the push.
 	// docgraph can't judge whether an added declaration is a real footgun, so it
 	// nags (the two-question test) and trusts the pusher to double-check — rather
@@ -792,22 +775,74 @@ func echoLine(s string) string {
 	return string(r[:footgunEchoRunes]) + "…"
 }
 
+// nagListCap bounds every unbounded list a nag prints (covered paths, doc hits,
+// declarations): the first few name the problem as well as all of them do, and
+// each nag lands in an agent's context on every push or Stop. The rest collapse
+// into one "+N more" — a rerun or `docgraph covers` gives the full set.
+const nagListCap = 5
+
+// joinCapped renders items inline, at most nagListCap of them.
+func joinCapped(items []string) string {
+	if len(items) <= nagListCap {
+		return strings.Join(items, ", ")
+	}
+	return fmt.Sprintf("%s (+%d more)", strings.Join(items[:nagListCap], ", "), len(items)-nagListCap)
+}
+
+// writeCapped writes one indented line per item, at most nagListCap of them.
+func writeCapped(w io.Writer, indent string, items []string) {
+	for i, s := range items {
+		if i == nagListCap {
+			fmt.Fprintf(w, "%s+%d more\n", indent, len(items)-nagListCap)
+			return
+		}
+		fmt.Fprintf(w, "%s%s\n", indent, s)
+	}
+}
+
+// hitLines renders doc hits as trimmed file:line: text lines.
+func hitLines(hs []audit.DocHit) []string {
+	out := make([]string, len(hs))
+	for i, h := range hs {
+		out[i] = fmt.Sprintf("%s:%d: %s", h.File, h.Line, echoLine(h.Text))
+	}
+	return out
+}
+
+// shortRev abbreviates a full object id; anything else (a ref) passes through.
+func shortRev(s string) string {
+	if len(s) >= 40 && strings.Trim(s, "0123456789abcdef") == "" {
+		return s[:12]
+	}
+	return s
+}
+
+// pushNagTail ends a push-time advisory. Agents filter push output (`| tail -2`,
+// `| grep -v docgraph`), so whatever survives must still say what to look at:
+// the last line names the subjects and never contains "docgraph", and the line
+// before it is a rerun that reproduces the full message after the push.
+func pushNagTail(w io.Writer, cmd string, ranges []audit.RevRange, subjects []string) {
+	for _, r := range ranges {
+		fmt.Fprintf(w, "rerun: docgraph %s --range %s..%s\n", cmd, shortRev(r.Base), shortRev(r.Head))
+	}
+	fmt.Fprintf(w, "%s: %s — advisory, push not blocked\n", cmd, joinCapped(subjects))
+}
+
 // printFootgunDrift renders findings with the two-question remediation. This is
 // advisory (the caller exits 0): the message exists to prompt a double-check, not
 // to justify a block.
-func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding) {
-	bar := strings.Repeat("─", 82)
-	fmt.Fprintf(w, "FOOTGUNS (%d) added in this push — ADVISORY, the push was NOT blocked. Verify each\n", len(fs))
-	fmt.Fprintln(w, "is a real footgun (a trap hit, a tempting-but-wrong path, or a re-litigated")
-	fmt.Fprintln(w, "decision, recorded WITH its why) and at the right level — invariant → CLAUDE.md,")
-	fmt.Fprintln(w, "deep rationale → docs/, human prose → README. Open each to judge it:")
-	for _, f := range fs {
-		fmt.Fprintf(w, "  %s:%d → %s\n", f.File, f.Line, echoLine(f.Text))
+func printFootgunDrift(w io.Writer, fs []audit.FootgunFinding, ranges []audit.RevRange) {
+	fmt.Fprintln(w, "footgun-drift: this push adds footgun declarations. Keep each only if it is a real")
+	fmt.Fprintln(w, "trap, stated with its why, at the right level (invariant → CLAUDE.md, rationale →")
+	fmt.Fprintln(w, "docs/, prose → README); a fixed bug's story goes in the commit message instead.")
+	lines := make([]string, len(fs))
+	subjects := make([]string, len(fs))
+	for i, f := range fs {
+		subjects[i] = fmt.Sprintf("%s:%d", f.File, f.Line)
+		lines[i] = subjects[i] + " → " + echoLine(f.Text)
 	}
-	fmt.Fprintln(w, "A bug you just fixed is not a footgun: its story belongs in the commit message,")
-	fmt.Fprintln(w, "and the doc keeps at most the surviving rule. Reword any note-just-in-case as a")
-	fmt.Fprintln(w, "plain note, or drop it — a follow-up commit is fine, docgraph did not hold the push.")
-	fmt.Fprintln(w, bar)
+	writeCapped(w, "  ", lines)
+	pushNagTail(w, "footgun-drift", ranges, subjects)
 }
 
 // runCoversDrift is the diff-scoped ADVISORY pre-push subcommand: it nags when a
@@ -865,7 +900,7 @@ func runCoversDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) in
 		}
 		diff.WriteString(d)
 	}
-	printCoversDrift(stdout, pointCovers(root, findings, diff.String(), err, stderr))
+	printCoversDrift(stdout, pointCovers(root, findings, diff.String(), err, stderr), ranges)
 	return 0
 }
 
@@ -1095,12 +1130,9 @@ func reportDocDrift(w io.Writer, findings []audit.DocDriftFinding, covers []audi
 		printDocDrift(w, findings)
 	}
 	if len(covers) > 0 {
-		fmt.Fprint(w, coversDriftMessage(
-			"doc-drift: you changed code these docs declare they cover, and didn't touch the docs:\n",
-			"Check the listed lines first, then what else each doc says these files do.\n",
-			"These won't block again — carry on.\n",
-			covers))
+		writeCoversFindings(w, "doc-drift: you changed code these docs cover, and didn't touch the docs.", covers)
 	}
+	fmt.Fprintln(w, "These won't block again.")
 	return 2
 }
 
@@ -1677,70 +1709,43 @@ func printDocDrift(w io.Writer, fs []audit.DocDriftFinding) {
 			value = append(value, f)
 		}
 	}
-	fmt.Fprintln(w, "doc-drift: this branch changed code that tracked docs still describe the old way.")
-	fmt.Fprintln(w, "Fix each in THIS change set by the smallest edit that makes the doc true again —")
-	fmt.Fprintln(w, "swap the value, rename the symbol, or DELETE the sentence that now describes")
-	fmt.Fprintln(w, "nothing — or confirm it is intentional history. Never add an account of what")
-	fmt.Fprintln(w, "changed or why: that belongs in the commit message, not the doc.")
-	if len(dangling) > 0 {
-		fmt.Fprintln(w, "  Dangling references (symbol deleted, doc still names it):")
-		for _, f := range dangling {
-			fmt.Fprintf(w, "    • '%s' (definition removed on this branch) still referenced in:\n", f.Symbol)
-			for _, h := range f.Hits {
-				fmt.Fprintf(w, "        %s:%d: %s\n", h.File, h.Line, h.Text)
-			}
-		}
+	fmt.Fprintln(w, "doc-drift: code on this branch changed, and these docs still describe the old way.")
+	fmt.Fprintln(w, "Make each true by the smallest edit — swap the value, rename the symbol, or cut the")
+	fmt.Fprintln(w, "sentence — or leave deliberate history. What changed and why goes in the commit message.")
+	for _, f := range dangling {
+		fmt.Fprintf(w, "  `%s` was removed, still named at:\n", f.Symbol)
+		writeCapped(w, "    ", hitLines(f.Hits))
 	}
-	if len(value) > 0 {
-		fmt.Fprintln(w, "  Anchored value drift (doc names the constant but shows its old value):")
-		for _, f := range value {
-			fmt.Fprintf(w, "    • '%s' changed value (old literal %s); doc names the symbol but still shows %s:\n", f.Symbol, f.Old, f.Old)
-			for _, h := range f.Hits {
-				fmt.Fprintf(w, "        %s:%d: %s\n", h.File, h.Line, h.Text)
-			}
-		}
+	for _, f := range value {
+		fmt.Fprintf(w, "  `%s` is no longer %s, still shown at:\n", f.Symbol, f.Old)
+		writeCapped(w, "    ", hitLines(f.Hits))
 	}
-	fmt.Fprintln(w, "This catches only anchored/symbol cases — for paraphrased values or reversed")
-	fmt.Fprintln(w, "decisions, run a semantic doc sweep before finishing: `docgraph covers <path>`")
-	fmt.Fprintln(w, "names the docs that govern a file you changed, including ones no symbol drift")
-	fmt.Fprintln(w, "points at. Already reconciled, or is it framed history? Stop again — these")
-	fmt.Fprintln(w, "findings won't block again; only a new one will.")
+	fmt.Fprintln(w, "A symbol scan misses paraphrase: `docgraph covers <path>` lists the docs that govern a changed file.")
 }
 
-// coversDriftMessage renders a covers-drift nag: lead names the occasion, read
-// says what to read, tail says what happens next. The guidance between them is
-// shared, so the pre-push and Stop-hook nags steer to the same smallest edit.
-func coversDriftMessage(lead, read, tail string, fs []audit.CoversFinding) string {
-	var b strings.Builder
-	b.WriteString(lead)
+// writeCoversFindings renders covers findings. The pre-push and Stop-hook nags
+// share it and its guidance, so both steer to the same smallest edit.
+func writeCoversFindings(w io.Writer, lead string, fs []audit.CoversFinding) {
+	fmt.Fprintln(w, lead)
+	fmt.Fprintln(w, "Now false → correct or cut the false lines; what changed and why goes in the commit")
+	fmt.Fprintln(w, "message. Still accurate → leave it: an edit made only to quiet this is doc bloat.")
 	for _, f := range fs {
-		fmt.Fprintf(&b, "  • %s covers:\n", f.Doc)
-		for _, p := range f.Paths {
-			fmt.Fprintf(&b, "      %s\n", p)
-		}
+		fmt.Fprintf(w, "  %s covers %s\n", f.Doc, joinCapped(f.Paths))
 		if len(f.Lines) == 0 {
-			b.WriteString("    no code in the doc names what this change added or removed\n")
+			fmt.Fprintln(w, "    no code in the doc names what this change added or removed")
 			continue
 		}
-		b.WriteString("    lines whose code names what changed:\n")
-		for _, h := range f.Lines {
-			fmt.Fprintf(&b, "      %s:%d: %s\n", h.File, h.Line, echoLine(h.Text))
-		}
+		writeCapped(w, "    ", hitLines(f.Lines))
 	}
-	b.WriteString(read)
-	b.WriteString("Now false → correct or cut the false lines, nothing more; what changed and why\n")
-	b.WriteString("goes in the commit message, not the doc. Still accurate → do nothing: an edit\n")
-	b.WriteString("made only to quiet this is doc bloat. ")
-	b.WriteString(tail)
-	return b.String()
 }
 
-func printCoversDrift(w io.Writer, fs []audit.CoversFinding) {
-	fmt.Fprint(w, coversDriftMessage(
-		"COVERS-DRIFT: this push changes code that a doc declares it covers,\nbut the doc itself is untouched:\n",
-		"Check the listed lines first, then what else each doc says these files do.\n",
-		"Advisory — the push is not blocked.\n",
-		fs))
+func printCoversDrift(w io.Writer, fs []audit.CoversFinding, ranges []audit.RevRange) {
+	writeCoversFindings(w, "covers-drift: this push changes code these docs cover, and leaves the docs untouched.", fs)
+	docs := make([]string, len(fs))
+	for i, f := range fs {
+		docs[i] = f.Doc
+	}
+	pushNagTail(w, "covers-drift", ranges, docs)
 }
 
 // runSchema prints the JSON Schema describing docgraph frontmatter, stamped with

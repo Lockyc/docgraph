@@ -253,9 +253,15 @@ restating the vocabulary, so the schema and the checks can't drift apart.
 - **Every hook message steers toward the smallest true edit, and sends the story to
   the commit message.** A nag an agent reads as "touch the doc" gets answered with an
   appended paragraph about the change, and a repo's docs grow by one per push. So
-  `printDocDrift`, `coversDriftMessage` and `printFootgunDrift` each say: cut or
+  `printDocDrift`, `writeCoversFindings` and `printFootgunDrift` each say: cut or
   correct, never narrate; still accurate → do nothing. Keep that in any reworded or
   new message — never tell the reader that editing a doc is what quiets a check.
+- **Every nag is read through a filter and paid for in context.** Agents pipe a
+  push through `tail -2` or `grep -v docgraph`, so a push advisory ends with a
+  rerun line and a last line naming its subjects (`pushNagTail`). Guidance goes
+  first, never as a trailer. Lists are capped (`nagListCap`) and echoed lines
+  trimmed (`echoLine`). The gate's failure output carries findings and fix lines,
+  never a description of the tool.
 - **Code-block links are skipped deliberately.** `extractLinks`
   (`internal/audit/links.go`) ignores fenced and inline code so template/example
   paths don't register as real *links*. Asymmetry: the orphan **reachability**
@@ -419,7 +425,7 @@ docs/" with zero config.
   advisory pre-push subcommands — `runCoversDrift` checks `DOCGRAPH_COVERS_OFF`,
   resolves ranges from `--range` or `rangesFromPrePushStdin`, calls
   `audit.RepoDocs` + `audit.CoversDrift`, prints via `printCoversDrift`
-  (rendering `coversDriftMessage`) to **stdout** and returns 0 on a finding;
+  (rendering `writeCoversFindings`) to **stdout** and returns 0 on a finding;
   exit 2 is reserved for a usage/git error, which is a tool bug rather than a
   finding), `runDocDrift(args, stdin, stdout, stderr) int` (the Stop-hook
   subcommand — checks `DOC_DRIFT_OFF`, resolves the diff spec via

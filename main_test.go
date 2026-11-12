@@ -755,8 +755,8 @@ func TestFootgunDriftSubcommandRangeIsAdvisory(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("footgun-drift is advisory — want exit 0, got %d\n%s", code, out.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
-		t.Fatalf("want a FOOTGUN finding naming the line, got:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("footgun-drift:")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
+		t.Fatalf("want a footgun-drift finding naming the line, got:\n%s", out.String())
 	}
 }
 
@@ -771,8 +771,8 @@ func TestFootgunDriftSubcommandReadsPrePushStdin(t *testing.T) {
 	if code := runFootgunDrift([]string{dir}, stdin, &out, &errb); code != 0 {
 		t.Fatalf("footgun-drift is advisory — want exit 0, got %d\n%s", code, errb.String())
 	}
-	if !bytes.Contains(out.Bytes(), []byte("FOOTGUN")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
-		t.Fatalf("want a FOOTGUN finding from the stdin range, got:\n%s", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("footgun-drift:")) || !bytes.Contains(out.Bytes(), []byte("no why")) {
+		t.Fatalf("want a footgun-drift finding from the stdin range, got:\n%s", out.String())
 	}
 }
 
@@ -787,8 +787,8 @@ func TestFootgunDriftSubcommandSilentWhenNoDeclaration(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("want exit 0, got %d\n%s", code, out.String())
 	}
-	if bytes.Contains(out.Bytes(), []byte("FOOTGUN")) {
-		t.Fatalf("no declaration added → no FOOTGUN output, got:\n%s", out.String())
+	if out.Len() != 0 {
+		t.Fatalf("no declaration added → no output, got:\n%s", out.String())
 	}
 }
 
@@ -1426,7 +1426,7 @@ func TestFlagsParseAfterPositionalPath(t *testing.T) {
 func TestFootgunDriftEchoIsTrimmed(t *testing.T) {
 	long := "- **Footgun — " + strings.Repeat("x", 2000) + "**"
 	var out bytes.Buffer
-	printFootgunDrift(&out, []audit.FootgunFinding{{File: "CLAUDE.md", Line: 117, Text: long}})
+	printFootgunDrift(&out, []audit.FootgunFinding{{File: "CLAUDE.md", Line: 117, Text: long}}, nil)
 	got := out.String()
 	if !strings.Contains(got, "CLAUDE.md:117") {
 		t.Errorf("the file:line payload must survive: %q", got)
@@ -1442,7 +1442,7 @@ func TestFootgunDriftEchoIsTrimmed(t *testing.T) {
 // Trimming is rune-safe: it must never split a multi-byte character.
 func TestFootgunDriftEchoIsRuneSafe(t *testing.T) {
 	var out bytes.Buffer
-	printFootgunDrift(&out, []audit.FootgunFinding{{File: "d.md", Line: 1, Text: strings.Repeat("é", 300)}})
+	printFootgunDrift(&out, []audit.FootgunFinding{{File: "d.md", Line: 1, Text: strings.Repeat("é", 300)}}, nil)
 	if !utf8.ValidString(out.String()) {
 		t.Errorf("trimmed echo must stay valid UTF-8: %q", out.String())
 	}
@@ -1718,13 +1718,13 @@ func TestDocDriftTrunkScansSessionCommits(t *testing.T) {
 	r.write("src/w.go", "package src\n\ntype NewWidget struct{}\ntype MidWidget struct{}\n")
 	r.commitAt("", "drop OldWidget in the session")
 	code, msg := r.stop("s1")
-	if code != 2 || !strings.Contains(msg, "'OldWidget'") || strings.Contains(msg, "'PreWidget'") {
+	if code != 2 || !strings.Contains(msg, "`OldWidget`") || strings.Contains(msg, "`PreWidget`") {
 		t.Fatalf("committed-this-session removal -> want 2 naming only OldWidget, got %d:\n%s", code, msg)
 	}
 
 	r.write("src/w.go", "package src\n\ntype MidWidget struct{}\n")
 	code, msg = r.stop("s1")
-	if code != 2 || !strings.Contains(msg, "'NewWidget'") || strings.Contains(msg, "'PreWidget'") {
+	if code != 2 || !strings.Contains(msg, "`NewWidget`") || strings.Contains(msg, "`PreWidget`") {
 		t.Fatalf("uncommitted removal -> want 2 naming NewWidget, got %d:\n%s", code, msg)
 	}
 
@@ -1732,7 +1732,7 @@ func TestDocDriftTrunkScansSessionCommits(t *testing.T) {
 	r.write("src/w.go", "package src\n")
 	r.commitAt("", "drop MidWidget")
 	code, msg = r.stop("s1")
-	if code != 2 || !strings.Contains(msg, "'MidWidget'") || strings.Contains(msg, "'PreWidget'") {
+	if code != 2 || !strings.Contains(msg, "`MidWidget`") || strings.Contains(msg, "`PreWidget`") {
 		t.Fatalf("commits since the last Stop -> want 2 naming MidWidget, got %d:\n%s", code, msg)
 	}
 }
@@ -1964,5 +1964,82 @@ func TestCheckCountsCoversExactlyTheGateChecks(t *testing.T) {
 		if _, ok := counts[name]; !ok {
 			t.Errorf("CheckCounts lacks %q", name)
 		}
+	}
+}
+
+// Agents filter push output (`git push -q 2>&1 | tail -2`, `| grep -v docgraph`),
+// so a push nag that names its docs mid-message and ends on fixed guidance
+// reaches them as "advisory, push not blocked" with no doc in sight. The last
+// line names the subjects without the word "docgraph", and the line before it
+// is a rerun that reproduces the whole message.
+func TestPushNagsEndNamingTheirSubject(t *testing.T) {
+	dir, base, head := commitRepoMain(t,
+		map[string]string{"docs/auth.md": coversFM, "src/auth.go": "package auth\n", "CLAUDE.md": "intro\n"},
+		map[string]string{"src/auth.go": "package auth\n\nfunc Login() {}\n", "CLAUDE.md": "intro\n\n- **Footgun:** no why.\n"},
+	)
+	rng := shortRev(base) + ".." + shortRev(head)
+	for _, tc := range []struct {
+		name, subject string
+		run           func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
+	}{
+		{"covers-drift", "docs/auth.md", runCoversDrift},
+		{"footgun-drift", "CLAUDE.md:3", runFootgunDrift},
+	} {
+		var out, errb bytes.Buffer
+		tc.run([]string{"--range", base + ".." + head, dir}, strings.NewReader(""), &out, &errb)
+		lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+		if len(lines) < 2 {
+			t.Fatalf("%s: want a message, got %q", tc.name, out.String())
+		}
+		last, rerun := lines[len(lines)-1], lines[len(lines)-2]
+		if !strings.Contains(last, tc.subject) || strings.Contains(last, "docgraph") {
+			t.Errorf("%s: last line must name %s and survive `grep -v docgraph`, got %q", tc.name, tc.subject, last)
+		}
+		if want := "docgraph " + tc.name + " --range " + rng; !strings.Contains(rerun, want) {
+			t.Errorf("%s: second-last line must be the rerun %q, got %q", tc.name, want, rerun)
+		}
+	}
+}
+
+// Every nag lands in an agent's context; an unbounded list (a doc covering a
+// directory, a symbol named on 40 lines) is context burnt for nothing.
+func TestNagListsAreCapped(t *testing.T) {
+	var paths []string
+	var hits []audit.DocHit
+	for i := 0; i < 20; i++ {
+		paths = append(paths, fmt.Sprintf("src/f%02d.go", i))
+		hits = append(hits, audit.DocHit{File: "docs/a.md", Line: i + 1, Text: strings.Repeat("y", 400)})
+	}
+	var b bytes.Buffer
+	reportDocDrift(&b,
+		[]audit.DocDriftFinding{{Symbol: "OldWidget", Kind: audit.Dangling, Hits: hits}},
+		[]audit.CoversFinding{{Doc: "docs/a.md", Paths: paths}})
+	got := b.String()
+	if strings.Contains(got, "src/f05.go") || !strings.Contains(got, "+15 more") {
+		t.Errorf("covered paths must be capped at %d with a +N more, got:\n%s", nagListCap, got)
+	}
+	if strings.Contains(got, "docs/a.md:6:") {
+		t.Errorf("hits must be capped at %d, got:\n%s", nagListCap, got)
+	}
+	if strings.Contains(got, strings.Repeat("y", footgunEchoRunes+1)) {
+		t.Errorf("hit text must be trimmed like every other echo, got:\n%s", got)
+	}
+	if len(got) > 1500 {
+		t.Errorf("a doc-drift nag with 40 capped items is %d bytes — keep it under 1500:\n%s", len(got), got)
+	}
+}
+
+// The gate's failure output is read by an agent whose push just failed: it
+// needs the findings and how to fix each, not a description of the tool.
+func TestFailureReportIsLean(t *testing.T) {
+	var b bytes.Buffer
+	rep := audit.Report{Roots: []string{"README.md"}, Orphans: []string{"b.md"}, BrokenLinks: []audit.BrokenLink{{Source: "README.md", Line: 2, Target: "a.md"}}}
+	printReport(&b, rep, nil, map[string]bool{"orphans": true, "broken": true})
+	got := b.String()
+	if !strings.Contains(got, "b.md") || !strings.Contains(got, "README.md:2 → a.md") || !strings.Contains(got, "aborted") {
+		t.Errorf("want both findings and why the push failed, got:\n%s", got)
+	}
+	if len(got) > 700 {
+		t.Errorf("a 2-finding failure report is %d bytes — keep it under 700:\n%s", len(got), got)
 	}
 }

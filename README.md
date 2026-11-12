@@ -32,10 +32,7 @@ ORPHANS (1) — docs unreachable by link/path-following:
 BROKEN LINKS (1) — .md targets that don't exist:
   docs/setup.md:9 → docs/install.md
 
-──────────────────────────────────────────────────────────────────────────────────
-docgraph: 2 finding(s) in gated checks → exiting non-zero.
-…
-Fix the findings listed above:
+docgraph: 2 finding(s) → exit 1 (as the pre-push gate, this aborted the push). Fix:
   ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a
               .docgraphignore entry) if it is intentionally standalone; or delete it.
   BROKEN    → repair or remove the dead .md link at the shown file:line.
