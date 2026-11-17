@@ -1,14 +1,14 @@
-name    = "docgraph"
+name = "docgraph"
 summary = "Pre-push gate for agent-facing repo docs — content/metadata graph islands, broken links, frontmatter, untracked markdown, leak scan — plus diff-scoped drift checks (footgun, covers, Stop-hook doc-drift) and read-only doc-graph views"
-kind    = "tool"
-status  = "active"
-tags    = ["docs", "linting", "ci", "git-hooks", "agents"]
-stack   = ["go"]
+status = "active"
+tags = ["docs", "linting", "ci", "git-hooks", "agents"]
 
 [github]
 topics_extra = ["cli", "developer-tools", "documentation", "golang", "linter", "markdown", "pre-push"]
+description = "Pre-push gate for agent-facing repo docs — content/metadata graph islands, broken links, frontmatter, untracked markdown, leak scan — plus diff-scoped drift checks (footgun, covers, Stop-hook doc-drift) and read-only doc-graph views"
+topics = ["cli", "developer-tools", "documentation", "git-hooks", "go", "golang", "linter", "markdown", "pre-push", "agents", "ci", "docs", "linting"]
 
 [[provides]]
-name    = "docgraph"
+name = "docgraph"
 summary = "go-installable doc-graph + leak audit binary; wired into .githooks/pre-push"
-url     = "https://github.com/lockyc/docgraph"
+url = "https://github.com/lockyc/docgraph"
