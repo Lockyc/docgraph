@@ -48,6 +48,18 @@ gate:
     go test ./...
     echo "✓ gate passed"
 
+# Fuzz every Fuzz* target for TIME each; a failing input lands in testdata/fuzz as a seed
+[group("check")]
+fuzz time="60s":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pkg in $(go list ./...); do
+      for t in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+        echo "→ $t ($pkg)"
+        go test "$pkg" -run '^$' -fuzz "^${t}\$" -fuzztime {{time}}
+      done
+    done
+
 # Run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
 # NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). Not `gh
 # --generate-notes`: it summarises MERGED PRs, and this repo integrates on the trunk, so it

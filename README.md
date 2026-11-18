@@ -154,6 +154,7 @@ just test    # go test ./...
 just build   # go build -o docgraph .
 just install # go install . -> ~/go/bin/docgraph
 just gate    # gofmt check + vet + tests
+just fuzz    # run every fuzz target (default 60s each)
 ```
 
 Branch model, release process and layout: [CLAUDE.md](CLAUDE.md).
