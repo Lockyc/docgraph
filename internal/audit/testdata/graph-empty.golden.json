@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "repoRoot": "REPO_ROOT",
+  "nodes": [
+    {
+      "path": "README.md",
+      "hasFrontmatter": false
+    }
+  ],
+  "contentEdges": [],
+  "metadataEdges": [],
+  "islands": {
+    "content": [],
+    "metadata": []
+  }
+}

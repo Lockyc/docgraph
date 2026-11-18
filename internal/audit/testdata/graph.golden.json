@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "repoRoot": "REPO_ROOT",
+  "nodes": [
+    {
+      "path": "README.md",
+      "hasFrontmatter": false
+    },
+    {
+      "path": "docs/arch.md",
+      "type": "architecture",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/guide.md",
+      "type": "guide",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/index.md",
+      "type": "index",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/island.md",
+      "hasFrontmatter": false
+    },
+    {
+      "path": "docs/loop-a.md",
+      "type": "decision",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/loop-b.md",
+      "type": "decision",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/meta-only.md",
+      "type": "reference",
+      "hasFrontmatter": true
+    },
+    {
+      "path": "docs/ref.md",
+      "type": "reference",
+      "title": "Reference",
+      "description": "The spec, summarised",
+      "verified": "2026-01-02",
+      "review": "90d",
+      "hasFrontmatter": true
+    }
+  ],
+  "contentEdges": [
+    {
+      "from": "README.md",
+      "to": "docs/guide.md",
+      "kind": "link"
+    },
+    {
+      "from": "README.md",
+      "to": "docs/guide.md",
+      "kind": "mention"
+    },
+    {
+      "from": "README.md",
+      "to": "docs/index.md",
+      "kind": "link"
+    },
+    {
+      "from": "README.md",
+      "to": "docs/index.md",
+      "kind": "mention"
+    },
+    {
+      "from": "docs/index.md",
+      "to": "docs/arch.md",
+      "kind": "link"
+    }
+  ],
+  "metadataEdges": [
+    {
+      "from": "docs/arch.md",
+      "to": "docs/guide.md",
+      "rel": "part-of"
+    },
+    {
+      "from": "docs/guide.md",
+      "to": "docs/index.md",
+      "rel": "part-of"
+    },
+    {
+      "from": "docs/guide.md",
+      "to": "docs/ref.md",
+      "rel": "see-also"
+    },
+    {
+      "from": "docs/loop-a.md",
+      "to": "docs/loop-b.md",
+      "rel": "part-of"
+    },
+    {
+      "from": "docs/loop-b.md",
+      "to": "docs/loop-a.md",
+      "rel": "part-of"
+    }
+  ],
+  "islands": {
+    "content": [
+      "docs/island.md",
+      "docs/loop-a.md",
+      "docs/loop-b.md",
+      "docs/meta-only.md",
+      "docs/ref.md"
+    ],
+    "metadata": [
+      "docs/meta-only.md"
+    ]
+  }
+}
