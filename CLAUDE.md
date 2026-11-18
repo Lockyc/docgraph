@@ -433,8 +433,8 @@ docs/" with zero config.
   `printDocDrift` to stderr and returns 2, gated on bare invocation by a
   once-per-finding nag marker under `docDriftStateDir()` (scan key + finding keys,
   `docDriftRecordNag`; `docDriftAllSeen` decides) — the scan key is HEAD plus a
-  digest of the code diff (`docDriftScanKey`), checked *before* the doc greps, so
-  a Stop over an already-nagged HEAD and diff skips them on a per-turn hook;
+  digest of the code and doc diffs (`docDriftScanKey`), checked *before* the doc
+  greps, so a Stop over an already-nagged HEAD and diffs skips them on a per-turn hook;
   the covers join (`sessionCoversDrift`) keeps its own per-session state beside it.
   `docDriftDiffBase` memoizes its answer per
   (repo, HEAD) beside that marker (`readDocDriftBase`/`writeDocDriftBase`, keyed

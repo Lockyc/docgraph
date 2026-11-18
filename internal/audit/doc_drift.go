@@ -319,6 +319,18 @@ func DocDriftDiff(root, spec string) (CodeDiff, error) {
 	return CodeDiff{Text: diff, patches: []string{diff}, root: root, excl: excl}, nil
 }
 
+// DocsDiff is the docs' uncommitted diff against HEAD, under the same ignore
+// layers. With HEAD and Text it fixes everything the doc greps read, so a caller
+// keying a skipped scan on it rescans when a doc gains a stale reference.
+func (d CodeDiff) DocsDiff() (string, error) {
+	args := append([]string{"diff", "HEAD", "--", "*.md", "*.mdx"}, d.excl...)
+	out, err := GitCmd(d.root, args...).Output()
+	if err != nil {
+		return "", gitError(err)
+	}
+	return string(out), nil
+}
+
 // SessionDocDriftDiff collects the code-side patches of the commits revArgs
 // selects — first-parent, non-merge, the same selection CommitChanges makes for
 // covers drift — followed by the uncommitted diff against HEAD. It is the trunk's

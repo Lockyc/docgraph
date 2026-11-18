@@ -1001,12 +1001,17 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return docDriftToolError(root, stderr, err)
 	}
+	docs, err := diff.DocsDiff()
+	if err != nil {
+		return docDriftToolError(root, stderr, err)
+	}
 	var fresh []audit.DocDriftFinding
-	// Already nagged over this exact diff at this HEAD? Then the greps would
-	// return the findings that nag carried and the guard would suppress them all,
-	// so skip them on a hook that fires once per turn. Any change to the code
-	// diff — committed or not — scans again, and docDriftAllSeen decides.
-	if scanned := docDriftScanKey(head, diff.Text); docDriftNaggedAt(root) != scanned {
+	// Already nagged over this exact code and doc state at this HEAD? Then the
+	// greps would return the findings that nag carried and the guard would
+	// suppress them all, so skip them on a hook that fires once per turn. Any
+	// change to the code diff or the docs — committed or not — scans again, and
+	// docDriftAllSeen decides.
+	if scanned := docDriftScanKey(head, diff.Text, docs); docDriftNaggedAt(root) != scanned {
 		findings, err := diff.Findings()
 		if err != nil {
 			return docDriftToolError(root, stderr, err)
@@ -1597,11 +1602,14 @@ func docDriftNagLines(root string) []string {
 }
 
 // docDriftScanKey identifies what a bare doc-drift run scanned: HEAD plus a
-// digest of the code diff, so an uncommitted change at an already-nagged HEAD
-// is still scanned.
-func docDriftScanKey(head, diff string) string {
-	sum := sha256.Sum256([]byte(diff))
-	return head + " " + hex.EncodeToString(sum[:])[:16]
+// digest of the code diff and the docs' uncommitted diff, so an uncommitted
+// change to either at an already-nagged HEAD is still scanned.
+func docDriftScanKey(head, code, docs string) string {
+	h := sha256.New()
+	h.Write([]byte(code))
+	h.Write([]byte{0})
+	h.Write([]byte(docs))
+	return head + " " + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // docDriftNaggedAt returns the scan key (docDriftScanKey) this repo was last
