@@ -153,13 +153,19 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// addedLines returns the set of new-file line numbers added to path in rng, by
-// parsing unified-diff hunk headers and counting '+' lines from the new start.
+// addedLines returns the set of new-file line numbers added to path in rng.
 func addedLines(root, rng, path string) (map[int]bool, error) {
 	lines, err := gitRawLines(root, "diff", "--unified=0", rng, "--", path)
 	if err != nil {
 		return nil, err
 	}
+	return parseAddedLines(lines), nil
+}
+
+// parseAddedLines reads a unified diff's lines into the set of new-file line
+// numbers it adds, by parsing hunk headers and counting '+' lines from the new
+// start.
+func parseAddedLines(lines []string) map[int]bool {
 	added := map[int]bool{}
 	newLine := 0
 	inHunk := false // file headers (---/+++) come only before the first hunk
@@ -197,7 +203,7 @@ func addedLines(root, rng, path string) (map[int]bool, error) {
 			newLine++
 		}
 	}
-	return added, nil
+	return added
 }
 
 // trackedAtRef lists the tracked "*.md" paths at ref from the object store, so it
