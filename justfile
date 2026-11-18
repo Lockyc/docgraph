@@ -60,6 +60,11 @@ fuzz time="60s":
       done
     done
 
+# Run the doc-drift Stop-hook state machine for CHECKS random turn sequences
+[group("check")]
+soak checks="200":
+    go test . -run '^TestDocDriftStopLifecycle$' -count=1 -rapid.checks={{checks}}
+
 # Run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
 # NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). Not `gh
 # --generate-notes`: it summarises MERGED PRs, and this repo integrates on the trunk, so it

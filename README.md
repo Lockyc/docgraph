@@ -155,6 +155,7 @@ just build   # go build -o docgraph .
 just install # go install . -> ~/go/bin/docgraph
 just gate    # gofmt check + vet + tests
 just fuzz    # run every fuzz target (default 60s each)
+just soak    # doc-drift Stop-hook state machine, 200 random sequences
 ```
 
 Branch model, release process and layout: [CLAUDE.md](CLAUDE.md).
