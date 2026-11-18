@@ -153,7 +153,7 @@ git clone https://github.com/lockyc/docgraph && cd docgraph
 just test    # go test ./...
 just build   # go build -o docgraph .
 just install # go install . -> ~/go/bin/docgraph
-just gate    # gofmt check + vet + tests
+just gate    # gofmt check + vet + race-checked, shuffled tests
 just fuzz    # run every fuzz target (default 60s each)
 just soak    # doc-drift Stop-hook state machine, 200 random sequences
 ```
