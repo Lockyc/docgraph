@@ -17,7 +17,7 @@ var leakFuzzSeeds = [][2]string{
 	{`\b[a-z][a-z0-9+.-]*://[^\s/:@'"]+:[^\s/@'"]{3,}@`, "HTTPS://user:hunter2@host"},
 	{`(?-i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)=['"]?[^\s'"]{11,}`, "API_KEY='abcdefghijklm'"},
 	{`acme[\s_-]*widgetry`, "ACME  Widgetry"},
-	{`10\.20\.30\.\d{1,3}`, "host 10.20.30.4"},
+	{`192\.0\.2\.\d{1,3}`, "host 192.0.2.4"},
 	{`(?:ab)+cdef`, "ABABcdef"},
 	{`(?:secret)?_value`, "x_VALUE"},
 	{`secret[0-9]+|token[a-z]*`, "TOKENabc"},
