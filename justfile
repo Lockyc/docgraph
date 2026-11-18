@@ -65,6 +65,14 @@ fuzz time="60s":
 soak checks="200":
     go test . -run '^TestDocDriftStopLifecycle$' -count=1 -rapid.checks={{checks}}
 
+# Mutation-test the lines changed since BASE (default: the last tag); triage each LIVED mutant
+[group("check")]
+mutants base="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="{{base}}"; [ -n "$base" ] || base="$(git describe --tags --abbrev=0)"
+    go run github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0 unleash --diff "$base" -S lt .
+
 # Run on dev with VERSION bumped and committed; the tree must be clean and gate-green.
 # NOTES is required and hand-written (default RELEASE_NOTES.md, gitignored). Not `gh
 # --generate-notes`: it summarises MERGED PRs, and this repo integrates on the trunk, so it

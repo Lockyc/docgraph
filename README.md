@@ -156,6 +156,7 @@ just install # go install . -> ~/go/bin/docgraph
 just gate    # gofmt check + vet + race-checked, shuffled tests
 just fuzz    # run every fuzz target (default 60s each)
 just soak    # doc-drift Stop-hook state machine, 200 random sequences
+just mutants # mutation-test the lines changed since the last tag
 ```
 
 Branch model, release process and layout: [CLAUDE.md](CLAUDE.md).
