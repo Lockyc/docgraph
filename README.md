@@ -11,15 +11,7 @@ those docs for pages nothing reaches, links that point nowhere and docs never ad
 also scans tracked files for secrets and for names you've listed. Run as a pre-push hook, any
 finding blocks the push.
 
-## Quick start
-
-```bash
-go install github.com/lockyc/docgraph/v3@latest   # needs Go + git on PATH
-docgraph .                                      # audit the current repo
-docgraph install-hook                           # wire it in as a pre-push gate
-```
-
-A clean run prints one line: `docgraph: clean ✓ (12 tracked .md, 12 reachable, 0 findings)`. A
+`docgraph .` audits the current repo. A clean run prints one line: `docgraph: clean ✓ (12 tracked .md, 12 reachable, 0 findings)`. A
 run with findings names each one and how to fix it, and exits 1:
 
 ```console
