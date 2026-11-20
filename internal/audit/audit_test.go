@@ -224,6 +224,43 @@ func TestBrokenEdges(t *testing.T) {
 	}
 }
 
+// The edges check judges a target as a fresh clone would: a leading `/` is the repo
+// root (and resolves), while an escape, a case-only match and an untracked file are broken.
+func TestBrokenEdgesJudgesByRepoMembership(t *testing.T) {
+	dir := setupRepo(t, map[string]string{
+		"CLAUDE.md": "[a](docs/a.md)\n",
+		"docs/a.md": "---\ntype: runbook\nlinks:\n" +
+			"  - {rel: covers, to: /scripts/real.sh}\n" +
+			"  - {rel: see-also, to: ../sibling/x.md}\n" +
+			"  - {rel: see-also, to: Docs/A.md}\n" +
+			"  - {rel: covers, to: scripts/untracked.sh}\n" +
+			"---\nbody\n",
+		"scripts/real.sh":      "#!/bin/sh\n",
+		"scripts/untracked.sh": "#!/bin/sh\n",
+	}, []string{"CLAUDE.md", "docs/a.md", "scripts/real.sh"})
+	rep, err := Audit(dir, Options{})
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	got := map[string]string{}
+	for _, e := range rep.BrokenEdges {
+		got[e.Target] = e.Reason
+	}
+	want := map[string]string{
+		"../sibling/x.md":      "target escapes the repo",
+		"Docs/A.md":            "target does not exist",
+		"scripts/untracked.sh": "target does not exist",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("BrokenEdges = %+v, want %v", rep.BrokenEdges, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: reason %q, want %q", k, got[k], v)
+		}
+	}
+}
+
 func TestAuditReportsCycle(t *testing.T) {
 	dir := setupRepo(t, map[string]string{
 		"CLAUDE.md": "[a](a.md) [b](b.md)\n",

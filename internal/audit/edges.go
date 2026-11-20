@@ -49,9 +49,15 @@ func ClassifyTarget(to string) EdgeKind {
 // ResolveEdgeTarget returns the repo-root-relative, slash-cleaned path for an
 // internal (EdgeDoc/EdgeCode) target. Unlike markdown links, a frontmatter edge
 // target is resolved against the REPO ROOT, not the source doc's directory — it
-// is a structured reference, not inline prose. Anchors/queries are stripped.
+// is a structured reference, not inline prose. Anchors/queries are stripped, and a
+// leading `/` names the repo root as it does in a markdown link, so every consumer
+// (`covers`, the graphs, the `edges` check) reads `/src/x.go` as `src/x.go`.
 func ResolveEdgeTarget(to string) string {
-	return filepath.ToSlash(filepath.Clean(cleanTarget(strings.TrimSpace(to))))
+	p := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(cleanTarget(strings.TrimSpace(to)))), "/")
+	if p == "" {
+		return "."
+	}
+	return p
 }
 
 // cycleRels are the hierarchy/lineage relations whose arcs must be acyclic. Other
@@ -115,4 +121,18 @@ func detectCycles(docs map[string]*Doc, trackedSet map[string]bool) [][]string {
 		}
 	}
 	return cycles
+}
+
+// codeInRepo reports whether a code edge target is `.`, a tracked file, or a
+// directory holding one (exact case, as git records it).
+func codeInRepo(target string, tracked []string) bool {
+	if target == "." {
+		return true
+	}
+	for _, f := range tracked {
+		if f == target || strings.HasPrefix(f, target+"/") {
+			return true
+		}
+	}
+	return false
 }

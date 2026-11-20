@@ -146,9 +146,13 @@ func parseDocsFrom(src fileSource, tracked, globs []string) (map[string]*Doc, []
 	return docs, findings
 }
 
-// brokenEdges reports frontmatter edges whose internal (doc/code) target is
-// absent on disk. EdgeExternal and EdgeCrossRepo targets are skipped by design.
-func brokenEdges(repoRoot string, docs map[string]*Doc) []BrokenEdge {
+// brokenEdges reports frontmatter edges whose internal (doc/code) target is not
+// in the repo, judged by membership as the broken-links check judges: a fresh
+// clone's verdict on any filesystem, so a target outside the repo, a case-only
+// match or a file git doesn't track is broken. inRepo is the repo's markdown
+// (tracked plus untracked); tracked is every tracked file. EdgeExternal and
+// EdgeCrossRepo targets are skipped by design.
+func brokenEdges(docs map[string]*Doc, inRepo map[string]bool, tracked []string) []BrokenEdge {
 	var out []BrokenEdge
 	for src, d := range docs {
 		for _, e := range d.Links {
@@ -162,8 +166,17 @@ func brokenEdges(repoRoot string, docs map[string]*Doc) []BrokenEdge {
 				out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: e.To, Reason: "missing to"})
 			case EdgeDoc, EdgeCode:
 				target := ResolveEdgeTarget(e.To)
-				if _, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(target))); err != nil {
-					out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: target, Reason: "target does not exist"})
+				reason := ""
+				switch {
+				case target == ".." || strings.HasPrefix(target, "../"):
+					reason = "target escapes the repo"
+				case ClassifyTarget(e.To) == EdgeDoc && !inRepo[target]:
+					reason = "target does not exist"
+				case ClassifyTarget(e.To) == EdgeCode && !codeInRepo(target, tracked):
+					reason = "target does not exist"
+				}
+				if reason != "" {
+					out = append(out, BrokenEdge{Source: src, Rel: e.Rel, Target: target, Reason: reason})
 				}
 			}
 		}
@@ -243,7 +256,11 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		return broken[i].Line < broken[j].Line
 	})
 
-	brokenEdgeFindings := brokenEdges(repoRoot, docs)
+	allTracked, err := gitLines(repoRoot, "ls-files")
+	if err != nil {
+		return Report{}, err
+	}
+	brokenEdgeFindings := brokenEdges(docs, inRepo, allTracked)
 	edgeCycles := detectCycles(docs, trackedSet)
 
 	mg := BuildMetadataGraph(docs, trackedSet)

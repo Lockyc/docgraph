@@ -25,7 +25,8 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   doc→doc edges in *or* out), broken internal `.md` links, untracked `.md`, a
   `leaks` content scan, `frontmatter` (every doc except `README.md` must carry a
   leading YAML block that parses and declares a `type` — see "Frontmatter model"
-  below), and `edges` (a frontmatter `links:` list's internal targets must exist,
+  below), and `edges` (a frontmatter `links:` list's internal targets must be in
+  the repo as git records them — the broken-links rule —,
   and `part-of`/`supersedes` edges must not cycle). All seven are **enforced by
   default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
   nothing). A finding exits non-zero — that's the pre-push gate.
