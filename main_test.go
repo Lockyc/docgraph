@@ -2043,3 +2043,19 @@ func TestFailureReportIsLean(t *testing.T) {
 		t.Errorf("a 2-finding failure report is %d bytes — keep it under 700:\n%s", len(got), got)
 	}
 }
+
+// The summary line git prints for a commit it creates names the commit in every form a
+// session meets, a detached HEAD included.
+func TestCommitLineMatchesEveryCommitSummaryForm(t *testing.T) {
+	for line, sha := range map[string]string{
+		"[main 1a2b3c4] subject":                 "1a2b3c4",
+		"[dev (root-commit) 1a2b3c4] subject":    "1a2b3c4",
+		"[detached HEAD 1a2b3c4] subject":        "1a2b3c4",
+		"[feature/x 0123456789abcdef] a subject": "0123456789abcdef",
+	} {
+		m := commitLine.FindStringSubmatch(line)
+		if m == nil || m[1] != sha {
+			t.Errorf("%q: got %v, want sha %s", line, m, sha)
+		}
+	}
+}

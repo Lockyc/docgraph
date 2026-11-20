@@ -1317,8 +1317,9 @@ type sessionWork struct {
 var editTools = map[string]bool{"Edit": true, "MultiEdit": true, "Write": true, "NotebookEdit": true}
 
 // commitLine matches the summary line `git commit`, `cherry-pick` and `revert`
-// print for a commit they create: "[branch sha] subject" or "[branch (root-commit) sha]".
-var commitLine = regexp.MustCompile(`\[[^\]\s"\\]+(?: \([a-z-]+\))? ([0-9a-f]{7,40})\] `)
+// print for a commit they create: "[branch sha] subject", "[branch (root-commit) sha]" or,
+// on a detached HEAD (a worktree or an automated run), "[detached HEAD sha]".
+var commitLine = regexp.MustCompile(`\[(?:detached HEAD|[^\]\s"\\]+)(?: \([a-z-]+\))? ([0-9a-f]{7,40})\] `)
 
 // readSessionWork reads a session's own transcript and its subagents', or
 // returns ok=false when the transcript can't be read. A changed path the

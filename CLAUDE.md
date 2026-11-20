@@ -443,7 +443,8 @@ docs/" with zero config.
   stale memo fails safe (an ancestor base = superset diff = over-report)),
   `runCovers`/`runIndex`/`runStale`/`runGraph` (the read-only views — each
   resolves the repo root, calls `audit.RepoDocs` (or `audit.BuildGraphView` for
-  `runGraph`, which also takes `--json`), and prints; always `return 0`), report
+  `runGraph`, which also takes `--json`), and prints; `return 0` on success, 2 on a usage or
+  git error), report
   format, `maybeLog` (opt-in usage logging side-channel).
 - **A GitRoot failure must report git's own stderr** (`gitError`,
   `internal/audit/git.go` → `notARepo`, `main.go`). Linked worktrees otherwise
