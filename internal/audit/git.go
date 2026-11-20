@@ -163,9 +163,12 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// addedLines returns the set of new-file line numbers added to path in rng.
-func addedLines(root, rng, path string) (map[int]bool, error) {
-	lines, err := gitRawLines(root, "diff", "--unified=0", rng, "--", path)
+// addedLines returns the set of new-file line numbers added to path in rng. from
+// is path's name at the range's base when the range renamed it: with only the new
+// name in the pathspec git cannot pair the rename and shows every line as added.
+func addedLines(root, rng, path string, from ...string) (map[int]bool, error) {
+	args := append([]string{"diff", "--unified=0", "-M", rng, "--", path}, from...)
+	lines, err := gitRawLines(root, args...)
 	if err != nil {
 		return nil, err
 	}

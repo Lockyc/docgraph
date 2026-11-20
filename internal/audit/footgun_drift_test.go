@@ -84,6 +84,32 @@ func TestFootgunDriftIgnoresPreexistingDeclaration(t *testing.T) {
 	}
 }
 
+// Renaming a doc with an edit flags only the declaration the edit added, not every
+// one the doc already carried.
+func TestFootgunDriftRenamedDocFlagsOnlyTheEdit(t *testing.T) {
+	body := "# Guide\n\n- **Footgun:** old one.\n\nline a\nline b\nline c\nline d\nline e\n"
+	dir, _, base := commitRepo(t, map[string]string{"docs/old.md": body}, map[string]string{"src/x.go": "package x\n"})
+	git := func(a ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", dir}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return string(out)
+	}
+	git("mv", "docs/old.md", "docs/new.md")
+	writeFile(t, dir, "docs/new.md", body+"- **Footgun:** new one.\n")
+	git("add", "-A")
+	git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "rename")
+	head := trim(git("rev-parse", "HEAD"))
+	got, err := FootgunDrift(dir, []RevRange{{Base: base, Head: head}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0].Text, "new one") {
+		t.Fatalf("want only the added declaration, got %+v", got)
+	}
+}
+
 // A rationale word no longer excuses an added declaration — every one flags, so
 // the pusher is nagged to verify it's a real footgun regardless of wording.
 func TestFootgunDriftFlagsAddedDeclarationDespiteRationale(t *testing.T) {

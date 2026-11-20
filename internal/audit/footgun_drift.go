@@ -3,7 +3,25 @@ package audit
 import (
 	"sort"
 	"strconv"
+	"strings"
 )
+
+// markdownRenames maps each markdown file the range renamed to its name at the
+// range's base, so a moved doc's existing declarations are not read as added.
+func markdownRenames(root, rng string) (map[string]string, error) {
+	lines, err := gitLines(root, "diff", "--name-status", "-M", rng, "--", "*.md")
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	for _, l := range lines {
+		f := strings.Split(l, "\t")
+		if len(f) == 3 && strings.HasPrefix(f[0], "R") {
+			m[f[2]] = f[1]
+		}
+	}
+	return m, nil
+}
 
 // RevRange is a base..head pair to examine (base exclusive).
 type RevRange struct {
@@ -23,8 +41,16 @@ func FootgunDrift(root string, ranges []RevRange) ([]FootgunFinding, error) {
 		if err != nil {
 			return nil, err
 		}
+		renamedFrom, err := markdownRenames(root, rng)
+		if err != nil {
+			return nil, err
+		}
 		for _, f := range files {
-			added, err := addedLines(root, rng, f)
+			var from []string
+			if old, ok := renamedFrom[f]; ok {
+				from = []string{old}
+			}
+			added, err := addedLines(root, rng, f, from...)
 			if err != nil {
 				return nil, err
 			}
