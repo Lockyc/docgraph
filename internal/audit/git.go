@@ -105,12 +105,22 @@ func SpecChanges(root, spec string) (code, md []string, err error) {
 	return code, md, err
 }
 
-// CommitChanges returns the code paths and markdown changed by the commits
-// `git log --first-parent --no-merges revArgs` selects, each against its own
+// SessionLog is the `git log` invocation for a session's committed change set:
+// the commits revArgs selects on the first-parent line, each against its own
 // parent. Merge commits are excluded so that merging a trunk in never imports
-// other people's changes, and first-parent keeps the merged side's commits out.
+// other people's changes, first-parent keeps the merged side's commits out, and
+// renames are not paired, so a renamed file lists both its paths everywhere.
+// shape is the output form (`--name-only`, `-p`, `--format=…`, `--reverse`),
+// the one thing callers vary.
+func SessionLog(revArgs []string, shape ...string) []string {
+	args := append([]string{"log", "--first-parent", "--no-merges", "--no-renames"}, shape...)
+	return append(args, revArgs...)
+}
+
+// CommitChanges returns the code paths and markdown changed by the commits
+// SessionLog selects.
 func CommitChanges(root string, revArgs ...string) (code, md []string, err error) {
-	base := append([]string{"log", "--first-parent", "--no-merges", "--name-only", "--format="}, revArgs...)
+	base := SessionLog(revArgs, "--name-only", "--format=")
 	if code, err = gitLines(root, append(append(append([]string{}, base...), "--"), nonCodePathspec...)...); err != nil || len(code) == 0 {
 		return dedupe(code), nil, err
 	}

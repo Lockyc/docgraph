@@ -1091,7 +1091,7 @@ func trunkSessionRevs(root, head string, p stopPayload) []string {
 	if !ok {
 		return rev
 	}
-	args := append([]string{"log", "--first-parent", "--no-merges", "--no-renames", "--name-only", "--format=%x00%H"}, rev...)
+	args := audit.SessionLog(rev, "--name-only", "--format=%x00%H")
 	out, err := audit.GitCmd(root, args...).Output()
 	if err != nil {
 		return rev
@@ -1269,7 +1269,7 @@ func actedDocs(root string, rev []string, st *coversSession) []string {
 	}
 	changed, _ := audit.GitCmd(root, "diff", "--name-only", "HEAD", "--", "*.md").Output()
 	if rev != nil {
-		args := append(append([]string{"log", "--first-parent", "--no-merges", "--name-only", "--format="}, rev...), "--", "*.md")
+		args := append(audit.SessionLog(rev, "--name-only", "--format="), "--", "*.md")
 		out, _ := audit.GitCmd(root, args...).Output()
 		changed = append(changed, out...)
 	}

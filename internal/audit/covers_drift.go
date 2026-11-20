@@ -132,7 +132,7 @@ func CoversChangeDiff(root string, revArgs []string, paths []string) (string, er
 	}
 	var b strings.Builder
 	if revArgs != nil {
-		args := append(append([]string{"log", "--first-parent", "--no-merges", "-p", "--format="}, revArgs...), "--")
+		args := append(SessionLog(revArgs, "-p", "--format="), "--")
 		out, err := GitCmd(root, append(args, paths...)...).Output()
 		if err != nil {
 			return "", gitError(err)
