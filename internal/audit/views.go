@@ -220,11 +220,15 @@ func CodeMovedDocs(root string, docs map[string]*Doc) ([]CodeMovedFinding, error
 	return found, nil
 }
 
-// firstUnder returns the first of files equal to or inside one of paths.
+// firstUnder returns the first of files equal to or inside one of paths; `.`
+// (a `covers: .` edge, the whole repo) holds every file.
 func firstUnder(files, paths []string) string {
 	for _, f := range files {
+		if f == "" { // the blank line git log prints after each record's date
+			continue
+		}
 		for _, p := range paths {
-			if f == p || strings.HasPrefix(f, p+"/") {
+			if p == "." || f == p || strings.HasPrefix(f, p+"/") {
 				return f
 			}
 		}

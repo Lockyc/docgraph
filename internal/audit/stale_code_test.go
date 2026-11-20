@@ -22,6 +22,7 @@ func TestCodeMovedDocs(t *testing.T) {
 		"docs/moved.md":    cover("2026-03-01", "src/a.go"),
 		"docs/sameday.md":  cover("2026-03-10", "src/b.go"),
 		"docs/dir.md":      cover("2026-03-01", "src"),
+		"docs/repo.md":     cover("2026-03-01", "."),
 		"docs/fresh.md":    cover("2026-04-01", "src/a.go"),
 		"docs/noverify.md": cover("", "src/a.go"),
 		"src/a.go":         "package src\n",
@@ -54,6 +55,7 @@ func TestCodeMovedDocs(t *testing.T) {
 	want := []CodeMovedFinding{
 		{File: "docs/dir.md", Verified: "2026-03-01", Changed: "2026-03-10", Path: "src/b.go"},
 		{File: "docs/moved.md", Verified: "2026-03-01", Changed: "2026-03-10", Path: "src/a.go"},
+		{File: "docs/repo.md", Verified: "2026-03-01", Changed: "2026-03-10", Path: "src/b.go"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CodeMovedDocs = %+v\nwant %+v", got, want)
