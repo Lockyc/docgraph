@@ -1124,12 +1124,16 @@ func readStopPayload(r io.Reader) stopPayload {
 // With measure set (usage logging is on), it also returns acted: docs an earlier
 // nag this session named that changed since the previous Stop, each reported once.
 func sessionCoversDrift(root, head string, p stopPayload, measure bool, stderr io.Writer) (fresh []audit.CoversFinding, acted []string) {
-	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
-		return nil, nil
-	}
 	st, known := readCoversSession(root, p.SessionID)
 	if !known && p.SessionID != "" {
 		st.since = transcriptStart(p.TranscriptPath)
+	}
+	if os.Getenv("DOCGRAPH_COVERS_OFF") != "" {
+		// The window (head, since) is also the trunk symbol scan's
+		// (trunkSessionRevs), so it advances with covers drift off too.
+		st.head = head
+		writeCoversSession(root, p.SessionID, st, !known)
+		return nil, nil
 	}
 	code, md, err := audit.WorktreeChanges(root)
 	var rev []string
