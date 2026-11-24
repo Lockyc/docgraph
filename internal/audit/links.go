@@ -15,25 +15,39 @@ type Link struct {
 
 var inlineLinkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
 var refLinkRe = regexp.MustCompile(`^\s*\[[^\]]+\]:\s+(\S+)`)
-var fenceRe = regexp.MustCompile("^([`~]{3,})")
+var fenceRe = regexp.MustCompile("^(`{3,}|~{3,})(.*)$")
+
+// fenceMarker reports a line that opens a fence: its run (``` or ~~~, three or
+// more of one character) and the info string after it. A backtick run whose info
+// string holds a backtick is an inline code span, not a fence (CommonMark).
+func fenceMarker(line string) (run, info string, ok bool) {
+	m := fenceRe.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil || (m[1][0] == '`' && strings.ContainsRune(m[2], '`')) {
+		return "", "", false
+	}
+	return m[1], strings.TrimSpace(m[2]), true
+}
 
 // proseLines yields each line outside fenced code blocks with its 0-based index.
-// A fence closes only on its own opening character, so ``` inside a ~~~ block is
-// content, not a close.
+// A fence closes only on a run of its own character at least as long as the
+// opener with nothing after it, so a ```` block can show a ``` example and
+// ```bash inside a ``` block is content, not a close.
 func proseLines(content string) iter.Seq2[int, string] {
 	return func(yield func(int, string) bool) {
-		inFence := false
-		var fenceChar byte
+		open := "" // the opening run while inside a fence
 		for i, raw := range strings.Split(content, "\n") {
-			if m := fenceRe.FindString(strings.TrimSpace(raw)); m != "" {
-				if !inFence {
-					inFence, fenceChar = true, m[0]
-				} else if m[0] == fenceChar {
-					inFence = false
+			run, info, ok := fenceMarker(raw)
+			switch {
+			case open == "" && ok:
+				open = run
+				continue
+			case open != "":
+				if ok && info == "" && run[0] == open[0] && len(run) >= len(open) {
+					open = ""
 				}
 				continue
 			}
-			if !inFence && !yield(i, raw) {
+			if !yield(i, raw) {
 				return
 			}
 		}

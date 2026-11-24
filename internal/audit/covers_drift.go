@@ -216,7 +216,7 @@ func pointedLines(doc, content string, want map[string]bool) []DocHit {
 		code := line // inside a fenced block, the whole line is code
 		if prose[i] {
 			code = inlineCode(line)
-		} else if fenceRe.MatchString(strings.TrimSpace(line)) {
+		} else if _, _, ok := fenceMarker(line); ok {
 			continue // the fence marker line itself
 		}
 		seen := map[string]bool{}
