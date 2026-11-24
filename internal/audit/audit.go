@@ -37,7 +37,7 @@ type Report struct {
 	Orphans             []string
 	BrokenLinks         []BrokenLink
 	BrokenAnchors       []BrokenLink // Target is the resolved path plus #fragment
-	Untracked          []string
+	Untracked           []string
 	FrontmatterFindings []FrontmatterFinding
 	BrokenEdges         []BrokenEdge
 	EdgeCycles          [][]string

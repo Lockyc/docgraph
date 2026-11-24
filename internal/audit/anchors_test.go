@@ -8,7 +8,7 @@ import (
 
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
-		"Land tax is an open question worth checking":           "land-tax-is-an-open-question-worth-checking",
+		"Land tax is an open question worth checking":            "land-tax-is-an-open-question-worth-checking",
 		"The SAP in full: four wastewater limbs plus stormwater": "the-sap-in-full-four-wastewater-limbs-plus-stormwater",
 		"What's new?":         "whats-new",
 		"The `foo` command":   "the-foo-command",
