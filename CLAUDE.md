@@ -434,11 +434,13 @@ docs/" with zero config.
   subcommand — checks `DOC_DRIFT_OFF`, resolves the diff spec via
   `docDriftDiffBase`, calls `audit.DocDriftDiff`, and on a finding prints via
   `printDocDrift` to stderr and returns 2, gated on bare invocation by a
-  once-per-finding nag marker under `docDriftStateDir()` (scan key + finding keys,
-  `docDriftRecordNag`; `docDriftAllSeen` decides) — the scan key is HEAD plus a
+  once-per-finding nag record under `docDriftStateDir()` (scan key + finding keys,
+  `driftNags`, scoped like the scan: per session on a trunk, per worktree root on a
+  branch; `docDriftAllSeen` decides) — the scan key is HEAD plus a
   digest of the code and doc diffs (`docDriftScanKey`), checked *before* the doc
   greps, so a Stop over an already-nagged HEAD and diffs skips them on a per-turn hook;
-  the covers join (`sessionCoversDrift`) keeps its own per-session state beside it.
+  the covers join (`sessionCoversDrift`) keeps its per-session state in the same
+  session file.
   `docDriftDiffBase` memoizes its answer per
   (repo, HEAD) beside that marker (`readDocDriftBase`/`writeDocDriftBase`, keyed
   via `docDriftStatePath`): `audit.ClosestBase` costs a dozen git subprocesses —

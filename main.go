@@ -921,8 +921,10 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	head := strings.TrimSpace(string(h))
 
 	var diff audit.CodeDiff
+	nags := driftNags{root: root}
 	if spec := docDriftDiffBase(root, head); spec == "HEAD" && payload.SessionID != "" {
 		diff, err = audit.SessionDocDriftDiff(root, trunkSessionRevs(root, head, payload))
+		nags.session = payload
 	} else {
 		diff, err = audit.DocDriftDiff(root, spec)
 	}
@@ -939,22 +941,18 @@ func runDocDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// suppress them all, so skip them on a hook that fires once per turn. Any
 	// change to the code diff or the docs — committed or not — scans again, and
 	// docDriftAllSeen decides.
-	if scanned := docDriftScanKey(head, diff.Text, docs); docDriftNaggedAt(root) != scanned {
+	nagAt, seen := nags.load()
+	if scanned := docDriftScanKey(head, diff.Text, docs); nagAt != scanned {
 		findings, err := diff.Findings()
 		if err != nil {
 			return docDriftToolError(root, stderr, err)
 		}
-		if len(findings) > 0 {
-			seen := docDriftNaggedKeys(root)
-			docDriftRecordNag(root, scanned, findings)
-			if !docDriftAllSeen(findings, seen) {
-				fresh = findings
-			}
-		} else if p := docDriftStatePath(root, ""); p != "" {
-			// Clean: forget the last nag, so a finding fixed here and reintroduced
-			// later is new again. The clean key isn't recorded, so the next doc
-			// edit still scans.
-			_ = os.Remove(p)
+		// Clean records nothing: the last nag is forgotten, so a finding fixed here
+		// and reintroduced later is new again, and with no scan key the next doc
+		// edit still scans.
+		nags.save(scanned, findings)
+		if len(findings) > 0 && !docDriftAllSeen(findings, seen) {
+			fresh = findings
 		}
 	}
 	clearDocDriftError(root)
@@ -1372,17 +1370,24 @@ func transcriptStart(path string) string {
 	return ""
 }
 
-// coversSession is one session's covers-drift state in one repo.
+// coversSession is one session's doc-drift state in one repo: its window, its
+// covers-drift record, and on a trunk its symbol-scan nag (driftNags).
 type coversSession struct {
 	head  string          // HEAD at the session's previous Stop
 	since string          // session start, git --since form; "" if unknown
 	seen  map[string]bool // "doc\tpath" pairs already raised
 	acted map[string]bool // nagged docs since changed, already logged (actedDocs)
+	nagAt string          // the symbol scan's last nag scan key; "" for none
+	nags  map[string]bool // docDriftKey of each finding that nag carried
 }
 
-// actedPrefix marks an acted doc's line in the session file; a "doc\tpath" seen
-// line never starts with it.
-const actedPrefix = "\x01"
+// Line prefixes in the session file for everything but a "doc\tpath" seen line,
+// which never starts with a control character.
+const (
+	actedPrefix = "\x01" // an acted doc
+	nagAtPrefix = "\x02" // the nag scan key
+	nagPrefix   = "\x03" // a nagged finding's docDriftKey
+)
 
 // coversSessionMaxAge bounds how long a session's state file outlives its last
 // write; a session idle this long is not coming back to the same HEAD.
@@ -1404,7 +1409,7 @@ func coversSessionPath(root, session string) string {
 }
 
 func readCoversSession(root, session string) (coversSession, bool) {
-	st := coversSession{seen: map[string]bool{}, acted: map[string]bool{}}
+	st := coversSession{seen: map[string]bool{}, acted: map[string]bool{}, nags: map[string]bool{}}
 	p := coversSessionPath(root, session)
 	if p == "" {
 		return st, false
@@ -1418,6 +1423,10 @@ func readCoversSession(root, session string) (coversSession, bool) {
 	for _, k := range lines[1:] {
 		if doc, ok := strings.CutPrefix(k, actedPrefix); ok {
 			st.acted[doc] = true
+		} else if at, ok := strings.CutPrefix(k, nagAtPrefix); ok {
+			st.nagAt = at
+		} else if nag, ok := strings.CutPrefix(k, nagPrefix); ok {
+			st.nags[nag] = true
 		} else {
 			st.seen[k] = true
 		}
@@ -1450,6 +1459,12 @@ func writeCoversSession(root, session string, st coversSession, first bool) {
 	}
 	for doc := range st.acted {
 		lines = append(lines, actedPrefix+doc)
+	}
+	if st.nagAt != "" {
+		lines = append(lines, nagAtPrefix+st.nagAt)
+	}
+	for k := range st.nags {
+		lines = append(lines, nagPrefix+k)
 	}
 	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }
@@ -1519,19 +1534,76 @@ func writeDocDriftBase(root, head, spec string) {
 	_ = os.WriteFile(p, []byte(head+" "+spec), 0o644)
 }
 
-// docDriftNagLines returns the nag marker's lines — the scan key last nagged
-// at, then one docDriftKey per finding that nag carried — or nil for never
-// (including an unresolvable state dir, which must never suppress).
-func docDriftNagLines(root string) []string {
-	p := docDriftStatePath(root, "")
+// driftNags is the symbol scan's record of its last nag: the scan key it nagged
+// at (docDriftScanKey) and one docDriftKey per finding it carried. The record's
+// scope is the scan's. On a trunk with a session the scan is that session's own
+// commits, so the record is the session's, kept in its coversSession state, and
+// another session's Stop in the same checkout never touches it. Otherwise the
+// scan is the branch diff every session shares, so the record is per worktree
+// root, and a finding one agent was told about stays quiet for the next
+// (docDriftAllSeen).
+type driftNags struct {
+	root    string
+	session stopPayload // zero: the per-root marker
+}
+
+// load returns the last nag's scan key and finding keys; "" and none for never,
+// including an unresolvable state dir, which must never suppress.
+func (n driftNags) load() (scanned string, keys map[string]bool) {
+	keys = map[string]bool{}
+	if n.session.SessionID != "" {
+		st, _ := readCoversSession(n.root, n.session.SessionID)
+		return st.nagAt, st.nags
+	}
+	p := docDriftStatePath(n.root, "")
 	if p == "" {
-		return nil
+		return "", keys
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil
+		return "", keys
 	}
-	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	for _, k := range lines[1:] {
+		keys[k] = true
+	}
+	return lines[0], keys
+}
+
+// save records fs as the last nag at scan key scanned, replacing the previous
+// record, so a finding that is fixed and later recurs blocks again. No findings
+// clears the record.
+func (n driftNags) save(scanned string, fs []audit.DocDriftFinding) {
+	keys := map[string]bool{}
+	for _, f := range fs {
+		keys[docDriftKey(f)] = true
+	}
+	if len(fs) == 0 {
+		scanned = ""
+	}
+	if id := n.session.SessionID; id != "" {
+		st, known := readCoversSession(n.root, id)
+		if !known {
+			st.since = transcriptStart(n.session.TranscriptPath)
+		}
+		st.nagAt, st.nags = scanned, keys
+		writeCoversSession(n.root, id, st, !known)
+		return
+	}
+	p := docDriftStatePath(n.root, "")
+	if p == "" {
+		return
+	}
+	if len(fs) == 0 {
+		_ = os.Remove(p)
+		return
+	}
+	lines := []string{scanned}
+	for _, f := range fs {
+		lines = append(lines, docDriftKey(f))
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 // docDriftScanKey identifies what a bare doc-drift run scanned: HEAD plus a
@@ -1543,26 +1615,6 @@ func docDriftScanKey(head, code, docs string) string {
 	h.Write([]byte{0})
 	h.Write([]byte(docs))
 	return head + " " + hex.EncodeToString(h.Sum(nil))[:16]
-}
-
-// docDriftNaggedAt returns the scan key (docDriftScanKey) this repo was last
-// nagged at, or "" for never.
-func docDriftNaggedAt(root string) string {
-	if l := docDriftNagLines(root); len(l) > 0 {
-		return l[0]
-	}
-	return ""
-}
-
-// docDriftNaggedKeys returns the findings the last nag carried.
-func docDriftNaggedKeys(root string) map[string]bool {
-	seen := map[string]bool{}
-	if l := docDriftNagLines(root); len(l) > 1 {
-		for _, k := range l[1:] {
-			seen[k] = true
-		}
-	}
-	return seen
 }
 
 // docDriftKey identifies a finding across commits: the symbol and what went
@@ -1582,24 +1634,6 @@ func docDriftAllSeen(fs []audit.DocDriftFinding, seen map[string]bool) bool {
 		}
 	}
 	return true
-}
-
-// docDriftRecordNag records the scan key and the findings as nagged. The key
-// line makes a repeat Stop over the same HEAD and diff skip the greps; the
-// finding keys let a later scan stay silent when it carries nothing new
-// (docDriftAllSeen). The keys are replaced, not accumulated, so a finding that is
-// fixed and later recurs blocks again.
-func docDriftRecordNag(root, scanned string, fs []audit.DocDriftFinding) {
-	p := docDriftStatePath(root, "")
-	if p == "" {
-		return
-	}
-	lines := []string{scanned}
-	for _, f := range fs {
-		lines = append(lines, docDriftKey(f))
-	}
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	_ = os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 // leakCache is the leaks clean-file cache under $XDG_CACHE_HOME (default

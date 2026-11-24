@@ -105,7 +105,9 @@ docgraph doc-drift --range base..head     # explicit range — bypasses the loop
 Bare invocation applies a **once-per-finding loop-guard**: a finding blocks the
 first time it appears, then stays silent at that `HEAD` and every later one. Any
 finding that wasn't in the previous nag blocks the turn, and that block lists all
-current findings. A finding that is fixed and later comes back counts as new.
+current findings. A finding that is fixed and later comes back counts as new. On
+a trunk the previous nag is this session's own, so other sessions' Stops in the
+same checkout never make it block again.
 
 A finding in either class **blocks** — prints to **stderr**, exits **2**.
 
