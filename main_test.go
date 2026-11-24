@@ -1409,8 +1409,8 @@ func TestFlagsParseAfterPositionalPath(t *testing.T) {
 		code := run(args, &out, &errb)
 		return out.String() + errb.String(), code
 	}
-	before, codeBefore := call("--skip", "leaks,orphans,broken,untracked,frontmatter,edges,disconnected", ".")
-	after, codeAfter := call(".", "--skip", "leaks,orphans,broken,untracked,frontmatter,edges,disconnected")
+	before, codeBefore := call("--skip", "leaks,orphans,broken,anchors,untracked,frontmatter,edges,disconnected", ".")
+	after, codeAfter := call(".", "--skip", "leaks,orphans,broken,anchors,untracked,frontmatter,edges,disconnected")
 	if before != after || codeBefore != codeAfter {
 		t.Errorf("flags must parse the same before and after the path\n before (%d): %q\n after  (%d): %q",
 			codeBefore, before, codeAfter, after)
@@ -2041,6 +2041,28 @@ func TestFailureReportIsLean(t *testing.T) {
 	}
 	if len(got) > 700 {
 		t.Errorf("a 2-finding failure report is %d bytes — keep it under 700:\n%s", len(got), got)
+	}
+}
+
+// An anchor finding prints its own section and fix line, apart from broken links.
+func TestReportPrintsBrokenAnchors(t *testing.T) {
+	var b bytes.Buffer
+	rep := audit.Report{Roots: []string{"README.md"}, BrokenAnchors: []audit.BrokenLink{{Source: "docs/approvals.md", Line: 7, Target: "docs/regulation.md#rates"}}}
+	if !printReport(&b, rep, nil, map[string]bool{"anchors": true, "broken": true}) {
+		t.Fatal("an anchor finding must fail the gate")
+	}
+	got := b.String()
+	for _, want := range []string{"ANCHORS (1)", "docs/approvals.md:7 → docs/regulation.md#rates", "ANCHOR "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "BROKEN") {
+		t.Errorf("an anchor finding is not a broken link:\n%s", got)
+	}
+	b.Reset()
+	if printReport(&b, rep, nil, map[string]bool{"broken": true}) {
+		t.Errorf("--skip anchors must silence it, got:\n%s", b.String())
 	}
 }
 

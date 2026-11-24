@@ -290,7 +290,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-var checkNames = []string{"orphans", "broken", "untracked", "leaks", "frontmatter", "edges", "disconnected"}
+var checkNames = []string{"orphans", "broken", "anchors", "untracked", "leaks", "frontmatter", "edges", "disconnected"}
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
@@ -301,7 +301,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var roots, ignores multiFlag
 	fs.Var(&roots, "root", "extra root doc to start reachability from (repeatable)")
 	fs.Var(&ignores, "ignore", "glob to exclude from checks (repeatable)")
-	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,untracked,leaks,frontmatter,edges,disconnected)")
+	skip := fs.String("skip", "", "checks to EXCLUDE, comma-separated (default: none — all enforced: orphans,broken,anchors,untracked,leaks,frontmatter,edges,disconnected)")
 	leaksConfig := fs.String("leaks-config", "", "path to the global leaks.toml (default: $DOCGRAPH_LEAKS or $XDG_CONFIG_HOME/docgraph/leaks.toml, else ~/.config/docgraph/leaks.toml)")
 	config := fs.String("config", "", "path to the global config.toml, holding [log] (default: $DOCGRAPH_CONFIG or $XDG_CONFIG_HOME/docgraph/config.toml)")
 	positional, perr := parseArgs(fs, args)
@@ -552,8 +552,8 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	found := func(name string) bool { return sel[name] && counts[name] > 0 }
 	orphans, broken, untracked := found("orphans"), found("broken"), found("untracked")
 	frontmatter, edges, leaksFound := found("frontmatter"), found("edges"), found("leaks")
-	disconnected := found("disconnected")
-	if !orphans && !broken && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
+	disconnected, anchors := found("disconnected"), found("anchors")
+	if !orphans && !broken && !anchors && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
 		fmt.Fprintf(w, "docgraph: clean ✓ (%d tracked .md, %d reachable, 0 findings)\n", r.TrackedMD, r.Reachable)
 		return false
 	}
@@ -570,6 +570,13 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 	if broken {
 		fmt.Fprintf(w, "BROKEN LINKS (%d) — .md targets that don't exist:\n", len(r.BrokenLinks))
 		for _, b := range r.BrokenLinks {
+			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
+		}
+		fmt.Fprintln(w)
+	}
+	if anchors {
+		fmt.Fprintf(w, "ANCHORS (%d) — #fragments no heading or id in the target produces:\n", len(r.BrokenAnchors))
+		for _, b := range r.BrokenAnchors {
 			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
 		}
 		fmt.Fprintln(w)
@@ -619,7 +626,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 			n += c
 		}
 	}
-	printFailureFooter(w, n, orphans, broken, untracked, frontmatter, edges, leaksFound, disconnected)
+	printFailureFooter(w, n, orphans, broken, anchors, untracked, frontmatter, edges, leaksFound, disconnected)
 	return true
 }
 
@@ -627,7 +634,7 @@ func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map
 // and how to act on it — so nobody has to reverse-engineer the gate from a bare
 // "failed to push some refs". Only the fix lines for checks that actually have
 // findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmatter, edges, leaks, disconnected bool) {
+func printFailureFooter(w io.Writer, n int, orphans, broken, anchors, untracked, frontmatter, edges, leaks, disconnected bool) {
 	fmt.Fprintf(w, "docgraph: %d finding(s) → exit 1 (as the pre-push gate, this aborted the push). Fix:\n", n)
 	if orphans {
 		fmt.Fprintln(w, "  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a")
@@ -635,6 +642,10 @@ func printFailureFooter(w io.Writer, n int, orphans, broken, untracked, frontmat
 	}
 	if broken {
 		fmt.Fprintln(w, "  BROKEN    → repair or remove the dead .md link at the shown file:line.")
+	}
+	if anchors {
+		fmt.Fprintln(w, "  ANCHOR    → point the #fragment at a heading the target has (its GitHub slug, or")
+		fmt.Fprintln(w, "              a `{#id}`/`id=\"…\"` it declares), or drop the fragment.")
 	}
 	if untracked {
 		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")

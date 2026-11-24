@@ -36,7 +36,8 @@ type Report struct {
 	Reachable           int
 	Orphans             []string
 	BrokenLinks         []BrokenLink
-	Untracked           []string
+	BrokenAnchors       []BrokenLink // Target is the resolved path plus #fragment
+	Untracked          []string
 	FrontmatterFindings []FrontmatterFinding
 	BrokenEdges         []BrokenEdge
 	EdgeCycles          [][]string
@@ -50,6 +51,7 @@ func CheckCounts(r Report, leaks []LeakFinding) map[string]int {
 	return map[string]int{
 		"orphans":      len(r.Orphans),
 		"broken":       len(r.BrokenLinks),
+		"anchors":      len(r.BrokenAnchors),
 		"untracked":    len(r.Untracked),
 		"leaks":        len(leaks),
 		"frontmatter":  len(r.FrontmatterFindings),
@@ -219,7 +221,21 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 	for _, f := range untrackedList {
 		inRepo[f] = true
 	}
-	var broken []BrokenLink
+	//
+	// Broken anchors: a #fragment, same-file or on a link whose target exists,
+	// that no heading or HTML id in that target produces. A missing target is
+	// only the broken-links finding.
+	var broken, badAnchors []BrokenLink
+	anchorCache := map[string]map[string]bool{}
+	anchorsOf := func(rel string) map[string]bool {
+		if a, ok := anchorCache[rel]; ok {
+			return a
+		}
+		content, _ := readFile(repoRoot, rel)
+		a := docAnchors(content)
+		anchorCache[rel] = a
+		return a
+	}
 	for _, f := range tracked {
 		if matchesIgnore(f, globs) {
 			continue
@@ -229,6 +245,13 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 			continue
 		}
 		for _, link := range extractLinks(content) {
+			frag, hasFrag := linkFragment(link.Target)
+			if strings.HasPrefix(link.Target, "#") {
+				if hasFrag && !hasAnchor(anchorsOf(f), frag) {
+					badAnchors = append(badAnchors, BrokenLink{Source: f, Line: link.Line, Target: f + "#" + frag})
+				}
+				continue
+			}
 			if !isLocalMd(link.Target) {
 				continue
 			}
@@ -236,6 +259,10 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 			_, statErr := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(resolved)))
 			if !inRepo[resolved] || statErr != nil {
 				broken = append(broken, BrokenLink{Source: f, Line: link.Line, Target: resolved})
+				continue
+			}
+			if hasFrag && !hasAnchor(anchorsOf(resolved), frag) {
+				badAnchors = append(badAnchors, BrokenLink{Source: f, Line: link.Line, Target: resolved + "#" + frag})
 			}
 		}
 	}
@@ -249,12 +276,14 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 
 	// orphans is already sorted by cg.Islands().
 	sort.Strings(untracked)
-	sort.Slice(broken, func(i, j int) bool {
-		if broken[i].Source != broken[j].Source {
-			return broken[i].Source < broken[j].Source
-		}
-		return broken[i].Line < broken[j].Line
-	})
+	for _, s := range [][]BrokenLink{broken, badAnchors} {
+		sort.SliceStable(s, func(i, j int) bool {
+			if s[i].Source != s[j].Source {
+				return s[i].Source < s[j].Source
+			}
+			return s[i].Line < s[j].Line
+		})
+	}
 
 	allTracked, err := gitLines(repoRoot, "ls-files")
 	if err != nil {
@@ -271,6 +300,7 @@ func Audit(repoRoot string, opts Options) (Report, error) {
 		Reachable:           len(cg.Nodes) - len(orphans),
 		Orphans:             orphans,
 		BrokenLinks:         broken,
+		BrokenAnchors:       badAnchors,
 		Untracked:           untracked,
 		FrontmatterFindings: fmFindings,
 		BrokenEdges:         brokenEdgeFindings,

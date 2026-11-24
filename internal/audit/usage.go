@@ -87,6 +87,11 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 				f["broken"] = append(f["broken"], fmt.Sprintf("%s:%d → %s", b.Source, b.Line, b.Target))
 			}
 		}
+		if sel["anchors"] {
+			for _, b := range rep.BrokenAnchors {
+				f["anchors"] = append(f["anchors"], fmt.Sprintf("%s:%d → %s", b.Source, b.Line, b.Target))
+			}
+		}
 		if sel["leaks"] {
 			for _, l := range leaks {
 				f["leaks"] = append(f["leaks"], fmt.Sprintf("%s:%d → %s (%s)", l.File, l.Line, l.Match, l.Pattern))
@@ -122,6 +127,11 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 		if sel["broken"] {
 			for _, b := range rep.BrokenLinks {
 				f["broken"] = append(f["broken"], fmt.Sprintf("%s:%d", b.Source, b.Line))
+			}
+		}
+		if sel["anchors"] {
+			for _, b := range rep.BrokenAnchors {
+				f["anchors"] = append(f["anchors"], fmt.Sprintf("%s:%d", b.Source, b.Line))
 			}
 		}
 		if sel["leaks"] {
