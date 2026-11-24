@@ -88,8 +88,10 @@ func explicitID(text string) (rest, id string) {
 
 // docAnchors is every fragment a markdown file answers to, lowercased: each
 // heading's rendered slug (duplicates numbered), each explicit heading id, and
-// each HTML id/name attribute. Frontmatter, fenced code, indented code and
-// inline code produce none.
+// each HTML id/name attribute. Frontmatter, fenced code and inline code produce
+// none. Indented code is not recognised as code: an ATX heading there is
+// rejected by its indent, but an HTML id or a setext underline still counts, so
+// a link to one can pass when it should not.
 func docAnchors(content string) map[string]bool {
 	_, body, _ := SplitFrontmatter(content)
 	ids := map[string]bool{}
