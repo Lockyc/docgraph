@@ -17,17 +17,19 @@ independent audit modes, each with its own trigger, plus
 read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
 `stale`/`graph`):
 
-- **`docgraph .`** — seven **whole-state** checks against the current tree,
+- **`docgraph .`** — eight **whole-state** checks against the current tree,
   spanning **two doc graphs** (see the two-graphs footgun):
   `orphans` (a non-root tracked `.md` that is a **content-graph island** — zero
   inbound markdown-link/path-mention edges over the doc *body*), `disconnected`
   (a frontmatter doc that is a **metadata-graph island** — zero frontmatter
-  doc→doc edges in *or* out), broken internal `.md` links, untracked `.md`, a
+  doc→doc edges in *or* out), broken internal `.md` links, `anchors` (a
+  `#fragment` no heading slug, `{#id}` or HTML id in the target produces —
+  `docAnchors`, `internal/audit/anchors.go`), untracked `.md`, a
   `leaks` content scan, `frontmatter` (every doc except `README.md` must carry a
   leading YAML block that parses and declares a `type` — see "Frontmatter model"
   below), and `edges` (a frontmatter `links:` list's internal targets must be in
   the repo as git records them — the broken-links rule —,
-  and `part-of`/`supersedes` edges must not cycle). All seven are **enforced by
+  and `part-of`/`supersedes` edges must not cycle). All eight are **enforced by
   default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
   nothing). A finding exits non-zero — that's the pre-push gate.
 - **`docgraph footgun-drift`** — a **diff-scoped, advisory** pre-push subcommand:
@@ -69,8 +71,8 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   both island lists) by default, or a stable `schemaVersion`-stamped JSON payload
   with `--json`, the machine seam a catalog / Mycelium consumes.
 
-`frontmatter`, `edges` and `disconnected` are ordinary `checkNames` entries —
-whole-state, `--skip`-able exactly like orphans/broken/untracked/leaks.
+`anchors`, `frontmatter`, `edges` and `disconnected` are ordinary `checkNames`
+entries — whole-state, `--skip`-able exactly like orphans/broken/untracked/leaks.
 `footgun-drift`, `covers-drift` and `doc-drift` are **not** `checkNames` — each is
 its own subcommand with its own trigger (a git range / a Stop invocation), not a
 `docgraph .` check. `schema`
@@ -83,7 +85,7 @@ log** (see the logging footgun). Human-facing usage lives in `README.md` and the
 ## Intended use
 
 docgraph is built to run as a **pre-push documentation gate** (and in CI): the
-seven whole-state checks exit non-zero on a finding so a broken doc-graph blocks
+eight whole-state checks exit non-zero on a finding so a broken doc-graph blocks
 the push without a wrapper. `docgraph install-hook` writes a tracked
 `.githooks/pre-push` for that; the generated hook also runs `footgun-drift` and
 `covers-drift` as **advisory** riders — each prints its nag but never blocks, and
@@ -119,7 +121,7 @@ about drift while it can still act — see
   their trigger and diff source differ: `doc-drift` a Stop hook over the
   working-tree code diff (and, for its covers join, the session's change set),
   `footgun-drift` a pre-push subcommand over the pushed range's markdown,
-  `covers-drift` a pre-push subcommand over that same range's code side. The seven `docgraph .` checks have no range concept — reachability,
+  `covers-drift` a pre-push subcommand over that same range's code side. The eight `docgraph .` checks have no range concept — reachability,
   link existence and leak content are properties of the current tree, not a range.
 
 ## Frontmatter model
@@ -420,7 +422,7 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the seven
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the eight
   whole-state checks), `runFootgunDrift(args, stdin, stdout, stderr) int` and
   `runCoversDrift(args, stdin, stdout, stderr) int` (the two diff-scoped
   advisory pre-push subcommands — `runCoversDrift` checks `DOCGRAPH_COVERS_OFF`,
@@ -641,8 +643,8 @@ Tools. That is per-machine operator config, not something a released binary can 
 
 ## v1 gaps (documented, not silent)
 
-Anchor validity, external-URL liveness, raw `<a href>`, per-section `index.md`
-implicit-nav, repo-specific conventions. Add only with a test and a README note.
+External-URL liveness, raw `<a href>`, per-section `index.md` implicit-nav,
+repo-specific conventions. Add only with a test and a README note.
 
 Those are **non-goals**. Deferred-but-wanted work is a different list:
 [`docs/FOLLOWUPS.md`](docs/FOLLOWUPS.md) — read it before designing a change to

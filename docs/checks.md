@@ -1,6 +1,6 @@
 ---
 type: reference
-description: The seven whole-state checks, the frontmatter schema, entry points, ignoring paths, and which doc models need --skip.
+description: The eight whole-state checks, the frontmatter schema, entry points, ignoring paths, and which doc models need --skip.
 links:
   - rel: part-of
     to: README.md
@@ -8,7 +8,7 @@ links:
 
 # Whole-state checks
 
-Seven checks run by default on `docgraph [path]`. **Everything is enforced; you
+Eight checks run by default on `docgraph [path]`. **Everything is enforced; you
 exclude explicitly** with `--skip <check[,check]>`; a check added in a later
 version is enforced automatically. (An auto-nav MkDocs repo, for instance, runs `--skip
 orphans`.)
@@ -45,16 +45,23 @@ or vice versa. Both are flagged.
    only edges are `covers`→code is disconnected. Fix it with a real `part-of`/`see-also`/`depends-on` edge.
 3. **Broken links** — a `[x](y.md)` whose target doesn't exist. Checked across
    the same tracked, non-ignored `.md` set as orphans.
-4. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
-5. **Leaks** — tracked file *content* matching a configured leak pattern (see
+4. **Anchors** — a `[x](y.md#frag)` or same-file `[x](#frag)` whose fragment no
+   heading or id in the target produces. A target's ids are its headings slugged
+   as GitHub and Forgejo render them (lowercase, punctuation dropped, spaces to
+   hyphens, a repeated heading numbered `-1`, `-2` …), explicit heading
+   attributes (`## Contents {#contents}`), and HTML `id="…"`/`name="…"`
+   attributes. Matching ignores case, and `#top` always resolves. A link whose
+   file is missing is a broken link only.
+5. **Untracked** — a `.md` on disk but not in git (a forgotten `git add`).
+6. **Leaks** — tracked file *content* matching a configured leak pattern (see
    [leaks.md](leaks.md)).
-6. **Frontmatter** — every doc except `README.md` (matched by basename) must
+7. **Frontmatter** — every doc except `README.md` (matched by basename) must
    carry a leading YAML block (first line exactly `---` to the next `---`) that is
    well-formed YAML and declares a `type`. A missing block, malformed YAML, or a
    missing `type` is a finding; `README.md` is exempt (see *Where to put
    frontmatter* below). `type` is an advisory vocabulary — see `docgraph schema`
    below.
-7. **Edges** — every entry in a frontmatter `links:` list must carry a `rel`
+8. **Edges** — every entry in a frontmatter `links:` list must carry a `rel`
    and a `to`; every internal `to` target (a repo-root-relative `.md` doc or
    code path) must exist; and `part-of` /
    `supersedes` edges between docs must not form a cycle. External URLs and

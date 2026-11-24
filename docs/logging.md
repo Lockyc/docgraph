@@ -42,9 +42,9 @@ Records land in `$XDG_STATE_HOME/docgraph/usage.jsonl` (default
 
 ```json
 {"ts":"2026-07-09T21:30:00+10:00","version":"3.0.0","repo":"/abs/git/root",
- "cmd":"run","checks":["broken","disconnected","edges","frontmatter","leaks","orphans","untracked"],
+ "cmd":"run","checks":["anchors","broken","disconnected","edges","frontmatter","leaks","orphans","untracked"],
  "exit":1,
- "counts":{"broken":1,"disconnected":0,"edges":0,"frontmatter":0,"leaks":0,"orphans":0,"untracked":0}}
+ "counts":{"anchors":0,"broken":1,"disconnected":0,"edges":0,"frontmatter":0,"leaks":0,"orphans":0,"untracked":0}}
 ```
 
 **Detail level** trades richness for exposure:

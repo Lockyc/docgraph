@@ -39,9 +39,9 @@ docgraph: 2 finding(s) → exit 1 (as the pre-push gate, this aborted the push).
 | **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
 | **`doc-drift`** | `docgraph doc-drift` | the branch diff incl. uncommitted changes (on a trunk branch: this agent session's commits + uncommitted changes) | agent Stop hook | **yes** — exit 2, once per finding |
 
-- **Whole-state checks** — seven, all on by default: orphans, disconnected (a doc with
-  frontmatter but no place in the doc structure), broken links, untracked docs, leaks,
-  frontmatter, and frontmatter edges. `--skip <check>` turns one off. In full:
+- **Whole-state checks** — eight, all on by default: orphans, disconnected (a doc with
+  frontmatter but no place in the doc structure), broken links, anchors (a `#fragment` no
+  heading in the target produces), untracked docs, leaks, frontmatter, and frontmatter edges. `--skip <check>` turns one off. In full:
   [docs/checks.md](docs/checks.md).
 - **Leaks** — scans every tracked file against rules in a machine-local
   `~/.config/docgraph/leaks.toml`, never committed; with no rules file it scans nothing.
@@ -125,10 +125,13 @@ Optional, machine-local usage logging (one JSON line per run): [docs/logging.md]
 
 ## Limits
 
-- Anchor validity (`y.md#missing`), external-URL liveness, raw `<a href>` in HTML blocks and
-  per-section `index.md` implicit nav aren't checked.
-- Broken-link detection skips fenced and inline code, so example paths aren't treated as
-  links; orphan reachability does read inline-code path mentions.
+- External-URL liveness, raw `<a href>` in HTML blocks and per-section `index.md` implicit nav
+  aren't checked.
+- Anchors are judged by GitHub/Forgejo heading slugs, `{#id}` heading attributes and HTML
+  `id`/`name` attributes. A site built with a different slugger (MkDocs, for one) can
+  `--skip anchors`.
+- Broken-link and anchor detection skip fenced and inline code, so example paths aren't
+  treated as links; orphan reachability does read inline-code path mentions.
 - `footgun-drift` has no code-fence awareness: an example `Footgun:` line inside a fenced block
   reads as a real declaration.
 - `leaks` scans the working tree, never git history; use a history scanner such as gitleaks,

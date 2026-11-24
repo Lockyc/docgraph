@@ -148,8 +148,8 @@ no doc claims a file sitting inside another doc's directory edge.
 
 ## The audit gate
 
-`docgraph .` runs seven whole-state checks (orphans, disconnected, broken links,
-untracked, leaks, frontmatter, edges) and exits non-zero on a finding — it's the
+`docgraph .` runs eight whole-state checks (orphans, disconnected, broken links,
+anchors, untracked, leaks, frontmatter, edges) and exits non-zero on a finding — it's the
 pre-push gate (`docgraph install-hook`), and `docgraph doc-drift` is a Stop hook;
 you rarely invoke them by hand.
 
