@@ -140,6 +140,16 @@ func TestLogPathExpandsTildeAndRejectsRelative(t *testing.T) {
 	if _, err := LogPath("logs/usage.jsonl"); err == nil {
 		t.Fatal("a relative [log].path must be an error, not a file inside the cwd")
 	}
+
+	// DOCGRAPH_LOG follows the same rule: it is written from the same cwd.
+	t.Setenv("DOCGRAPH_LOG", "usage.jsonl")
+	if got, err := LogPath("/cfg/usage.jsonl"); err == nil {
+		t.Fatalf("a relative DOCGRAPH_LOG must be an error, got %q", got)
+	}
+	t.Setenv("DOCGRAPH_LOG", "~/env/usage.jsonl")
+	if got, err := LogPath(""); err != nil || got != filepath.Join(home, "env/usage.jsonl") {
+		t.Fatalf("DOCGRAPH_LOG ~ not expanded: got %q, %v", got, err)
+	}
 }
 
 func TestXDGDirIgnoresARelativeValue(t *testing.T) {

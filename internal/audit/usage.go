@@ -208,13 +208,17 @@ func DocDriftRecord(repo, version string, exit int, fs []DocDriftFinding, covers
 // > $XDG_STATE_HOME/docgraph/usage.jsonl (default ~/.local/state/... — XDG *state*,
 // not config, matching the machine's ~/.local/state ledger convention).
 //
-// cfgPath expands a leading ~/ and must then be absolute: the log is written from
-// whatever cwd docgraph runs in (the repo root, under the pre-push hook), so a
+// Either path expands a leading ~/ and must then be absolute: the log is written
+// from whatever cwd docgraph runs in (the repo root, under the pre-push hook), so a
 // relative or unexpanded-~ path would land inside the repo — at level 3, leak
 // match text where a `git add -A` commits it.
 func LogPath(cfgPath string) (string, error) {
 	if env := os.Getenv("DOCGRAPH_LOG"); env != "" {
-		return env, nil
+		p, err := expandDirPath(env)
+		if err != nil {
+			return "", fmt.Errorf("DOCGRAPH_LOG %q: %w", env, err)
+		}
+		return p, nil
 	}
 	if cfgPath != "" {
 		p, err := expandDirPath(cfgPath)
