@@ -1,0 +1,42 @@
+roots: [CLAUDE.md]   tracked .md: 9   reachable: 7
+
+ORPHANS (1) — docs unreachable by link/path-following:
+  docs/lost.md
+
+BROKEN LINKS (1) — .md targets that don't exist:
+  README.md:3 → gone.md
+
+ANCHORS (1) — #fragments no heading or id in the target produces:
+  README.md:4 → docs/a.md#nope
+
+UNTRACKED (1) — .md on disk but not in git:
+  notes.md
+
+FRONTMATTER (1) — malformed frontmatter or missing required `type`:
+  docs/b.md → missing required `type`
+
+EDGES (2) — frontmatter typed edges with a missing target, or a part-of/supersedes cycle:
+  docs/c.md [covers] → src/x.go (not in the repo)
+  cycle: docs/d.md → docs/e.md → docs/d.md
+
+LEAKS (1) — tree content matching a leak pattern:
+  src/y.go:7 → SECRET  (secret)
+
+DISCONNECTED (1) — frontmatter docs with no doc→doc edge (metadata island):
+  docs/f.md
+
+docgraph: 9 finding(s) → exit 1 (as the pre-push gate, this aborted the push). Fix:
+  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a
+              .docgraphignore entry) if it is intentionally standalone; or delete it.
+  BROKEN    → repair or remove the dead .md link at the shown file:line.
+  ANCHOR    → point the #fragment at a heading the target has (its GitHub slug, or
+              a `{#id}`/`id="…"` it declares), or drop the fragment.
+  UNTRACKED → `git add` it; or delete/ignore it.
+  FRONTMATTER → add a `---` frontmatter block with a `type:` (every doc except a
+                README.md needs one); or fix malformed YAML; or `--skip frontmatter`.
+  EDGES     → fix the frontmatter `to:` target (path is repo-root-relative), or remove the edge.
+              A cycle means part-of/supersedes edges form a loop — break it.
+  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally
+              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.
+  DISCONNECTED → give the doc a frontmatter part-of/see-also/depends-on edge to a
+                related doc (a covers→code edge does not count); or `--skip disconnected`.
