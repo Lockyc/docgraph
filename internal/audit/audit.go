@@ -44,22 +44,6 @@ type Report struct {
 	Disconnected        []string
 }
 
-// CheckCounts is each gate check's finding count, keyed by check name — the one
-// mapping from a check to the Report fields it reports, which the gate's footer,
-// its exit code and the usage log all derive from.
-func CheckCounts(r Report, leaks []LeakFinding) map[string]int {
-	return map[string]int{
-		"orphans":      len(r.Orphans),
-		"broken":       len(r.BrokenLinks),
-		"anchors":      len(r.BrokenAnchors),
-		"untracked":    len(r.Untracked),
-		"leaks":        len(leaks),
-		"frontmatter":  len(r.FrontmatterFindings),
-		"edges":        len(r.BrokenEdges) + len(r.EdgeCycles),
-		"disconnected": len(r.Disconnected),
-	}
-}
-
 func (r Report) HasFindings() bool {
 	for _, n := range CheckCounts(r, nil) {
 		if n > 0 {

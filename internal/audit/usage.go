@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -70,91 +69,28 @@ func BuildRecord(cmd, repo, version string, exit int, rep Report, leaks []LeakFi
 		Counts:  counts,
 	}
 
-	switch {
-	case level >= 3:
-		// Level 3 — the deliberate sink: paths plus broken targets and leak MATCH
-		// text. docs/logging.md warns this turns the log into the sensitive-string sink
-		// the leaks check exists to prevent.
-		f := map[string][]string{}
-		if sel["orphans"] {
-			f["orphans"] = append([]string{}, rep.Orphans...)
+	if level < 2 {
+		return rec
+	}
+	// Level 2 is Finding.Location (paths, file:line, never a target or leak match);
+	// level 3 is Finding.Detail, the deliberate sink that includes leak MATCH text
+	// (docs/logging.md warns about it).
+	f := map[string][]string{}
+	for _, c := range Checks {
+		if !sel[c.Name] {
+			continue
 		}
-		if sel["untracked"] {
-			f["untracked"] = append([]string{}, rep.Untracked...)
-		}
-		if sel["broken"] {
-			for _, b := range rep.BrokenLinks {
-				f["broken"] = append(f["broken"], fmt.Sprintf("%s:%d → %s", b.Source, b.Line, b.Target))
+		for _, fd := range c.Findings(rep, leaks) {
+			if level >= 3 {
+				f[c.Name] = append(f[c.Name], fd.Detail)
+			} else {
+				f[c.Name] = append(f[c.Name], fd.Location)
 			}
 		}
-		if sel["anchors"] {
-			for _, b := range rep.BrokenAnchors {
-				f["anchors"] = append(f["anchors"], fmt.Sprintf("%s:%d → %s", b.Source, b.Line, b.Target))
-			}
-		}
-		if sel["leaks"] {
-			for _, l := range leaks {
-				f["leaks"] = append(f["leaks"], fmt.Sprintf("%s:%d → %s (%s)", l.File, l.Line, l.Match, l.Pattern))
-			}
-		}
-		if sel["frontmatter"] {
-			for _, ff := range rep.FrontmatterFindings {
-				f["frontmatter"] = append(f["frontmatter"], fmt.Sprintf("%s: %s", ff.File, ff.Detail))
-			}
-		}
-		if sel["edges"] {
-			for _, e := range rep.BrokenEdges {
-				f["edges"] = append(f["edges"], fmt.Sprintf("%s [%s] → %s (%s)", e.Source, e.Rel, e.Target, e.Reason))
-			}
-			for _, cyc := range rep.EdgeCycles {
-				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
-			}
-		}
-		if sel["disconnected"] {
-			f["disconnected"] = append([]string{}, rep.Disconnected...)
-		}
+	}
+	if level >= 3 {
 		rec.Findings = f
-	case level == 2:
-		// Level 2 — paths only. broken/leaks carry file:line (a location), never the
-		// target or match text: the match string is what must not be logged here.
-		f := map[string][]string{}
-		if sel["orphans"] {
-			f["orphans"] = append([]string{}, rep.Orphans...)
-		}
-		if sel["untracked"] {
-			f["untracked"] = append([]string{}, rep.Untracked...)
-		}
-		if sel["broken"] {
-			for _, b := range rep.BrokenLinks {
-				f["broken"] = append(f["broken"], fmt.Sprintf("%s:%d", b.Source, b.Line))
-			}
-		}
-		if sel["anchors"] {
-			for _, b := range rep.BrokenAnchors {
-				f["anchors"] = append(f["anchors"], fmt.Sprintf("%s:%d", b.Source, b.Line))
-			}
-		}
-		if sel["leaks"] {
-			for _, l := range leaks {
-				f["leaks"] = append(f["leaks"], fmt.Sprintf("%s:%d", l.File, l.Line))
-			}
-		}
-		if sel["frontmatter"] {
-			for _, ff := range rep.FrontmatterFindings {
-				f["frontmatter"] = append(f["frontmatter"], ff.File)
-			}
-		}
-		if sel["edges"] {
-			for _, e := range rep.BrokenEdges {
-				f["edges"] = append(f["edges"], e.Source)
-			}
-			for _, cyc := range rep.EdgeCycles {
-				f["edges"] = append(f["edges"], "cycle: "+strings.Join(cyc, " → "))
-			}
-		}
-		if sel["disconnected"] {
-			f["disconnected"] = append([]string{}, rep.Disconnected...)
-		}
+	} else {
 		rec.Files = f
 	}
 

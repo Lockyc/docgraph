@@ -290,7 +290,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-var checkNames = []string{"orphans", "broken", "anchors", "untracked", "leaks", "frontmatter", "edges", "disconnected"}
+var checkNames = audit.CheckNames()
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if checksFlagRemoved(args, stderr) {
@@ -548,124 +548,41 @@ func loadLeakConfig(path string) (audit.LeakConfig, error) {
 // failing check — and nothing describing the tool, which it would pay for in
 // context on every failed push.
 func printReport(w io.Writer, r audit.Report, leaks []audit.LeakFinding, sel map[string]bool) bool {
-	counts := audit.CheckCounts(r, leaks)
-	found := func(name string) bool { return sel[name] && counts[name] > 0 }
-	orphans, broken, untracked := found("orphans"), found("broken"), found("untracked")
-	frontmatter, edges, leaksFound := found("frontmatter"), found("edges"), found("leaks")
-	disconnected, anchors := found("disconnected"), found("anchors")
-	if !orphans && !broken && !anchors && !untracked && !frontmatter && !edges && !leaksFound && !disconnected {
+	type section struct {
+		check    audit.Check
+		findings []audit.Finding
+	}
+	var failing []section
+	n := 0
+	for _, c := range audit.Checks {
+		if fs := c.Findings(r, leaks); sel[c.Name] && len(fs) > 0 {
+			failing = append(failing, section{c, fs})
+			n += len(fs)
+		}
+	}
+	if len(failing) == 0 {
 		fmt.Fprintf(w, "docgraph: clean ✓ (%d tracked .md, %d reachable, 0 findings)\n", r.TrackedMD, r.Reachable)
 		return false
 	}
 
 	fmt.Fprintf(w, "roots: %v   tracked .md: %d   reachable: %d\n\n", r.Roots, r.TrackedMD, r.Reachable)
-
-	if orphans {
-		fmt.Fprintf(w, "ORPHANS (%d) — docs unreachable by link/path-following:\n", len(r.Orphans))
-		for _, o := range r.Orphans {
-			fmt.Fprintf(w, "  %s\n", o)
-		}
-		fmt.Fprintln(w)
-	}
-	if broken {
-		fmt.Fprintf(w, "BROKEN LINKS (%d) — .md targets that don't exist:\n", len(r.BrokenLinks))
-		for _, b := range r.BrokenLinks {
-			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
-		}
-		fmt.Fprintln(w)
-	}
-	if anchors {
-		fmt.Fprintf(w, "ANCHORS (%d) — #fragments no heading or id in the target produces:\n", len(r.BrokenAnchors))
-		for _, b := range r.BrokenAnchors {
-			fmt.Fprintf(w, "  %s:%d → %s\n", b.Source, b.Line, b.Target)
-		}
-		fmt.Fprintln(w)
-	}
-	if untracked {
-		fmt.Fprintf(w, "UNTRACKED (%d) — .md on disk but not in git:\n", len(r.Untracked))
-		for _, u := range r.Untracked {
-			fmt.Fprintf(w, "  %s\n", u)
-		}
-		fmt.Fprintln(w)
-	}
-	if frontmatter {
-		fmt.Fprintf(w, "FRONTMATTER (%d) — malformed frontmatter or missing required `type`:\n", len(r.FrontmatterFindings))
-		for _, f := range r.FrontmatterFindings {
-			fmt.Fprintf(w, "  %s → %s\n", f.File, f.Detail)
-		}
-		fmt.Fprintln(w)
-	}
-	if edges {
-		fmt.Fprintf(w, "EDGES (%d) — frontmatter typed edges with a missing target, or a part-of/supersedes cycle:\n", len(r.BrokenEdges)+len(r.EdgeCycles))
-		for _, e := range r.BrokenEdges {
-			fmt.Fprintf(w, "  %s [%s] → %s (%s)\n", e.Source, e.Rel, e.Target, e.Reason)
-		}
-		for _, cyc := range r.EdgeCycles {
-			fmt.Fprintf(w, "  cycle: %s → %s\n", strings.Join(cyc, " → "), cyc[0])
-		}
-		fmt.Fprintln(w)
-	}
-	if leaksFound {
-		fmt.Fprintf(w, "LEAKS (%d) — tree content matching a leak pattern:\n", len(leaks))
-		for _, l := range leaks {
-			fmt.Fprintf(w, "  %s:%d → %s  (%s)\n", l.File, l.Line, l.Match, l.Pattern)
-		}
-		fmt.Fprintln(w)
-	}
-	if disconnected {
-		fmt.Fprintf(w, "DISCONNECTED (%d) — frontmatter docs with no doc→doc edge (metadata island):\n", len(r.Disconnected))
-		for _, d := range r.Disconnected {
-			fmt.Fprintf(w, "  %s\n", d)
+	for _, s := range failing {
+		fmt.Fprintf(w, "%s (%d) — %s:\n", s.check.Heading, len(s.findings), s.check.Title)
+		for _, f := range s.findings {
+			fmt.Fprintf(w, "  %s\n", f.Report)
 		}
 		fmt.Fprintln(w)
 	}
 
-	n := 0
-	for name, c := range counts {
-		if sel[name] {
-			n += c
-		}
-	}
-	printFailureFooter(w, n, orphans, broken, anchors, untracked, frontmatter, edges, leaksFound, disconnected)
-	return true
-}
-
-// printFailureFooter explains, in plain text, why docgraph is exiting non-zero
-// and how to act on it — so nobody has to reverse-engineer the gate from a bare
-// "failed to push some refs". Only the fix lines for checks that actually have
-// findings are shown.
-func printFailureFooter(w io.Writer, n int, orphans, broken, anchors, untracked, frontmatter, edges, leaks, disconnected bool) {
+	// The footer says why docgraph exits non-zero and how to act on it, so nobody
+	// has to reverse-engineer the gate from a bare "failed to push some refs".
 	fmt.Fprintf(w, "docgraph: %d finding(s) → exit 1 (as the pre-push gate, this aborted the push). Fix:\n", n)
-	if orphans {
-		fmt.Fprintln(w, "  ORPHAN    → link it in from a reachable doc; or `--ignore '<glob>'` (a")
-		fmt.Fprintln(w, "              .docgraphignore entry) if it is intentionally standalone; or delete it.")
+	for _, s := range failing {
+		for _, line := range s.check.Fix {
+			fmt.Fprintln(w, line)
+		}
 	}
-	if broken {
-		fmt.Fprintln(w, "  BROKEN    → repair or remove the dead .md link at the shown file:line.")
-	}
-	if anchors {
-		fmt.Fprintln(w, "  ANCHOR    → point the #fragment at a heading the target has (its GitHub slug, or")
-		fmt.Fprintln(w, "              a `{#id}`/`id=\"…\"` it declares), or drop the fragment.")
-	}
-	if untracked {
-		fmt.Fprintln(w, "  UNTRACKED → `git add` it; or delete/ignore it.")
-	}
-	if frontmatter {
-		fmt.Fprintln(w, "  FRONTMATTER → add a `---` frontmatter block with a `type:` (every doc except a")
-		fmt.Fprintln(w, "                README.md needs one); or fix malformed YAML; or `--skip frontmatter`.")
-	}
-	if edges {
-		fmt.Fprintln(w, "  EDGES     → fix the frontmatter `to:` target (path is repo-root-relative), or remove the edge.")
-		fmt.Fprintln(w, "              A cycle means part-of/supersedes edges form a loop — break it.")
-	}
-	if leaks {
-		fmt.Fprintln(w, "  LEAK      → genericise it, remove it, or add an `allow`/`allow_regex` (optionally")
-		fmt.Fprintln(w, "              scoped under `[[dir]]`) to your leaks.toml if the match is legitimate.")
-	}
-	if disconnected {
-		fmt.Fprintln(w, "  DISCONNECTED → give the doc a frontmatter part-of/see-also/depends-on edge to a")
-		fmt.Fprintln(w, "                related doc (a covers→code edge does not count); or `--skip disconnected`.")
-	}
+	return true
 }
 
 // runFootgunDrift checks only footgun declarations ADDED in a range. With

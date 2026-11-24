@@ -15,18 +15,18 @@ import (
 // and the usage-log tiers can be pinned for each check at once.
 func fullReport() (audit.Report, []audit.LeakFinding) {
 	return audit.Report{
-			Roots: []string{"CLAUDE.md"}, TrackedMD: 9, Reachable: 7,
-			Orphans:             []string{"docs/lost.md"},
-			BrokenLinks:         []audit.BrokenLink{{Source: "README.md", Line: 3, Target: "gone.md"}},
-			BrokenAnchors:       []audit.BrokenLink{{Source: "README.md", Line: 4, Target: "docs/a.md#nope"}},
-			Untracked:           []string{"notes.md"},
-			FrontmatterFindings: []audit.FrontmatterFinding{{File: "docs/b.md", Detail: "missing required `type`"}},
-			BrokenEdges:         []audit.BrokenEdge{{Source: "docs/c.md", Rel: "covers", Target: "src/x.go", Reason: "not in the repo"}},
-			EdgeCycles:          [][]string{{"docs/d.md", "docs/e.md"}},
-			Disconnected:        []string{"docs/f.md"},
-		}, []audit.LeakFinding{
-			{File: "src/y.go", Line: 7, Match: "SECRET", Pattern: "secret"},
-		}
+		Roots: []string{"CLAUDE.md"}, TrackedMD: 9, Reachable: 7,
+		Orphans:             []string{"docs/lost.md"},
+		BrokenLinks:         []audit.BrokenLink{{Source: "README.md", Line: 3, Target: "gone.md"}},
+		BrokenAnchors:       []audit.BrokenLink{{Source: "README.md", Line: 4, Target: "docs/a.md#nope"}},
+		Untracked:           []string{"notes.md"},
+		FrontmatterFindings: []audit.FrontmatterFinding{{File: "docs/b.md", Detail: "missing required `type`"}},
+		BrokenEdges:         []audit.BrokenEdge{{Source: "docs/c.md", Rel: "covers", Target: "src/x.go", Reason: "not in the repo"}},
+		EdgeCycles:          [][]string{{"docs/d.md", "docs/e.md"}},
+		Disconnected:        []string{"docs/f.md"},
+	}, []audit.LeakFinding{
+		{File: "src/y.go", Line: 7, Match: "SECRET", Pattern: "secret"},
+	}
 }
 
 func allSelected() map[string]bool {

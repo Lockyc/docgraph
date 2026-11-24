@@ -1953,20 +1953,6 @@ func TestPrePushZeroSHAAnyLength(t *testing.T) {
 	}
 }
 
-// Every gate check has a CheckCounts entry and nothing else does, so the footer,
-// exit code and usage log can't silently miss a check.
-func TestCheckCountsCoversExactlyTheGateChecks(t *testing.T) {
-	counts := audit.CheckCounts(audit.Report{}, nil)
-	if len(counts) != len(checkNames) {
-		t.Fatalf("CheckCounts has %d keys, checkNames %d", len(counts), len(checkNames))
-	}
-	for _, name := range checkNames {
-		if _, ok := counts[name]; !ok {
-			t.Errorf("CheckCounts lacks %q", name)
-		}
-	}
-}
-
 // Agents filter push output (`git push -q 2>&1 | tail -2`, `| grep -v docgraph`),
 // so a push nag that names its docs mid-message and ends on fixed guidance
 // reaches them as "advisory, push not blocked" with no doc in sight. The last
