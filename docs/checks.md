@@ -1,6 +1,6 @@
 ---
 type: reference
-description: The eight whole-state checks, the frontmatter schema, entry points, ignoring paths, and which doc models need --skip.
+description: The whole-state checks, the frontmatter schema, entry points, ignoring paths, and which doc models need --skip.
 links:
   - rel: part-of
     to: README.md
@@ -8,7 +8,7 @@ links:
 
 # Whole-state checks
 
-Eight checks run by default on `docgraph [path]`. **Everything is enforced; you
+Every check below runs by default on `docgraph [path]`. **Everything is enforced; you
 exclude explicitly** with `--skip <check[,check]>`; a check added in a later
 version is enforced automatically. (An auto-nav MkDocs repo, for instance, runs `--skip
 orphans`.)

@@ -17,7 +17,7 @@ independent audit modes, each with its own trigger, plus
 read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
 `stale`/`graph`):
 
-- **`docgraph .`** — eight **whole-state** checks against the current tree,
+- **`docgraph .`** — the **whole-state** checks (`checkNames`) against the current tree,
   spanning **two doc graphs** (see the two-graphs footgun):
   `orphans` (a non-root tracked `.md` that is a **content-graph island** — zero
   inbound markdown-link/path-mention edges over the doc *body*), `disconnected`
@@ -29,7 +29,7 @@ read-only subcommands (`schema`, and the doc-graph views `covers`/`index`/
   leading YAML block that parses and declares a `type` — see "Frontmatter model"
   below), and `edges` (a frontmatter `links:` list's internal targets must be in
   the repo as git records them — the broken-links rule —,
-  and `part-of`/`supersedes` edges must not cycle). All eight are **enforced by
+  and `part-of`/`supersedes` edges must not cycle). All are **enforced by
   default**; exclude one with `--skip` (no opt-in — an opt-in check enforces
   nothing). A finding exits non-zero — that's the pre-push gate.
 - **`docgraph footgun-drift`** — a **diff-scoped, advisory** pre-push subcommand:
@@ -85,7 +85,7 @@ log** (see the logging footgun). Human-facing usage lives in `README.md` and the
 ## Intended use
 
 docgraph is built to run as a **pre-push documentation gate** (and in CI): the
-eight whole-state checks exit non-zero on a finding so a broken doc-graph blocks
+whole-state checks exit non-zero on a finding so a broken doc-graph blocks
 the push without a wrapper. `docgraph install-hook` writes a tracked
 `.githooks/pre-push` for that; the generated hook also runs `footgun-drift` and
 `covers-drift` as **advisory** riders — each prints its nag but never blocks, and
@@ -121,7 +121,7 @@ about drift while it can still act — see
   their trigger and diff source differ: `doc-drift` a Stop hook over the
   working-tree code diff (and, for its covers join, the session's change set),
   `footgun-drift` a pre-push subcommand over the pushed range's markdown,
-  `covers-drift` a pre-push subcommand over that same range's code side. The eight `docgraph .` checks have no range concept — reachability,
+  `covers-drift` a pre-push subcommand over that same range's code side. The `docgraph .` checks have no range concept — reachability,
   link existence and leak content are properties of the current tree, not a range.
 
 ## Frontmatter model
@@ -422,7 +422,7 @@ docs/" with zero config.
 
 ## Layout & commands
 
-- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the eight
+- `main.go` — thin CLI: flags, `run(args, stdout, stderr) int` (the
   whole-state checks), `runFootgunDrift(args, stdin, stdout, stderr) int` and
   `runCoversDrift(args, stdin, stdout, stderr) int` (the two diff-scoped
   advisory pre-push subcommands — `runCoversDrift` checks `DOCGRAPH_COVERS_OFF`,
@@ -583,7 +583,7 @@ Go-bin fallback back to `command -v`.
 ## Footgun — the leaks scan is ~95% of the runtime, and its prefilter must only ever widen
 
 The doc-graph work is not the cost. On a 9.7k-file repo (~14M tracked lines,
-~1GB tracked) the six doc-graph checks measure **~0.3s combined**, while
+~1GB tracked) the doc-graph checks measure **~0.3s combined**, while
 `leaks` costs the rest: every byte of tracked text not in the clean-file cache is read, lowercased and
 substring-searched, and any regexp that runs over it goes at Go-NFA speed
 (~50–80MB/s for a rule with no literal prefix). So the profile is inverted

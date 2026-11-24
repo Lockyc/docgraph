@@ -39,7 +39,7 @@ docgraph: 2 finding(s) → exit 1 (as the pre-push gate, this aborted the push).
 | **`covers-drift`** | `docgraph covers-drift` | the code a push *changes* | pre-push (advisory rider) | no — nags, always exit 0 |
 | **`doc-drift`** | `docgraph doc-drift` | the branch diff incl. uncommitted changes (on a trunk branch: this agent session's commits + uncommitted changes) | agent Stop hook | **yes** — exit 2, once per finding |
 
-- **Whole-state checks** — eight, all on by default: orphans, disconnected (a doc with
+- **Whole-state checks** — all on by default: orphans, disconnected (a doc with
   frontmatter but no place in the doc structure), broken links, anchors (a `#fragment` no
   heading in the target produces), untracked docs, leaks, frontmatter, and frontmatter edges. `--skip <check>` turns one off. In full:
   [docs/checks.md](docs/checks.md).
